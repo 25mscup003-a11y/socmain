@@ -15,7 +15,7 @@ const {
   enrichFimHashFields,
   enrichFimPermissionFields,
 } = require('../security/agentTelemetry');
-const { boundedInteger, enforceBatchLimit } = require('../utils/requestLimits');
+const { boundedInteger, enforceBatchLimit, escapeRegex } = require('../utils/requestLimits');
 const { verifySignedAgentRequest } = require('../utils/agentRequestAuth');
 const { brokerEnabled, getEventBroker } = require('../services/eventBroker.service');
 const { ingestionEvents } = require('../observability/httpObservability');
@@ -1621,6 +1621,17 @@ router.post('/', async (req, res) => {
 
     // ── Emit via Socket.IO ────────────────────────────────────────────────────
     const io = req.app.get('io');
+    // Lightweight event for monitoring dashboards. The full alert remains
+    // available through the authenticated API; this only tells clients that
+    // persisted endpoint telemetry is ready to be reconciled.
+    io.to(`company:${alert.companyId}`).emit('telemetry:new', {
+      companyId: alert.companyId,
+      systemId: alert.systemId || alert.endpointId || null,
+      alertId: alert._id,
+      eventCategory: alert.eventCategory,
+      ruleId: alert.ruleId,
+      createdAt: alert.createdAt,
+    });
     if (alert.ruleId === 'NET_CONNECTION_SUMMARY') {
       setImmediate(() => ingestNetworkTelemetry(alert, io)
         .catch(error => console.error('[network telemetry]', error.message)));
@@ -2223,6 +2234,14 @@ router.post('/batch', async (req, res) => {
       const io = req.app.get('io');
       for (const a of inserted) {
         const routineTelemetry = isRoutineSecurityTelemetry(a);
+        io.to(`company:${a.companyId}`).emit('telemetry:new', {
+          companyId: a.companyId,
+          systemId: a.systemId || a.endpointId || null,
+          alertId: a._id,
+          eventCategory: a.eventCategory,
+          ruleId: a.ruleId,
+          createdAt: a.createdAt,
+        });
         if (!routineTelemetry) scheduleGeolocationEnrichment(a, io);
         if (a.ruleId === 'NET_CONNECTION_SUMMARY') {
           ingestNetworkTelemetry(a, io)
@@ -2419,7 +2438,7 @@ router.use(authenticate);
 
 // GET /api/alerts
 router.get('/', requireAnalyst, async (req, res) => {
-  const { severity, status, from, to, departmentId, category, sourceType, action, iocMatch, threatIntel, username, hostname, sourceIp, destinationIp, mitreTechnique, search } = req.query;
+  const { severity, status, from, to, departmentId, category, source, sourceType, action, iocMatch, threatIntel, username, hostname, sourceIp, destinationIp, mitreTechnique, search } = req.query;
   const page = boundedInteger(req.query.page, { defaultValue: 1, max: 100000 });
   const limit = boundedInteger(req.query.limit, { defaultValue: 50, max: 200 });
   const filter = (await getUserDataFilter(req.user, { personal: false })).filter;
@@ -2474,6 +2493,18 @@ router.get('/', requireAnalyst, async (req, res) => {
   if (severity) filter.severity = severity;
   if (status)   filter.status   = status;
   if (category) filter.eventCategory = category;
+  if (source) {
+    const sourceRegex = { $regex: escapeRegex(String(source).slice(0, 120)), $options: 'i' };
+    filter.$and = [
+      ...(filter.$and || []),
+      { $or: [
+        { source: sourceRegex },
+        { sourceType: sourceRegex },
+        { sourceVendor: sourceRegex },
+        { detectionSource: sourceRegex },
+      ] },
+    ];
+  }
   if (sourceType) filter.sourceType = String(sourceType).toUpperCase();
   if (action) filter.action = action;
   if (iocMatch === 'true') filter.iocMatched = true;

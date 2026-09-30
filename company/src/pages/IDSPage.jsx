@@ -4014,7 +4014,22 @@ export default function IDSPage({ initialModule = 'ids' }) {
   const summaryCache = useRef(null);
   const fetchSummary = useCallback(async () => {
     try {
-      const { data: nextSummary } = await api.get('/idsips/summary');
+      let nextSummary;
+      try {
+        const { data } = await api.get('/idsips/summary');
+        nextSummary = data;
+      } catch {
+        // Keep the IDS workspace useful when the combined widget endpoint is
+        // temporarily unavailable. The dedicated IDS stats route has the same
+        // tenant/time scope and is a reliable fallback for the KPI shell.
+        const { data } = await api.get('/ids/stats?summary=true');
+        nextSummary = {
+          ...data,
+          ipsBlocked: data.blocked ?? 0,
+          ipsOnline: false,
+          ipsStatus: 'unknown',
+        };
+      }
       const newJson = JSON.stringify(nextSummary);
       if (summaryCache.current === newJson) return;
       summaryCache.current = newJson;

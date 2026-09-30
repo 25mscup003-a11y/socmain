@@ -178,7 +178,7 @@ function liveCapabilityMatch(companyId, since, departmentId) {
   };
 }
 
-function liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId) {
+function liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId, systemId = null) {
   const id = Number(capabilityId);
   if (!PUBLIC_EDR_CAPABILITY_IDS.has(id)) throw new Error('Unsupported public capabilityId');
   if (!companyId) throw new Error('companyId is required');
@@ -186,6 +186,7 @@ function liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId)
   const dashboardScope = {
     companyId,
     ...(departmentId ? { departmentId } : {}),
+    ...(systemId ? { systemId } : {}),
     createdAt: { $gte: since },
     isSynthetic: { $ne: true },
   };

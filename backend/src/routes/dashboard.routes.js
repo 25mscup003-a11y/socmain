@@ -22,6 +22,27 @@ function emitAlertChange(req, event, alert) {
   if (alert.departmentId) io.to(`dept:${alert.departmentId}`).emit(event, payload);
   io.to('superadmin').emit(event, payload);
 }
+
+async function resolveRequestedSystemScope(companyId, requestedSystemId, departmentId = null) {
+  if (!requestedSystemId) return null;
+  if (!mongoose.Types.ObjectId.isValid(String(requestedSystemId))) {
+    const error = new Error('Invalid system scope');
+    error.statusCode = 400;
+    throw error;
+  }
+  const query = {
+    _id: new mongoose.Types.ObjectId(String(requestedSystemId)),
+    companyId,
+  };
+  if (departmentId) query.departmentId = departmentId;
+  const system = await System.findOne(query).select('_id').lean();
+  if (!system) {
+    const error = new Error('System not found in the current company scope');
+    error.statusCode = 404;
+    throw error;
+  }
+  return system._id;
+}
 const { expandFimCategoryScope, fimCapabilityFilter } = require('../utils/fimQuery');
 const { authCapabilityFilter } = require('../utils/authCapability');
 const { registryMonitoringFilter } = require('../utils/registryMonitoring');
@@ -1686,20 +1707,22 @@ router.get('/capabilities/:capabilityId/live', requireAnalyst, async (req, res) 
     const departmentId = requestedDepartment && mongoose.Types.ObjectId.isValid(requestedDepartment)
       ? new mongoose.Types.ObjectId(requestedDepartment)
       : requestedDepartment || undefined;
+    const systemId = await resolveRequestedSystemScope(companyId, req.query.systemId, departmentId);
     let query = ADVANCED_CAPABILITY_IDS.has(capabilityId)
       ? {
           $and: [
-            buildCapabilityQuery({ companyId, capabilityId, since, departmentId }),
-            liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId),
+            buildCapabilityQuery({ companyId, capabilityId, since, departmentId, systemId }),
+            liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId, systemId),
           ],
         }
-      : liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId);
+      : liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId, systemId);
     if (requestedEnd && !Number.isNaN(requestedEnd.getTime())) {
       query = { $and: [query, { createdAt: { $lte: now } }] };
     }
     const analyticsPlan = buildCapabilityAnalyticsPlan(query, limit);
     const systemQuery = { companyId };
     if (departmentId) systemQuery.departmentId = departmentId;
+    if (systemId) systemQuery._id = systemId;
 
     const analyticsFacets = {
       counts: [{ $count: 'total' }],
@@ -1883,6 +1906,8 @@ router.get('/alerts/:category', requireAnalyst, async (req, res) => {
       if (Array.isArray(dept)) base.departmentId = { $in: dept };
       else base.departmentId = dept;
     }
+    const requestedSystemId = await resolveRequestedSystemScope(companyScopeId, req.query.systemId, dept);
+    if (requestedSystemId) base.systemId = requestedSystemId;
     if (Number(capabilityId) === 1 && category === 'edr') {
       const payload = await fastProcessCapabilityAlerts(base, page, limit, windowHours);
       return res.json(payload);
@@ -2367,12 +2392,13 @@ router.get('/process-activity/report', requireAnalyst, async (req, res) => {
       : companyId;
 
     const dept = deptParam || (role === 'department_admin' ? userDeptId : null);
+    const systemId = await resolveRequestedSystemScope(companyScopeId, req.query.systemId, dept);
 
     // Reuse the dashboard's canonical process scope so a 24-hour report and
     // the 24-hour dashboard always represent the same event population.
     const baseQuery = {
       $and: [
-        liveTargetCapabilityMatch(companyScopeId, 1, since, dept),
+        liveTargetCapabilityMatch(companyScopeId, 1, since, dept, systemId),
         { createdAt: { $lte: until } },
         ...(reportCategoryFilters[category] ? [reportCategoryFilters[category]] : []),
       ],

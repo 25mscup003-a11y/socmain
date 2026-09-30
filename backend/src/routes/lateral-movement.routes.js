@@ -22,6 +22,9 @@ const companyScope = (req, requestedDepartmentId = req.query?.departmentId) => {
   return {
     companyId: new mongoose.Types.ObjectId(String(req.user.companyId?._id || req.user.companyId)),
     ...(departmentId ? { departmentId: new mongoose.Types.ObjectId(String(departmentId)) } : {}),
+    ...(req.query?.systemId && mongoose.isValidObjectId(req.query.systemId)
+      ? { systemId: new mongoose.Types.ObjectId(String(req.query.systemId)) }
+      : {}),
   };
 };
 const periodStart = value => new Date(Date.now() - integer(value, 24, 1, 24 * 365) * 3600000);

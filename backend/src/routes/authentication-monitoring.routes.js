@@ -27,6 +27,9 @@ function companyScope(req, requestedDepartmentId = req.query?.departmentId) {
     ...(departmentId && mongoose.isValidObjectId(departmentId)
       ? { departmentId: new mongoose.Types.ObjectId(String(departmentId)) }
       : {}),
+    ...(req.query?.systemId && mongoose.isValidObjectId(req.query.systemId)
+      ? { systemId: new mongoose.Types.ObjectId(String(req.query.systemId)) }
+      : {}),
   };
 }
 

@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { SOCKET_URL, connectSocket, socketOptions, io, createEventBuffer } from '../api/config';
 import { useAuth } from '../context/AuthContext';
 import { CAPABILITY_CONFIG } from '../utils/capabilityMap';
+import { EDRCapabilitiesDashboard } from './EDRPage';
+import { EDRCapabilityDashboardModal } from './EDRDashboardDetails';
 import './SystemMonitoringDashboard.css';
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -13,7 +15,24 @@ import './SystemMonitoringDashboard.css';
 const ONLINE_THRESHOLD = 10 * 60 * 1000; // 10 minutes — matches backend heartbeat window
 const INVENTORY_REFRESH_MS = 90 * 1000;
 const DETAIL_RECONCILE_MS = 2 * 60 * 1000;
-const CAPABILITY_RECONCILE_MS = 60 * 1000;
+// Capability telemetry scans normalized endpoint events. Keep reconciliation
+// deliberately slower; live socket events update the surrounding UI without
+// forcing another expensive full capability scan.
+const CAPABILITY_RECONCILE_MS = 5 * 60 * 1000;
+
+function edrCategoryForCapability(capabilityId) {
+  const id = Number(capabilityId);
+  if (id === 1) return 'edr';
+  if ([2, 12, 18, 25, 27].includes(id)) return 'file';
+  if ([3, 9, 15, 20, 23, 26, 30, 31].includes(id)) return 'network';
+  if ([4, 11, 13, 14, 16].includes(id)) return 'edr';
+  if (id === 5) return 'memory';
+  if (id === 6) return 'registry';
+  if (id === 7) return 'systemchanges';
+  if (id === 8) return 'persistence';
+  if (id === 10) return 'usb';
+  return 'system';
+}
 
 function pageIsVisible() {
   return typeof document === 'undefined' || document.visibilityState === 'visible';
@@ -489,9 +508,6 @@ function DepartmentOverview({ departments, systems, onSelectDept, deptSearch, se
         </div>
       </div>
 
-      {/* 24h Logs Overview Cards */}
-      <LogsOverviewCards />
-
       {/* Search */}
       <div className="sm-filter-bar">
         <div className="sm-search">
@@ -624,20 +640,26 @@ function SystemsList({ systems, dept, onSelectSystem, searchTerm, setSearchTerm,
     });
     setCapabilitySummaries(initial);
 
-    Promise.all(desktopSystems.map(async system => {
-      try {
-        const { data } = await api.get(
-          `/monitoring/system/${system._id}/capability-telemetry?hours=24&limit=1&summaryOnly=1`,
-        );
-        return [system._id, {
-          reporting: Number(data.summary?.reporting || 0),
-          events24h: (data.cards || []).reduce((total, card) => total + Number(card.count24h || 0), 0),
-          loading: false,
-        }];
-      } catch {
-        return [system._id, { reporting: 0, events24h: 0, loading: false }];
+    const queue = [...desktopSystems];
+    const entries = [];
+    const loadNext = async () => {
+      while (!cancelled && queue.length > 0) {
+        const system = queue.shift();
+        try {
+          const { data } = await api.get(
+            `/monitoring/system/${system._id}/capability-telemetry?hours=24&limit=1&summaryOnly=1`,
+          );
+          entries.push([system._id, {
+            reporting: Number(data.summary?.reporting || 0),
+            events24h: (data.cards || []).reduce((total, card) => total + Number(card.count24h || 0), 0),
+            loading: false,
+          }]);
+        } catch {
+          entries.push([system._id, { reporting: 0, events24h: 0, loading: false }]);
+        }
       }
-    })).then(entries => {
+    };
+    Promise.all(Array.from({ length: Math.min(2, queue.length) }, loadNext)).then(() => {
       if (cancelled) return;
       setCapabilitySummaries(current => ({ ...current, ...Object.fromEntries(entries) }));
     });
@@ -680,9 +702,6 @@ function SystemsList({ systems, dept, onSelectSystem, searchTerm, setSearchTerm,
           <div className="sm-stat-card__value">{filtered.filter(s => calculateRiskLevel(s) === 'high').length}</div>
         </div>
       </div>
-
-      {/* 24h Logs Overview Cards */}
-      <LogsOverviewCards />
 
       {/* Filters */}
       <div className="sm-filter-bar">
@@ -2155,46 +2174,94 @@ function SystemCapability24hDashboardModal({ capabilityId, title, system, onClos
   );
 }
 
+function SystemModuleDashboardModal({ item, system, onClose }) {
+  const [search, setSearch] = useState('');
+  const [severity, setSeverity] = useState('ALL');
+  const [selected, setSelected] = useState(null);
+  const sourceItems = Array.isArray(item?.items) ? item.items : [];
+  const rows = sourceItems.map((row, index) => ({
+    ...row,
+    _rowId: row._id || `${item.title}-${index}`,
+    _time: row.createdAt || row.receivedAt || row.logTime || row.timestamp,
+    _message: row.description || row.message || row.ruleId || row.type || 'Telemetry event',
+    _severity: String(row.severity || row.level || 'info').toLowerCase(),
+  }));
+  const filtered = rows.filter(row => {
+    if (severity !== 'ALL' && row._severity !== severity.toLowerCase()) return false;
+    if (!search) return true;
+    return `${row._message} ${row.ruleId || ''} ${row.hostname || ''} ${row.agentName || ''}`
+      .toLowerCase().includes(search.toLowerCase());
+  });
+  const count = rows.length;
+  const critical = rows.filter(row => row._severity === 'critical').length;
+  const high = rows.filter(row => row._severity === 'high').length;
+  const recent = rows.filter(row => {
+    const time = new Date(row._time || 0).getTime();
+    return Number.isFinite(time) && time >= Date.now() - 24 * 60 * 60 * 1000;
+  }).length;
+  const hourly = Array.from({ length: 12 }, (_, index) => {
+    const from = Date.now() - (index + 1) * 2 * 60 * 60 * 1000;
+    const to = Date.now() - index * 2 * 60 * 60 * 1000;
+    return rows.filter(row => {
+      const time = new Date(row._time || 0).getTime();
+      return time >= from && time < to;
+    }).length;
+  }).reverse();
+  const maxHourly = Math.max(...hourly, 1);
+  const severityColor = { critical: '#f87171', high: '#fb923c', medium: '#facc15', low: '#34d399', info: '#60a5fa' };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(2,8,18,.86)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 10 }}>
+      <div style={{ width: 'min(1240px, 100%)', height: 'min(900px, 100%)', background: '#071321', border: `1px solid ${item.color}55`, borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,.55)' }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid #1e3a5f', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <div>
+            <div style={{ color: item.color, fontSize: 10, fontWeight: 900, letterSpacing: 1.5, textTransform: 'uppercase' }}>System-level module dashboard</div>
+            <h2 style={{ margin: '4px 0 0', color: '#f8fafc', fontSize: 19 }}>{item.icon} {item.title} — {system.name}</h2>
+            <div style={{ color: '#64748b', fontSize: 10, marginTop: 3 }}>Last 24 hours · system-scoped telemetry · {system.hostname || system.name}</div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Return to system monitoring" title="Return to system monitoring" style={{ background: 'rgba(96,165,250,.12)', border: '1px solid #2563eb66', borderRadius: 8, color: '#93c5fd', padding: '8px 12px', cursor: 'pointer', fontWeight: 800 }}>← Back</button>
+        </div>
+
+        <div style={{ padding: 18, overflow: 'auto', flex: 1 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+            {[['TOTAL EVENTS', count, item.color], ['24H EVENTS', recent, '#38bdf8'], ['HIGH / CRITICAL', high + critical, '#fb923c'], ['LAST EVENT', rows[0]?._time ? timeAgo(rows[0]._time) : '—', '#34d399']].map(([label, value, color]) => (
+              <div key={label} style={{ background: '#0b1b2e', border: `1px solid ${color}44`, borderRadius: 10, padding: '12px 14px' }}>
+                <div style={{ color: '#64748b', fontSize: 9, fontWeight: 900, letterSpacing: 1 }}>{label}</div>
+                <div style={{ color, fontSize: 24, fontWeight: 950, marginTop: 5 }}>{typeof value === 'number' ? value.toLocaleString() : value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ background: '#091a2b', border: '1px solid #1e3a5f', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1', fontSize: 11, fontWeight: 800, marginBottom: 12 }}><span>📈 Live 24-hour volume</span><span style={{ color: '#64748b' }}>2-hour buckets</span></div>
+            <div style={{ height: 100, display: 'flex', alignItems: 'end', gap: 6 }}>
+              {hourly.map((value, index) => <div key={index} title={`${value} events`} style={{ flex: 1, height: `${Math.max(5, (value / maxHourly) * 100)}%`, background: `linear-gradient(180deg, ${item.color}, ${item.color}33)`, borderRadius: '4px 4px 1px 1px' }} />)}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search system events..." style={{ flex: 1, minWidth: 220, background: '#06111f', color: '#e2e8f0', border: '1px solid #1e3a5f', borderRadius: 7, padding: '9px 11px', outline: 'none' }} />
+            {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'].map(value => <button type="button" key={value} onClick={() => setSeverity(value)} style={{ background: severity === value ? `${item.color}22` : '#091a2b', color: severity === value ? item.color : '#94a3b8', border: `1px solid ${severity === value ? item.color : '#1e3a5f'}66`, borderRadius: 7, padding: '8px 10px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}>{value}</button>)}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: selected ? 'minmax(0, 1.3fr) minmax(280px, .7fr)' : '1fr', gap: 12 }}>
+            <div style={{ border: '1px solid #1e3a5f', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ padding: '9px 12px', color: '#64748b', fontSize: 10, borderBottom: '1px solid #1e3a5f' }}>{filtered.length.toLocaleString()} matching events</div>
+              <div style={{ maxHeight: 360, overflow: 'auto' }}>
+                {filtered.length === 0 ? <div style={{ padding: 30, textAlign: 'center', color: '#64748b', fontSize: 12 }}>No system-level events found.</div> : filtered.slice(0, 250).map(row => <button type="button" key={row._rowId} onClick={() => setSelected(row)} style={{ display: 'block', width: '100%', textAlign: 'left', background: selected?._rowId === row._rowId ? '#102c49' : 'transparent', color: '#e2e8f0', border: 0, borderBottom: '1px solid #10243a', padding: '10px 12px', cursor: 'pointer' }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ fontSize: 11, fontWeight: 750, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._message}</span><span style={{ color: severityColor[row._severity] || '#94a3b8', fontSize: 9, fontWeight: 900 }}>{row._severity.toUpperCase()}</span></div><div style={{ color: '#64748b', fontSize: 9, marginTop: 4 }}>{row._time ? new Date(row._time).toLocaleString() : 'Time unavailable'} · {row.hostname || row.agentName || system.hostname || system.name}</div></button>)}
+              </div>
+            </div>
+            {selected && <div style={{ border: '1px solid #1e3a5f', borderRadius: 10, padding: 14, background: '#06111f', overflow: 'auto' }}><div style={{ color: item.color, fontSize: 11, fontWeight: 900, marginBottom: 10 }}>EVENT DETAILS</div><div style={{ color: '#e2e8f0', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>{selected._message}</div><pre style={{ margin: 0, color: '#7dd3fc', fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(selected, null, 2)}</pre></div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    SYSTEM-LEVEL MONITORING CARDS (Company Admin Dashboard Style)
    ═══════════════════════════════════════════════════════════════════ */
-
-function SystemSummaryCard({ title, value, subtitle, icon, color, onClick, trend }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        minHeight: 168,
-        padding: 20,
-        border: `1px solid ${color}38`,
-        borderRadius: 18,
-        background: `radial-gradient(circle at top right, ${color}18, transparent 46%), linear-gradient(145deg, rgba(12,26,46,.98), rgba(7,16,31,.94))`,
-        color: '#e2e8f0',
-        textAlign: 'left',
-        cursor: onClick ? 'pointer' : 'default',
-        boxShadow: '0 18px 42px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04)',
-        fontFamily: 'inherit',
-        position: 'relative',
-        overflow: 'hidden',
-        width: '100%',
-      }}
-    >
-      <span style={{ position: 'absolute', inset: 'auto 0 0 0', height: 3, background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.75 }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ color: '#8fa4bd', fontSize: 11, fontWeight: 950, letterSpacing: '.08em', textTransform: 'uppercase' }}>{title}</div>
-          <div style={{ marginTop: 14, color, fontSize: 36, fontWeight: 950, lineHeight: 1 }}>{value}</div>
-        </div>
-        <div style={{ width: 48, height: 48, borderRadius: 16, display: 'grid', placeItems: 'center', background: `${color}18`, border: `1px solid ${color}44`, fontSize: 23 }}>
-          {icon}
-        </div>
-      </div>
-      <div style={{ marginTop: 16, color: '#9fb0c6', fontSize: 13, lineHeight: 1.45 }}>{subtitle}</div>
-      {trend && <div style={{ marginTop: 12, color: trend.color || color, fontSize: 12, fontWeight: 900 }}>{trend.text}</div>}
-    </button>
-  );
-}
 
 function SystemPortalMetricCard({ item, onClick }) {
   const values = (item.chart || [5, 12, 8, 15, 20, 14, 22]).map(v => Math.max(0, Number(v || 0)));
@@ -2317,18 +2384,9 @@ function ActiveTelemetryCard({ card, systemName, onOpen }) {
   );
 }
 
-function SystemLevelCards({ system, onDetailModal, liveRevision = 0 }) {
-  const [sysData, setSysData] = useState({
-    edr:      { counts: {}, alerts: [], loading: true },
-    ids:      { counts: {}, items: [],  loading: true },
-    firewall: { counts: {}, items: [],  loading: true },
-    incidents:{ items: [], total: 0,    loading: true },
-    threats:  { counts: {}, items: [],  loading: true },
-    allAlerts:{ items: [],              loading: true },
-    siem:     { counts: {}, logs: [],   loading: true },
-    malware:  { counts: {}, data: [],   loading: true },
-    network:  { counts: {}, alerts: [], loading: true },
-  });
+function SystemLevelCards({ system, onDetailModal, systemData }) {
+  const navigate = useNavigate();
+  const sysData = systemData;
   const [activeTelemetry, setActiveTelemetry] = useState({
     cards: [], runtime: {}, summary: {}, loading: true, generatedAt: null,
   });
@@ -2375,168 +2433,156 @@ function SystemLevelCards({ system, onDetailModal, liveRevision = 0 }) {
   }, [fetchActiveTelemetry]);
 
   useEffect(() => {
-    if (liveRevision > 0) fetchActiveTelemetry();
-  }, [liveRevision, fetchActiveTelemetry]);
-
-  useEffect(() => {
     setSelectedCapability(null);
   }, [system?._id]);
-
-  useEffect(() => {
-    if (!system?._id) return;
-    const id = system._id;
-    let cancelled = false;
-    Promise.all([
-      api.get(`/monitoring/system/${id}/edr?limit=100`),
-      api.get(`/monitoring/system/${id}/ips-ids?limit=100`),
-      api.get(`/monitoring/system/${id}/firewall?limit=100`),
-      api.get(`/monitoring/system/${id}/threats?limit=100`),
-      api.get(`/monitoring/system/${id}/logs?limit=100`),
-      api.get(`/monitoring/system/${id}/malware?limit=100`),
-      api.get(`/monitoring/system/${id}/network?limit=100`),
-      api.get(`/soc-edr/incidents?systemId=${id}&limit=100`),
-    ].map(request => request.catch(() => ({ data: {} })))).then(([edr, ids, fw, thr, siem, mal, net, incidents]) => {
-      if (cancelled) return;
-      const alertItems = [
-        ...(mal.data?.data || []), ...(net.data?.alerts || []),
-        ...(edr.data?.alerts || []), ...(thr.data?.alerts || []),
-        ...(ids.data?.alerts || []), ...(fw.data?.alerts || []),
-      ];
-      setSysData({
-        edr: { counts: edr.data?.counts || {}, alerts: edr.data?.alerts || [], loading: false },
-        ids: { counts: ids.data?.counts || {}, items: [...(ids.data?.alerts || []), ...(ids.data?.logs || [])], loading: false },
-        firewall: { counts: fw.data?.counts || {}, items: [...(fw.data?.alerts || []), ...(fw.data?.logs || [])], loading: false },
-        incidents: { items: incidents.data?.incidents || [], total: Number(incidents.data?.total || 0), loading: false },
-        threats: { counts: thr.data?.counts || {}, items: thr.data?.alerts || [], loading: false },
-        allAlerts: { items: alertItems, loading: false },
-        siem: { counts: siem.data?.counts || {}, logs: siem.data?.logs || [], loading: false },
-        malware: { counts: mal.data?.counts || {}, data: mal.data?.data || [], loading: false },
-        network: { counts: net.data?.counts || {}, alerts: net.data?.alerts || [], loading: false },
-      });
-    });
-    return () => { cancelled = true; };
-  }, [system?._id]);
-
-  const secScore = (() => {
-    if (sysData.edr.loading || sysData.ids.loading) return null;
-    let score = 100;
-    score -= Math.min((sysData.edr.counts?.edrAlerts || 0) * 2, 25);
-    score -= Math.min((sysData.ids.counts?.total || 0) * 1, 20);
-    score -= Math.min((sysData.threats.counts?.malicious || 0) * 5, 30);
-    score -= Math.min((sysData.firewall.counts?.critical || 0) * 3, 15);
-    return Math.max(Math.round(score), 0);
-  })();
-  const postureColor = secScore === null ? '#64748b' : secScore >= 80 ? '#34d399' : secScore >= 60 ? '#f59e0b' : '#f87171';
 
   const openModal = (title, icon, items, type) => {
     if (onDetailModal) onDetailModal({ title, icon, items, type });
     else setModal({ title, icon, items, type });
   };
 
+  const closeCapabilityDashboard = useCallback(() => {
+    // Keep the selected system view mounted underneath the capability modal.
+    // Closing a card opened from System Monitoring must return to this exact
+    // system, rather than navigating to the company-wide EDR page.
+    setSelectedCapability(null);
+  }, []);
+
   const fmt = val => Number(val || 0).toLocaleString();
 
-  const isOnline = system.lastSeen && (Date.now() - new Date(system.lastSeen).getTime()) < 10 * 60 * 1000;
-  const edrAlertsCount = sysData.edr.counts?.edrAlerts || sysData.edr.alerts.length;
-  const idsTotal = sysData.ids.counts?.total || sysData.ids.items.length;
-  const fwBlocked = sysData.firewall.counts?.blocked || 0;
-  const fwTotal = sysData.firewall.counts?.total || sysData.firewall.items.length;
-  const priorityItems = sysData.allAlerts.items.filter(item => ['critical', 'high'].includes(String(item.severity || '').toLowerCase()));
-  const priorityCount = priorityItems.length;
-  const incidentsCount = Number(sysData.incidents.total || 0);
   const activeCollectorCount = activeTelemetry.cards.length;
   const reportingCapabilityCount = Number(activeTelemetry.summary.reporting || 0);
-
-  const summaryCards = [
-    {
-      title: 'EDR Coverage', icon: '🛡️', color: '#38bdf8',
-      value: activeTelemetry.loading ? '…' : (isAndroidSystem ? `${activeCollectorCount}` : `${reportingCapabilityCount}/31`),
-      subtitle: isAndroidSystem
-        ? `${fmt(edrAlertsCount)} endpoint events · runtime-reported coverage only`
-        : `${fmt(edrAlertsCount)} endpoint events · canonical 24-hour capability evidence`,
-      trend: {
-        text: activeTelemetry.loading
-          ? 'Checking agent capabilities'
-          : isAndroidSystem
-            ? `${activeCollectorCount} collectors enabled`
-            : `${reportingCapabilityCount} reporting · ${Number(activeTelemetry.summary.enabledNoTelemetry || 0)} awaiting telemetry`,
-        color: system.edrEnabled ? '#34d399' : '#f87171',
+  const systemCapabilityCards = !isAndroidSystem && activeTelemetry.cards.length === 0
+    ? CAPABILITY_CONFIG.map(definition => ({
+        capabilityId: definition.capabilityId,
+        status: 'enabled_no_telemetry',
+        count24h: 0,
+        totalCount: 0,
+        highCritical24h: 0,
+        lastEventAt: null,
+        reason: 'Waiting for endpoint telemetry',
+        key: `capability-${definition.capabilityId}`,
+        title: definition.title,
+        icon: definition.icon || '⚡',
+        description: 'System-scoped telemetry is loading',
+      }))
+    : activeTelemetry.cards;
+  const systemEdrOverview = {
+    capabilities: systemCapabilityCards.map(card => ({
+      id: card.capabilityId,
+      name: card.title,
+      source: card.description || card.reason || 'System capability telemetry',
+      live: {
+        telemetryStatus: card.status,
+        logs24h: Number(card.count24h || 0),
+        highCritical24h: Number(card.highCritical24h || 0),
+        reportingAgents: Number(card.count24h || 0) > 0 ? 1 : 0,
+        lastSeenAt: card.lastEventAt || null,
+        timeline24h: [],
       },
-      onClick: null,
+      metrics: {
+        logs24h: Number(card.count24h || 0),
+        highCritical24h: Number(card.highCritical24h || 0),
+        reportingAgents: Number(card.count24h || 0) > 0 ? 1 : 0,
+      },
+    })),
+    liveSummary: {
+      reporting: reportingCapabilityCount,
+      idle: Math.max(0, Number(activeTelemetry.summary.totalCapabilities || 31) - reportingCapabilityCount),
+      total: Number(activeTelemetry.summary.totalCapabilities || 31),
     },
-    {
-      title: 'IDS / IPS', icon: '📡', color: '#22d3ee',
-      value: fmt(idsTotal),
-      subtitle: `${fmt(sysData.ids.counts?.high || 0)} high · ${fmt(sysData.ids.counts?.critical || 0)} critical intrusion events`,
-      onClick: () => openModal('📡 IDS / IPS Events', '📡', sysData.ids.items, 'alert'),
-    },
-    {
-      title: 'Firewall Controls', icon: '🔥', color: '#fb923c',
-      value: fmt(fwBlocked),
-      subtitle: `${fmt(fwBlocked)} blocked traffic · ${fmt(fwTotal)} total firewall logs`,
-      onClick: () => openModal('🧱 Firewall Events', '🧱', sysData.firewall.items, 'log'),
-    },
-    {
-      title: 'Agent Status', icon: isOnline ? '🟢' : '🔴', color: isOnline ? '#34d399' : '#f87171',
-      value: isOnline ? 'ONLINE' : 'OFFLINE',
-      subtitle: `Last active: ${system.lastSeen ? new Date(system.lastSeen).toLocaleTimeString() : 'Never'}`,
-      onClick: null,
-    },
-    {
-      title: 'Priority Signals', icon: '⚠️', color: '#f87171',
-      value: fmt(priorityCount),
-      subtitle: 'Recent critical & high workload detected on this system',
-      onClick: () => openModal('⚠️ Priority Signals', '⚠️', priorityItems, 'alert'),
-    },
-    {
-      title: 'Total Incidents', icon: '🚨', color: '#f87171',
-      value: fmt(incidentsCount),
-      subtitle: `${fmt(sysData.incidents.items.filter(item => ['open', 'investigating'].includes(item.status)).length)} open or investigating correlated cases`,
-      onClick: () => openModal('🚨 Security Incidents', '🚨', sysData.incidents.items, 'alert'),
-    },
-  ];
+  };
 
   const portalCards = [
     {
-      title: 'Threat Intelligence', icon: '⌾', color: '#a78bfa',
+      title: 'IPS', icon: '📡', color: '#22d3ee',
+      value: fmt(sysData.ids.counts?.blocked || 0),
+      subtitle: `${fmt(sysData.ids.counts?.blocked || 0)} blocked · ${fmt(sysData.ids.counts?.alerts || 0)} alert events`,
+      chart: [0, 1, 0, 2, 1, 0, sysData.ids.counts?.blocked || 0],
+      items: sysData.ids.items,
+      type: 'alert',
+      to: '/company-admin/ips',
+    },
+    {
+      title: 'IDS', icon: '📡', color: '#38bdf8',
+      value: fmt(sysData.ids.counts?.detections || sysData.ids.counts?.alerts || 0),
+      subtitle: `${fmt(sysData.ids.counts?.high || 0)} high · ${fmt(sysData.ids.counts?.critical || 0)} critical detections`,
+      chart: [1, 2, 1, 3, 2, 1, sysData.ids.counts?.detections || 0],
+      items: sysData.ids.items,
+      type: 'alert',
+      to: '/company-admin/ids',
+    },
+    {
+      title: 'Firewall Events', icon: '🧱', color: '#fb923c',
+      value: fmt(sysData.firewall.counts?.blocked || 0),
+      subtitle: `${fmt(sysData.firewall.counts?.blocked || 0)} blocked · ${fmt(sysData.firewall.counts?.total || 0)} total firewall logs`,
+      chart: [0, 1, 0, 2, 1, 0, sysData.firewall.counts?.blocked || 0],
+      items: sysData.firewall.items,
+      type: 'alert',
+      to: '/company-admin/firewall',
+    },
+    {
+      title: 'Threat Intelligence Incidents', icon: '🚨', color: '#a78bfa',
       value: fmt(sysData.threats.counts?.total || sysData.threats.items.length),
       subtitle: `${fmt(sysData.threats.counts?.malicious || 0)} malicious IOC matches`,
       chart: [2, 5, 3, 8, 4, 9, sysData.threats.items.length],
-      to: () => openModal('🔥 Threat Intelligence', '🔥', sysData.threats.items, 'alert'),
+      items: sysData.threats.items,
+      type: 'alert',
+      to: '/company-admin/threat-intelligence',
     },
     {
-      title: 'Recent Alerts', icon: '🔔', color: '#fbbf24',
-      value: fmt(sysData.allAlerts.items.length),
-      subtitle: 'Latest aggregated security alerts loaded for this system',
-      chart: [10, 15, 12, 18, 22, 19, sysData.allAlerts.items.length],
-      to: () => openModal('🔔 All Alerts', '🔔', sysData.allAlerts.items, 'alert'),
+      title: 'Incidents', icon: '🚨', color: '#f87171',
+      value: 'VIEW',
+      subtitle: 'Open endpoint incident workflow',
+      chart: [1, 1, 0, 1, 0, 1, 1],
+      items: sysData.allAlerts.items,
+      type: 'alert',
+      to: '/company-admin/incidents',
     },
     {
-      title: 'SIEM Logs', icon: '📊', color: '#34d399',
+      title: 'Digital Forensics', icon: '🔬', color: '#2dd4bf',
+      value: 'VIEW',
+      subtitle: 'Endpoint evidence and forensic hunts',
+      chart: [1, 2, 1, 3, 2, 2, 3],
+      items: [...(sysData.malware.data || []), ...(sysData.network.alerts || [])],
+      type: 'alert',
+      to: '/company-admin/forensics',
+    },
+    {
+      title: 'Correlation', icon: '🔗', color: '#60a5fa',
+      value: 'VIEW',
+      subtitle: 'Cross-source security correlation',
+      chart: [2, 3, 2, 4, 3, 4, 5],
+      items: sysData.allAlerts.items,
+      type: 'alert',
+      to: '/company-admin/correlation',
+    },
+    {
+      title: 'SOAR', icon: '⚡', color: '#c084fc',
+      value: 'VIEW',
+      subtitle: 'Response playbooks and automation',
+      chart: [1, 1, 2, 1, 3, 2, 3],
+      items: sysData.allAlerts.items.filter(item => item.actionTaken || item.action || item.responseAction),
+      type: 'alert',
+      to: '/company-admin/soar',
+    },
+    {
+      title: 'SIEM', icon: '📊', color: '#34d399',
       value: fmt(sysData.siem.counts?.total || sysData.siem.logs.length),
-      subtitle: 'System event logs & telemetry entries',
+      subtitle: 'System event logs and telemetry entries',
       chart: [30, 45, 40, 60, 55, 70, sysData.siem.logs.length],
-      to: () => openModal('📊 SIEM Logs', '📊', sysData.siem.logs, 'log'),
+      items: sysData.siem.logs,
+      type: 'log',
+      to: '/company-admin/siem',
     },
     {
-      title: 'Security Score', icon: '📊', color: postureColor,
-      value: secScore !== null ? `${secScore}%` : '—',
-      subtitle: `System posture rating (${secScore >= 80 ? 'Good' : secScore >= 60 ? 'Moderate' : 'At Risk'})`,
-      chart: [75, 80, 82, 85, 78, 88, secScore || 75],
-      to: null,
-    },
-    {
-      title: 'Reports', icon: '📄', color: '#94a3b8',
-      value: 'READY',
-      subtitle: `${fmt(sysData.allAlerts.items.length)} security records ready to export`,
-      chart: [0, 0, 0, 0, 0, 0, sysData.allAlerts.items.length],
-      to: () => {
-        const rows = sysData.allAlerts.items.map(a => [
-          new Date(a.createdAt).toISOString(), a.eventCategory || 'alert',
-          a.severity || '', a.description || a.ruleId || '', a.status || '',
-        ]);
-        downloadCSV(`${system.name}_report_${new Date().toISOString().slice(0, 10)}.csv`,
-          ['Timestamp', 'Category', 'Severity', 'Message', 'Status'], rows);
-      },
+      title: 'Alerts', icon: '🔔', color: '#fbbf24',
+      value: fmt(sysData.allAlerts.items.length),
+      subtitle: 'Aggregated security alerts for this system',
+      chart: [10, 15, 12, 18, 22, 19, sysData.allAlerts.items.length],
+      items: sysData.allAlerts.items,
+      type: 'alert',
+      to: '/company-admin/alerts',
     },
   ];
 
@@ -2544,22 +2590,6 @@ function SystemLevelCards({ system, onDetailModal, liveRevision = 0 }) {
 
   return (
     <div style={{ color: '#dbeafe', display: 'grid', gap: 20, marginBottom: 24 }}>
-      {/* Top Summary Cards Grid (Exact Company Admin Dashboard Style) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 16 }}>
-        {summaryCards.map((card, i) => (
-          <SystemSummaryCard
-            key={i}
-            title={card.title}
-            value={card.value}
-            subtitle={card.subtitle}
-            icon={card.icon}
-            color={card.color}
-            trend={card.trend}
-            onClick={card.onClick}
-          />
-        ))}
-      </div>
-
       {/* Monitoring Live Portal Section (Exact Company Admin Dashboard Portal Style) */}
       <section style={{ border: '1px solid rgba(52,211,153,.25)', borderRadius: 20, padding: 19, background: 'linear-gradient(145deg,rgba(6,15,28,.95),rgba(8,20,36,.86))', boxShadow: '0 18px 42px rgba(0,0,0,.20)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'center', marginBottom: 16 }}>
@@ -2571,13 +2601,24 @@ function SystemLevelCards({ system, onDetailModal, liveRevision = 0 }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 13 }}>
           {portalCards.map((item, i) => (
-            <SystemPortalMetricCard key={i} item={item} onClick={item.to} />
+            <SystemPortalMetricCard
+              key={i}
+              item={item}
+              onClick={() => {
+                const returnTo = `${window.location.pathname}?systemId=${encodeURIComponent(system._id)}`;
+                const params = new URLSearchParams({
+                  systemId: String(system._id),
+                  returnTo,
+                });
+                navigate(`${item.to}?${params.toString()}`);
+              }}
+            />
           ))}
         </div>
       </section>
 
-      {/* Android shows runtime-supported collectors; desktop shows the canonical 31-card matrix. */}
-      <section style={{
+      {/* Android shows runtime-supported collectors; desktop uses the exact EDR overview card UI with system-scoped data. */}
+      {isAndroidSystem ? <section style={{
         background: 'linear-gradient(135deg, rgba(6,13,22,.95), rgba(8,20,36,.88))',
         border: '1px solid rgba(56,189,248,.25)',
         borderRadius: 20,
@@ -2640,7 +2681,18 @@ function SystemLevelCards({ system, onDetailModal, liveRevision = 0 }) {
             <span>Updated: {activeTelemetry.generatedAt ? timeAgo(activeTelemetry.generatedAt) : '—'}</span>
           </div>
         )}
-      </section>
+      </section> : (
+        <EDRCapabilitiesDashboard
+          data={systemEdrOverview}
+          loading={activeTelemetry.loading}
+          title={`All 31 EDR Monitoring Capabilities — ${system.name}`}
+          subtitle={`System-scoped telemetry · last 24 hours · ${system.hostname || system.name}`}
+          onOpenCapability={selected => setSelectedCapability({
+            capabilityId: selected.cardNumber || selected.id,
+            title: selected.cardConfig?.title || selected.name || selected.title,
+          })}
+        />
+      )}
 
       {openedModal && (
         <LogDetailModal
@@ -2653,11 +2705,13 @@ function SystemLevelCards({ system, onDetailModal, liveRevision = 0 }) {
       )}
 
       {selectedCapability && !isAndroidSystem && (
-        <SystemCapability24hDashboardModal
+        <EDRCapabilityDashboardModal
+          title={`🛡️ ${selectedCapability.capabilityId}. ${selectedCapability.title}`}
+          category={edrCategoryForCapability(selectedCapability.capabilityId)}
           capabilityId={selectedCapability.capabilityId}
-          title={selectedCapability.title}
-          system={system}
-          onClose={() => setSelectedCapability(null)}
+          overviewData={systemEdrOverview}
+          systemId={system._id}
+          onClose={closeCapabilityDashboard}
         />
       )}
 
@@ -2665,7 +2719,7 @@ function SystemLevelCards({ system, onDetailModal, liveRevision = 0 }) {
   );
 }
 
-function SystemDashboard({ system, dept, onBack, isAdmin, liveRevision = 0 }) {
+function SystemDashboard({ system, dept, onBack, isAdmin }) {
   const [malwareData, setMalwareData] = useState({ data: [], counts: {} });
   const [networkData, setNetworkData] = useState({ alerts: [], logs: [], counts: {} });
   const [fileData, setFileData] = useState({ logs: [], alerts: [], counts: {} });
@@ -2678,7 +2732,6 @@ function SystemDashboard({ system, dept, onBack, isAdmin, liveRevision = 0 }) {
   const [loginData, setLoginData] = useState({ logins: [], counts: {} });
   const [healthData, setHealthData] = useState({});
   const [timelineData, setTimelineData] = useState({ timeline: [], total: 0 });
-  const [networkActivityData, setNetworkActivityData] = useState({ hourly: [], stats: {} });
   const [loadingData, setLoadingData] = useState(true);
   const [isolating, setIsolating] = useState(false);
   const [detailModal, setDetailModal] = useState(null);
@@ -2686,72 +2739,72 @@ function SystemDashboard({ system, dept, onBack, isAdmin, liveRevision = 0 }) {
   const online = isSystemOnline(system);
   const osDisplay = system.os || system.osType || '—';
 
+  const fetchAllMonitoringData = useCallback(async (showLoading = false) => {
+    if (!system?._id) return;
+    try {
+      if (showLoading) setLoadingData(true);
+      const systemId = system._id;
+      const request = url => api.get(url);
+
+      const [
+        malware,
+        network,
+        files,
+        logs,
+        edr,
+        usb,
+        threats,
+        firewall,
+        ips,
+        login,
+        health,
+        timeline,
+      ] = await Promise.all([
+        request(`/monitoring/system/${systemId}/malware?limit=100`).catch(() => ({ data: { data: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/network?limit=100`).catch(() => ({ data: { alerts: [], logs: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/file-activity?limit=100`).catch(() => ({ data: { logs: [], alerts: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/logs?limit=100`).catch(() => ({ data: { logs: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/edr?limit=100`).catch(() => ({ data: { alerts: [], loginActivity: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/usb?limit=100`).catch(() => ({ data: { logs: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/threats?limit=100`).catch(() => ({ data: { alerts: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/firewall?limit=100`).catch(() => ({ data: { logs: [], alerts: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/ips-ids?limit=100`).catch(() => ({ data: { logs: [], alerts: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/login-activity?limit=100`).catch(() => ({ data: { logins: [], counts: {} } })),
+        request(`/monitoring/system/${systemId}/health`).catch(() => ({ data: {} })),
+        request(`/monitoring/system/${systemId}/timeline?limit=50`).catch(() => ({ data: { timeline: [], total: 0 } })),
+      ]);
+
+      setMalwareData(malware.data);
+      setNetworkData(network.data);
+      setFileData(files.data);
+      setLogData(logs.data);
+      setEdrData(edr.data);
+      setUsbData(usb.data);
+      setThreatData(threats.data);
+      setFirewallData(firewall.data);
+      setIpsData(ips.data);
+      setLoginData(login.data);
+      setHealthData(health.data);
+      setTimelineData(timeline.data);
+    } catch (err) {
+      console.error('Failed to fetch monitoring data:', err);
+    } finally {
+      setLoadingData(false);
+    }
+  }, [system?._id]);
+
   useEffect(() => {
-    const fetchAllMonitoringData = async (showLoading = false) => {
-      try {
-        if (showLoading) setLoadingData(true);
-        const systemId = system._id;
+    // Initial load — show spinner.
+    fetchAllMonitoringData(true);
 
-        const [
-          malware,
-          network,
-          files,
-          logs,
-          edr,
-          usb,
-          threats,
-          firewall,
-          ips,
-          login,
-          health,
-          timeline,
-          networkActivity,
-        ] = await Promise.all([
-          api.get(`/monitoring/system/${systemId}/malware?limit=100`).catch(() => ({ data: { data: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/network?limit=100`).catch(() => ({ data: { alerts: [], logs: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/file-activity?limit=100`).catch(() => ({ data: { logs: [], alerts: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/logs?limit=100`).catch(() => ({ data: { logs: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/edr?limit=100`).catch(() => ({ data: { alerts: [], loginActivity: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/usb?limit=100`).catch(() => ({ data: { logs: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/threats?limit=100`).catch(() => ({ data: { alerts: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/firewall?limit=100`).catch(() => ({ data: { logs: [], alerts: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/ips-ids?limit=100`).catch(() => ({ data: { logs: [], alerts: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/login-activity?limit=100`).catch(() => ({ data: { logins: [], counts: {} } })),
-          api.get(`/monitoring/system/${systemId}/health`).catch(() => ({ data: {} })),
-          api.get(`/monitoring/system/${systemId}/timeline?limit=50`).catch(() => ({ data: { timeline: [], total: 0 } })),
-          api.get(`/monitoring/system/${systemId}/network-activity`).catch(() => ({ data: { hourly: [], stats: {} } })),
-        ]);
-
-        setMalwareData(malware.data);
-        setNetworkData(network.data);
-        setFileData(files.data);
-        setLogData(logs.data);
-        setEdrData(edr.data);
-        setUsbData(usb.data);
-        setThreatData(threats.data);
-        setFirewallData(firewall.data);
-        setIpsData(ips.data);
-        setLoginData(login.data);
-        setHealthData(health.data);
-        setTimelineData(timeline.data);
-        setNetworkActivityData(networkActivity.data);
-      } catch (err) {
-        console.error('Failed to fetch monitoring data:', err);
-      } finally {
-        setLoadingData(false);
-      }
-    };
-
-    // Initial load — show spinner
-    if (system?._id) fetchAllMonitoringData(true);
-
-    // Socket.IO supplies live changes; this slower poll only reconciles missed events.
+    // Socket.IO handles normal live updates; this poll reconciles missed
+    // events and keeps the page current after a backend/agent reconnect.
     const interval = setInterval(() => {
-      if (system?._id && pageIsVisible()) fetchAllMonitoringData(false);
+      if (pageIsVisible()) fetchAllMonitoringData(false);
     }, DETAIL_RECONCILE_MS);
 
     return () => clearInterval(interval);
-  }, [system?._id]);
+  }, [fetchAllMonitoringData]);
 
   // Data aggregates from API responses
   const malwareAlerts = malwareData.data || [];
@@ -2770,7 +2823,42 @@ function SystemDashboard({ system, dept, onBack, isAdmin, liveRevision = 0 }) {
   const ipsAlerts = ipsData.alerts || [];
   const logins = loginData.logins || [];
   const timelineEvents = timelineData.timeline || [];
-  const networkActivityChart = networkActivityData.hourly || [];
+  const chartNow = Date.now();
+  const chartStart = chartNow - 24 * 60 * 60 * 1000;
+  const chartSeries = [
+    { key: 'edr', label: 'EDR', color: '#38bdf8', rows: [...edrAlerts, ...loginActivity] },
+    { key: 'ids', label: 'IDS / IPS', color: '#22d3ee', rows: [...ipsAlerts, ...ipsLogs] },
+    { key: 'forensics', label: 'Forensics', color: '#a78bfa', rows: [...fileAlerts, ...fileLogs, ...malwareAlerts] },
+  ].map(series => {
+    const values = Array(24).fill(0);
+    series.rows.forEach(row => {
+      const timestamp = new Date(row?.createdAt || row?.eventTimestamp || row?.logTime || 0).getTime();
+      if (!Number.isFinite(timestamp) || timestamp < chartStart || timestamp > chartNow) return;
+      const bucket = Math.min(23, Math.floor((timestamp - chartStart) / (60 * 60 * 1000)));
+      values[bucket] += 1;
+    });
+    return { ...series, values, total: values.reduce((sum, value) => sum + value, 0) };
+  });
+  const telemetryChartMax = Math.max(...chartSeries.flatMap(series => series.values), 1);
+  const hasTelemetryChartData = chartSeries.some(series => series.total > 0);
+  const chartPointString = values => values.map((value, index) => {
+    const x = (index / 23) * 720;
+    const y = 105 - (value / telemetryChartMax) * 90;
+    return `${x},${y}`;
+  }).join(' ');
+  const systemLevelData = {
+    edr: { counts: edrData.counts || {}, alerts: edrAlerts, loading: loadingData },
+    ids: { counts: ipsData.counts || {}, items: [...ipsAlerts, ...ipsLogs], loading: loadingData },
+    firewall: { counts: firewallData.counts || {}, items: [...firewallAlerts, ...firewallLogs], loading: loadingData },
+    threats: { counts: threatData.counts || {}, items: threatAlerts, loading: loadingData },
+    allAlerts: {
+      items: [...malwareAlerts, ...networkAlerts, ...edrAlerts, ...threatAlerts, ...ipsAlerts, ...firewallAlerts],
+      loading: loadingData,
+    },
+    siem: { counts: logData.counts || {}, logs, loading: loadingData },
+    malware: { counts: malwareData.counts || {}, data: malwareAlerts, loading: loadingData },
+    network: { counts: networkData.counts || {}, alerts: networkAlerts, loading: loadingData },
+  };
 
   const handleExportCSV = () => {
     const allEvents = [
@@ -2947,26 +3035,54 @@ function SystemDashboard({ system, dept, onBack, isAdmin, liveRevision = 0 }) {
               </linearGradient>
             </defs>
             {[20, 50, 80, 105].map(y => <line key={y} x1="0" y1={y} x2="720" y2={y} stroke="#1e3a5f" strokeWidth="1" strokeDasharray="4 4" opacity="0.5" />)}
-            {networkActivityChart.length > 1 ? (
+            {hasTelemetryChartData ? (
               <>
-                <path
-                  d={`M 0 105 ${networkActivityChart.map((d, i) => `L ${(i / Math.max(networkActivityChart.length - 1, 1)) * 720} ${105 - Math.min((d.count || d || 0) * 3, 90)}`).join(' ')} L 720 105 Z`}
-                  fill="url(#system24hGlow)"
-                />
-                <polyline
-                  points={networkActivityChart.map((d, i) => `${(i / Math.max(networkActivityChart.length - 1, 1)) * 720},${105 - Math.min((d.count || d || 0) * 3, 90)}`).join(' ')}
-                  fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                />
+                <text x="8" y="16" fill="#64748b" fontSize="9">{telemetryChartMax.toLocaleString()} events</text>
+                {chartSeries.map(series => {
+                  const points = chartPointString(series.values);
+                  return (
+                    <g key={series.key}>
+                      <polyline
+                        points={points}
+                        fill="none" stroke={series.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                      />
+                      {series.values.map((value, index) => {
+                        const x = (index / 23) * 720;
+                        const y = 105 - (value / telemetryChartMax) * 90;
+                        return (
+                          <circle key={`${series.key}-${index}`} cx={x} cy={y} r="3" fill="#06101d" stroke={series.color} strokeWidth="2">
+                            <title>{`${series.label} · Hour ${index + 1}: ${value.toLocaleString()} events`}</title>
+                          </circle>
+                        );
+                      })}
+                    </g>
+                  );
+                })}
               </>
             ) : (
-              <polyline points="0,95 120,80 240,85 360,60 480,75 600,40 720,50" fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <text x="360" y="65" textAnchor="middle" fill="#64748b" fontSize="11">No EDR, IDS/IPS or forensic events in the last 24 hours</text>
             )}
           </svg>
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 5, color: '#94a3b8', fontSize: 10 }}>
+            {chartSeries.map(series => (
+              <span key={series.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: series.color, boxShadow: `0 0 8px ${series.color}` }} />
+                {series.label}: <strong style={{ color: series.color }}>{series.total.toLocaleString()}</strong>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, color: '#64748b', fontSize: 10 }}>
+            <span>24h ago</span>
+            <span>
+              {chartSeries.reduce((sum, series) => sum + series.total, 0).toLocaleString()} total security events
+            </span>
+            <span>Now</span>
+          </div>
         </div>
       </div>
 
       {/* ── 24H SYSTEM & EDR DASHBOARD CONTENT ── */}
-      <SystemLevelCards system={system} onDetailModal={setDetailModal} liveRevision={liveRevision} />
+      <SystemLevelCards system={system} onDetailModal={setDetailModal} systemData={systemLevelData} />
 
       {/* ── LOG DETAIL MODAL ── */}
       {detailModal && (
@@ -2993,7 +3109,6 @@ export default function SystemMonitoringDashboard() {
   const { user, isAdmin, isDeptAdmin, isAnalyst, selectedDeptId } = useAuth();
   const socketRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
-  const [telemetryRevision, setTelemetryRevision] = useState(0);
 
   // Navigation state
   const [view, setView] = useState('departments');
@@ -3018,6 +3133,9 @@ export default function SystemMonitoringDashboard() {
   // Alerts
   const [alerts, setAlerts] = useState([]);
   const [showAlerts, setShowAlerts] = useState(true);
+  const requestedSystemId = typeof window === 'undefined'
+    ? ''
+    : new URLSearchParams(window.location.search).get('systemId') || '';
 
   // ── RBAC: Determine role label ──
   const roleLabel = isAdmin ? 'Company Admin' : isDeptAdmin ? 'Department Admin' : 'Analyst';
@@ -3102,7 +3220,6 @@ export default function SystemMonitoringDashboard() {
         const payload = [...events].reverse().find(item => String(item.systemId) === String(current._id));
         return payload ? { ...current, status: payload.status, lastSeen: payload.lastSeen || current.lastSeen } : current;
       });
-      setTelemetryRevision(value => value + 1);
     }, 1200);
 
     socket.on('system:status_changed', statusBuffer.add);
@@ -3118,15 +3235,9 @@ export default function SystemMonitoringDashboard() {
         };
       });
       setAlerts(prev => [...formattedAlerts, ...prev].slice(0, 8));
-      setTelemetryRevision(value => value + 1);
     }, 1200);
 
     socket.on('alert:new', alertBuffer.add);
-
-    // Real-time logs
-    socket.on('log:new', () => {
-      // Trigger a lightweight refresh of timeline data (debounced by 30s auto-refresh)
-    });
 
     const disconnectSocket = connectSocket(socket);
     return () => {
@@ -3170,6 +3281,21 @@ export default function SystemMonitoringDashboard() {
       }
     }
   }, [loading, departments, isDeptAdmin, isAnalyst, user, selectedDeptId, view, fetchDeptSystems]);
+
+  // Module pages return here with the selected endpoint in the query string.
+  // Restore the exact system detail view instead of dropping the user at the
+  // department list.
+  useEffect(() => {
+    if (loading || !requestedSystemId || !allSystems.length) return;
+    const target = allSystems.find(item => String(item._id) === String(requestedSystemId));
+    if (!target) return;
+    const departmentId = typeof target.departmentId === 'object' ? target.departmentId?._id : target.departmentId;
+    const department = departments.find(item => String(item._id) === String(departmentId));
+    setSelectedDept(department || (typeof target.departmentId === 'object' ? target.departmentId : null));
+    setDeptSystems([target]);
+    setSelectedSystem(target);
+    setView('detail');
+  }, [loading, requestedSystemId, allSystems, departments]);
 
   // Inventory changes far less frequently than telemetry. Keep this lightweight,
   // pause it in background tabs, and let Socket.IO handle live endpoint status.
@@ -3372,7 +3498,6 @@ export default function SystemMonitoringDashboard() {
           dept={typeof selectedSystem.departmentId === 'object' ? selectedSystem.departmentId : selectedDept || { name: 'Unknown' }}
           onBack={() => navigateTo('systems')}
           isAdmin={isAdmin}
-          liveRevision={telemetryRevision}
         />
       )}
 

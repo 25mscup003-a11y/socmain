@@ -921,6 +921,9 @@ router.get('/stats', companyAuth, async (req, res) => {
           { level: 'system', systemId: { $in: departmentScope.systemIds } },
         ] }
       : { companyId };
+    if (req.query.systemId && mongoose.Types.ObjectId.isValid(String(req.query.systemId))) {
+      scopeQuery.systemId = new mongoose.Types.ObjectId(String(req.query.systemId));
+    }
 
     const [totalRules, enabledRules, companyRules, departmentRules, systemRules, blockRules] =
       await Promise.all([

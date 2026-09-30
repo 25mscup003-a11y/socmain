@@ -95,6 +95,14 @@ async function requestScope(req) {
 function connectionFilter(scope, req) {
   const { from, to } = networkWindow(req.query);
   const filter = { ...scope, observedAt: { $gte: from, $lte: to } };
+  if (req.query.systemId) {
+    if (!mongoose.Types.ObjectId.isValid(String(req.query.systemId))) {
+      const error = new Error('Invalid system scope');
+      error.statusCode = 400;
+      throw error;
+    }
+    filter.systemId = new mongoose.Types.ObjectId(String(req.query.systemId));
+  }
   const exact = {
     hostname: 'hostname', username: 'username', process: 'processName', pid: 'pid',
     sourceIp: 'sourceIp', destinationIp: 'destinationIp', port: 'destinationPort',
@@ -257,6 +265,14 @@ function alertFilter(scope, req) {
       { $nor: [{ source: 'zeek', ruleId: 'ZEEK_weird', signatureName: /^truncated_tcp_payload$/i }] },
     ],
   };
+  if (req.query.systemId) {
+    if (!mongoose.Types.ObjectId.isValid(String(req.query.systemId))) {
+      const error = new Error('Invalid system scope');
+      error.statusCode = 400;
+      throw error;
+    }
+    filter.systemId = new mongoose.Types.ObjectId(String(req.query.systemId));
+  }
   if (req.query.severity) filter.severity = req.query.severity;
   if (req.query.detectionType) filter.ruleId = new RegExp(escapeRegex(req.query.detectionType).slice(0, 100), 'i');
   if (req.query.mitre) filter.mitreId = new RegExp(escapeRegex(req.query.mitre).slice(0, 64), 'i');

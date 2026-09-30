@@ -755,6 +755,9 @@ router.get('/idsips/summary', async (req, res) => {
     } else if (req.query.companyId) {
       companyFilter.companyId = new mongoose.Types.ObjectId(req.query.companyId);
     }
+    if (req.query.systemId && mongoose.Types.ObjectId.isValid(String(req.query.systemId))) {
+      companyFilter.systemId = new mongoose.Types.ObjectId(String(req.query.systemId));
+    }
 
     const { filter, isStale, capturedAt } = await resolveIdsIpsWindow(companyFilter, 24);
 

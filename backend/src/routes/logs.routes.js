@@ -22,6 +22,7 @@
  * GET  /api/logs/stream          — SSE stream of recent logs (auth)
  */
 const router = require('express').Router();
+const mongoose = require('mongoose');
 const Log    = require('../models/Log.model');
 const Alert  = require('../models/Alert.model');
 const System = require('../models/System.model');
@@ -565,6 +566,13 @@ router.get('/', authenticate, requireAnalyst, async (req, res) => {
     const page = boundedInteger(req.query.page, { defaultValue: 1, max: 100000 });
     const limit = boundedInteger(req.query.limit, { defaultValue: 50, max: 200 });
     const filter = scopeForUser(req.user, { departmentScoped: true });
+
+    if (req.query.systemId) {
+      if (!mongoose.Types.ObjectId.isValid(String(req.query.systemId))) {
+        return res.status(400).json({ message: 'Invalid system scope' });
+      }
+      filter.systemId = new mongoose.Types.ObjectId(String(req.query.systemId));
+    }
 
     if (logType) filter.logType = logType;
     if (level)   filter.level   = level;

@@ -87,6 +87,66 @@ const CATEGORIES = [
   { id: 'system',   label: 'System & Syslog', icon: '⚙️', color: '#94a3b8', match: ['system', 'syslog', 'kernel', 'os', 'cloud', 'database'] },
 ];
 
+// The SIEM feed combines Log and Alert documents. They do not use exactly the
+// same field names, so keep filtering in one place and apply it to both types.
+const LOG_TYPE_ALIASES = {
+  ids: ['ids', 'ips', 'suricata', 'zeek', 'snort'],
+  webserver: ['webserver', 'web', 'http', 'nginx', 'apache', 'dns'],
+  edr: ['edr', 'agent', 'winlog', 'process', 'hash', 'script'],
+  firewall: ['firewall', 'pfsense', 'opnsense', 'iptables', 'fw'],
+  auth: ['auth', 'ssh', 'login', 'iam', 'sudo'],
+  system: ['system', 'syslog', 'kernel', 'os', 'cloud', 'database'],
+};
+
+function rowValues(row = {}) {
+  return [
+    row.logType,
+    row.eventCategory,
+    row.category,
+    row.source,
+    row.sourceType,
+    row.detectionSource,
+    row.module,
+    row.program,
+  ].filter(Boolean).map(value => String(value).toLowerCase());
+}
+
+function matchesLogFilter(row, filter = {}) {
+  const values = rowValues(row);
+  const selectedType = String(filter.logType || '').toLowerCase();
+  const selectedSource = String(filter.source || '').trim().toLowerCase();
+  const selectedLevel = String(filter.level || '').toLowerCase();
+  const rowLevel = String(row.level || row.severity || '').toLowerCase();
+
+  if (selectedType) {
+    const aliases = LOG_TYPE_ALIASES[selectedType] || [selectedType];
+    if (!aliases.some(alias => values.some(value => value === alias || value.includes(alias)))) return false;
+  }
+  if (selectedSource && !values.some(value => value.includes(selectedSource))) return false;
+  if (selectedLevel && rowLevel !== selectedLevel) return false;
+  return true;
+}
+
+function toAlertLog(a = {}) {
+  return {
+    _id: a._id,
+    source: a.source || a.sourceType || a.detectionSource || a.eventCategory || 'agent',
+    sourceType: a.sourceType,
+    detectionSource: a.detectionSource,
+    agentName: a.agentName,
+    hostname: a.hostname || a.agentName,
+    logType: a.eventCategory || a.category || a.module || 'system',
+    eventCategory: a.eventCategory,
+    level: a.severity || 'info',
+    severity: a.severity,
+    message: a.description || `[${a.ruleId}] ${a.type || ''}`,
+    receivedAt: a.createdAt,
+    createdAt: a.createdAt,
+    format: 'alert',
+    tags: [a.eventCategory, a.severity].filter(Boolean),
+  };
+}
+
 function getCategoryCounts(logs = [], logStats = null) {
   const counts = { edr: 0, ids_ips: 0, firewall: 0, web_net: 0, auth: 0, system: 0 };
   const sources = logStats?.bySource || [];
@@ -255,8 +315,11 @@ export default function SIEMPage() {
   const [activeTab,setActiveTab]= useState('feed');
   const [logFilter,setLogFilter]= useState({ logType: '', source: '', level: '' });
   const socketRef = useRef(null);
+  const dataRequestRef = useRef(0);
+  const filterReadyRef = useRef(false);
 
   const load = useCallback(async () => {
+    const requestId = ++dataRequestRef.current;
     setLoading(true);
     try {
       const [lRes, lStats, aRes] = await Promise.all([
@@ -268,24 +331,13 @@ export default function SIEMPage() {
       console.log('[SIEMPage] alerts count:', aRes.data.alerts?.length);
 
       const rawLogs = lRes.data.logs || [];
-      const alertsAsLogs = (aRes.data.alerts || []).map(a => ({
-        _id: a._id,
-        source: a.source || 'agent',
-        agentName: a.agentName,
-        hostname: a.agentName,
-        logType: a.eventCategory || 'system',
-        level: a.severity || 'info',
-        message: a.description || `[${a.ruleId}] ${a.type || ''}`,
-        receivedAt: a.createdAt,
-        createdAt: a.createdAt,
-        format: 'alert',
-        tags: [a.eventCategory, a.severity],
-      }));
+      const alertsAsLogs = (aRes.data.alerts || []).map(toAlertLog);
 
       const combined = [...rawLogs, ...alertsAsLogs]
         .sort((a, b) => new Date(b.receivedAt || b.createdAt) - new Date(a.receivedAt || a.createdAt))
         .slice(0, 80);
 
+      if (requestId !== dataRequestRef.current) return;
       setLogs(combined);
 
       const alertTotal = aRes.data.total || 0;
@@ -303,44 +355,54 @@ export default function SIEMPage() {
         mergedStats.bySource = Object.entries(sourceCounts).map(([_id, count]) => ({ _id, count }))
           .sort((a, b) => b.count - a.count);
       }
+      if (requestId !== dataRequestRef.current) return;
       setLogStats(mergedStats);
       setAlerts(aRes.data.alerts || []);
     } catch (err) { console.error('[SIEMPage] Error:', err.message); }
-    finally { setLoading(false); }
+    finally {
+      if (requestId === dataRequestRef.current) setLoading(false);
+    }
   }, []);
 
   const loadFiltered = useCallback(async () => {
+    const requestId = ++dataRequestRef.current;
+    setLoading(true);
     try {
       const q = new URLSearchParams({ limit: 80 });
-      if (logFilter.logType) q.set('logType', logFilter.logType);
+      // Category cards represent several telemetry names (for example IDS /
+      // IPS includes suricata, zeek and snort), so those are matched locally
+      // across the returned records instead of being reduced to one exact DB
+      // logType value.
+      if (logFilter.logType && !LOG_TYPE_ALIASES[logFilter.logType]) q.set('logType', logFilter.logType);
       if (logFilter.source)  q.set('source', logFilter.source);
       if (logFilter.level)   q.set('level', logFilter.level);
 
+      const alertQuery = new URLSearchParams({ limit: 200, page: 1 });
+      if (logFilter.level)  alertQuery.set('severity', logFilter.level);
+      if (logFilter.source) alertQuery.set('source', logFilter.source);
+
       const [logRes, alertRes] = await Promise.all([
         api.get(`/logs?${q}`),
-        api.get(`/alerts?limit=80&page=1${logFilter.level ? '&severity=' + logFilter.level : ''}${logFilter.logType ? '&category=' + logFilter.logType : ''}`),
+        api.get(`/alerts?${alertQuery}`),
       ]);
 
-      const rawLogs = logRes.data.logs || [];
-      const alertsAsLogs = (alertRes.data.alerts || []).map(a => ({
-        _id: a._id,
-        source: a.source || 'agent',
-        agentName: a.agentName,
-        hostname: a.agentName,
-        logType: a.eventCategory || 'system',
-        level: a.severity || 'info',
-        message: a.description || `[${a.ruleId}] ${a.type || ''}`,
-        receivedAt: a.createdAt,
-        createdAt: a.createdAt,
-        format: 'alert',
-      }));
+      const rawLogs = (logRes.data.logs || []).filter(row => matchesLogFilter(row, logFilter));
+      const alertsAsLogs = (alertRes.data.alerts || [])
+        .map(toAlertLog)
+        .filter(row => matchesLogFilter(row, logFilter));
 
       const combined = [...rawLogs, ...alertsAsLogs]
         .sort((a, b) => new Date(b.receivedAt || b.createdAt) - new Date(a.receivedAt || a.createdAt))
         .slice(0, 80);
 
+      if (requestId !== dataRequestRef.current) return;
       setLogs(combined);
-    } catch {}
+    } catch (err) {
+      console.error('[SIEMPage] Filter error:', err.message);
+      if (requestId === dataRequestRef.current) setLogs([]);
+    } finally {
+      if (requestId === dataRequestRef.current) setLoading(false);
+    }
   }, [logFilter]);
 
   useEffect(() => {
@@ -398,10 +460,18 @@ export default function SIEMPage() {
     };
   }, [user, logFilter]);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (activeTab === 'feed') loadFiltered(); }, [logFilter, loadFiltered, activeTab]);
-
   const hasFilters = !!(logFilter.logType || logFilter.source || logFilter.level);
+  useEffect(() => { load(); }, [load]);
+  // The initial unfiltered load already populates the feed. Re-query only when
+  // a filter is selected/cleared, avoiding two competing requests on mount.
+  useEffect(() => {
+    if (!filterReadyRef.current) {
+      filterReadyRef.current = true;
+      return;
+    }
+    if (activeTab === 'feed') loadFiltered();
+  }, [logFilter, loadFiltered, activeTab]);
+
   const categoryCounts = getCategoryCounts(logs, logStats);
   const totalCategoryLogs = Math.max(Object.values(categoryCounts).reduce((a, b) => a + b, 0), 1);
 
@@ -433,7 +503,7 @@ export default function SIEMPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={load} style={{ fontSize: 11, padding: '5px 14px', borderRadius: 6,
+          <button onClick={() => (hasFilters ? loadFiltered() : load())} style={{ fontSize: 11, padding: '5px 14px', borderRadius: 6,
             border: '1px solid #1e3a5f', background: 'none', color: '#60a5fa', cursor: 'pointer' }}>
             ↺ Refresh
           </button>
@@ -501,7 +571,7 @@ export default function SIEMPage() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             {[
               ['logType', 'Log Type', ['','system','auth','network','file','usb','webserver','database','cloud','ids','edr','firewall']],
-              ['level',   'Level',    ['','critical','error','warning','info','debug']],
+              ['level',   'Level',    ['','critical','high','error','warning','medium','low','info','debug']],
             ].map(([key, label, opts]) => (
               <select key={key} value={logFilter[key]}
                 onChange={e => setLogFilter(p => ({ ...p, [key]: e.target.value }))}

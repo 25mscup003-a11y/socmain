@@ -8,7 +8,9 @@ const { canonicalCapabilityIds, isSyntheticAlert } = require('../utils/capabilit
 const { DESKTOP_CAPABILITIES, capabilityRuntimeState, desktopOs } = require('../utils/desktopCapabilities');
 
 const desktopCapabilityCache = new Map();
-const DESKTOP_CAPABILITY_CACHE_MS = 12000;
+// Capability classification walks endpoint alert history; keep the shared
+// snapshot long enough to prevent each dashboard/card refresh from rescanning.
+const DESKTOP_CAPABILITY_CACHE_MS = 5 * 60 * 1000;
 
 function parseJsonObject(value) {
   if (value && typeof value === 'object') return value;
@@ -833,46 +835,94 @@ router.get('/system/:systemId/timeline', authenticate, requireAnalyst, async (re
 
 /* ─────────────────────────────────────────────────────────────────────────
    GET /api/monitoring/system/:systemId/network-activity
-   Returns network activity graph data (12-hour rolling window)
+   Returns network activity graph data (24-hour rolling window)
 ───────────────────────────────────────────────────────────────────────────── */
 router.get('/system/:systemId/network-activity', authenticate, requireAnalyst, async (req, res) => {
   try {
     const systemId = req.params.systemId;
     const now = Date.now();
 
-    // Get logs from last 12 hours, grouped by hour
-    const logs = await Log.find({
-      systemId,
-      companyId: req.user.companyId,
-      logType: 'network',
-      createdAt: { $gte: new Date(now - 12 * 60 * 60 * 1000) },
-    }).lean();
+    // Network snapshots are persisted as Alerts by the agent ingestion path.
+    // Older/manual network records may still exist as Log documents, so keep
+    // those as a backwards-compatible source as well.
+    const windowHours = 24;
+    const since = new Date(now - windowHours * 60 * 60 * 1000);
+    const [snapshots, logs] = await Promise.all([
+      Alert.find({
+        systemId,
+        companyId: req.user.companyId,
+        ruleId: 'NET_CONNECTION_SUMMARY',
+        createdAt: { $gte: since },
+      })
+        .select('createdAt connectionCount bytesSent bytesReceived rawEvent')
+        .sort({ createdAt: 1 })
+        .lean(),
+      Log.find({
+        systemId,
+        companyId: req.user.companyId,
+        logType: 'network',
+        createdAt: { $gte: since },
+      })
+        .select('createdAt fields')
+        .sort({ createdAt: 1 })
+        .lean(),
+    ]);
+
+    const numberOrZero = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+    const snapshotMetrics = snapshots.map(snapshot => {
+      const rawEvent = parseJsonObject(snapshot.rawEvent);
+      const raw = parseJsonObject(rawEvent.raw);
+      const adapterDelta = parseJsonObject(rawEvent.adapter_delta || raw.adapter_delta);
+      const connectionCount = numberOrZero(
+        snapshot.connectionCount
+          ?? rawEvent.connection_count
+          ?? raw.connection_count
+          ?? rawEvent.established_count
+          ?? raw.established_count,
+      );
+      const bytes = numberOrZero(snapshot.bytesSent) + numberOrZero(snapshot.bytesReceived)
+        || numberOrZero(adapterDelta.bytes_sent) + numberOrZero(adapterDelta.bytes_received);
+      const intervalSeconds = Math.max(1, numberOrZero(adapterDelta.interval_seconds));
+      return {
+        createdAt: snapshot.createdAt,
+        connectionCount,
+        mbps: bytes > 0 ? (bytes * 8) / intervalSeconds / 1_000_000 : 0,
+      };
+    });
+    const legacyMetrics = logs.map(log => ({
+      createdAt: log.createdAt,
+      connectionCount: numberOrZero(log.fields?.connectionCount || log.fields?.connection_count) || 1,
+      mbps: 0,
+    }));
+    const events = [...snapshotMetrics, ...legacyMetrics].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
 
     // Aggregate by hour
-    const hourly = Array(12)
+    const hourly = Array(windowHours)
       .fill(0)
       .map((_, i) => {
-        const hourStart = now - (12 - i - 1) * 60 * 60 * 1000;
+        const hourStart = now - (windowHours - i - 1) * 60 * 60 * 1000;
         const hourEnd = hourStart + 60 * 60 * 1000;
-        const hourLogs = logs.filter(l => {
+        const hourEvents = events.filter(l => {
           const time = new Date(l.createdAt).getTime();
           return time >= hourStart && time < hourEnd;
         });
 
-        // Simulated MB/s (in real scenario, extract from network logs)
-        const baseActivity = Math.floor(Math.random() * 40 + 20);
+        const totalBytesPerSecond = hourEvents.reduce((sum, event) => sum + (event.mbps || 0), 0);
         return {
           hour: i,
           timestamp: new Date(hourStart).toISOString(),
-          mbps: baseActivity + Math.floor(hourLogs.length / 2),
-          connectionCount: hourLogs.length,
+          mbps: hourEvents.length ? Math.round(totalBytesPerSecond / hourEvents.length) : 0,
+          connectionCount: hourEvents.reduce((sum, event) => sum + event.connectionCount, 0),
         };
       });
 
     const stats = {
-      avgMbps: Math.round(hourly.reduce((sum, h) => sum + h.mbps, 0) / 12),
+      avgMbps: Math.round(hourly.reduce((sum, h) => sum + h.mbps, 0) / windowHours),
       peakMbps: Math.max(...hourly.map(h => h.mbps)),
-      totalConnections: logs.length,
+      totalConnections: hourly.reduce((sum, h) => sum + h.connectionCount, 0),
+      telemetrySnapshots: snapshots.length,
     };
 
     res.json({ hourly, stats });

@@ -322,7 +322,13 @@ function EDRCapabilityCard({ cap, onOpen }) {
   return <EDROverviewMetricCard cap={cap} onOpen={onOpen} countLabel={countLabel} />;
 }
 
-function EDRCapabilitiesDashboard({ data, loading, onOpenCapability }) {
+export function EDRCapabilitiesDashboard({
+  data,
+  loading,
+  onOpenCapability,
+  title = 'All 31 EDR Monitoring Capabilities',
+  subtitle = 'Real tenant telemetry · last 24 hours · demo/synthetic rows excluded',
+}) {
   const summary = data?.liveSummary || {};
   const caps = data?.capabilities || [];
   const isInitialLoad = loading && caps.length === 0;
@@ -337,9 +343,9 @@ function EDRCapabilitiesDashboard({ data, loading, onOpenCapability }) {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 16, color: '#e0f2fe', fontWeight: 900 }}>All 31 EDR Monitoring Capabilities</div>
+          <div style={{ fontSize: 16, color: '#e0f2fe', fontWeight: 900 }}>{title}</div>
           <div style={{ fontSize: 11, color: '#60a5fa', marginTop: 3 }}>
-            Real tenant telemetry · last 24 hours · demo/synthetic rows excluded
+            {subtitle}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>

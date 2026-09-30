@@ -41,6 +41,17 @@ api.get = cacheableGet;
 api.interceptors.request.use(async (config) => {
   const token = localStorage.getItem('co_token') || localStorage.getItem('sa_token') || localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Module pages opened from System Monitoring carry the selected endpoint in
+  // the URL. Forward that scope to every GET request unless the page already
+  // supplied one explicitly, so module dashboards stay endpoint-specific.
+  if (typeof window !== 'undefined' && String(config.method || 'get').toLowerCase() === 'get') {
+    const routeParams = new URLSearchParams(window.location.search);
+    const scopedSystemId = routeParams.get('systemId');
+    const returnTo = routeParams.get('returnTo');
+    if (scopedSystemId && returnTo && !config.params?.systemId) {
+      config.params = { ...(config.params || {}), systemId: scopedSystemId };
+    }
+  }
   return encryptApiRequest(config, token || '');
 });
 

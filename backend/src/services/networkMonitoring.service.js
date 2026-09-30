@@ -689,6 +689,20 @@ async function ingestNetworkTelemetry(alert, io = null) {
   const liveCandidates = observeBeaconSnapshot(alert, beaconRows(raw), beaconConfig);
   const beaconCandidates = liveCandidates.length ? liveCandidates : warmedCandidates;
   const createdBeacons = await persistBeaconCandidates(alert, beaconCandidates, io);
+
+  // Notify dashboards even when the snapshot contains no currently open
+  // connections. The snapshot itself is still live telemetry and should
+  // clear/update the endpoint chart immediately.
+  if (io) {
+    io.to(`company:${alert.companyId}`).emit('network:event', {
+      companyId: alert.companyId,
+      systemId: alert.systemId || alert.endpointId || null,
+      count: documents.length,
+      connectionCount: Number(raw.connection_count ?? raw.established_count ?? 0),
+      observedAt: new Date(),
+    });
+  }
+
   if (!documents.length) return { upserted: 0, beaconEvents: createdBeacons.length };
 
   const matches = [];
@@ -747,13 +761,6 @@ async function ingestNetworkTelemetry(alert, io = null) {
     if (io) created.forEach(item => io.to(`company:${item.companyId}`).emit('alert:new', item));
   }
 
-  if (io) {
-    io.to(`company:${alert.companyId}`).emit('network:event', {
-      companyId: alert.companyId,
-      count: documents.length,
-      observedAt: new Date(),
-    });
-  }
   return { upserted: documents.length, beaconEvents: createdBeacons.length };
 }
 

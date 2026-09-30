@@ -44,6 +44,9 @@ export default function Layout() {
     : user?.role === 'department_admin'
       ? '/department-admin/settings'
       : '/settings';
+  const routeParams = new URLSearchParams(location.search);
+  const systemReturnTo = routeParams.get('returnTo');
+  const systemReturnId = routeParams.get('systemId');
 
   useEffect(() => {
     if (!user || user.role === 'partner_admin') return undefined;
@@ -578,6 +581,12 @@ export default function Layout() {
           position: 'relative',
           boxSizing: 'border-box',
         }}>
+          {systemReturnTo && systemReturnId && (
+            <div style={{ position: 'sticky', top: -32, zIndex: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, margin: '-20px -12px 18px', padding: '9px 14px', background: 'linear-gradient(90deg, rgba(8,35,58,.98), rgba(14,36,63,.96))', border: '1px solid rgba(56,189,248,.35)', borderRadius: 9, boxShadow: '0 8px 20px rgba(0,0,0,.2)' }}>
+              <span style={{ color: '#bae6fd', fontSize: 11, fontWeight: 800 }}>System-scoped module · {systemReturnId}</span>
+              <button type="button" onClick={() => navigate(systemReturnTo)} style={{ border: '1px solid #38bdf866', borderRadius: 6, background: '#38bdf814', color: '#7dd3fc', padding: '6px 10px', fontSize: 11, fontWeight: 900, cursor: 'pointer' }}>← Back to System Monitoring</button>
+            </div>
+          )}
           {/* Background decorative elements */}
           <div style={{
             position: 'fixed',

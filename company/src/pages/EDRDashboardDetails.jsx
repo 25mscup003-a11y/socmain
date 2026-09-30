@@ -5521,7 +5521,7 @@ function AlertDetail({ selected, doAction }) {
   );
 }
 
-function CategoryModal({ title, category, deptId, capabilityId, backendId: directBackendId, onClose, overviewData = null, processCapability = null }) {
+function CategoryModal({ title, category, deptId, capabilityId, backendId: directBackendId, systemId = null, onClose, overviewData = null, processCapability = null }) {
   const { company, user } = useAuth();
   const [searchParams] = useSearchParams();
   const capConfig = getCapabilityByCardId(capabilityId) || (directBackendId ? getCapabilityByBackendId(directBackendId) : null) || getCapability(capabilityId);
@@ -5598,6 +5598,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
     if (!quiet) setLoading(true);
     const q = new URLSearchParams({ page, limit: capabilityLimit });
     if (deptId) q.set('departmentId', deptId);
+    if (systemId) q.set('systemId', systemId);
     if (queryBackendId) q.set('capabilityId', queryBackendId);
     // Process Activity, Network Activity, and Lateral Movement remain rolling
     // live views; other capabilities may honor the overview snapshot.
@@ -5609,7 +5610,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       q.set('windowHours', 24);
     }
     if (isAuthenticationCapability) {
-      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/authentication-monitoring/dashboard', { params, skipCache: quiet })
         .then(response => {
           const payload = response.data || {};
@@ -5632,7 +5633,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         .finally(() => setLoading(false));
     }
     if (isMemoryActivityCapability) {
-      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/memory-activity/dashboard', { params, skipCache: quiet })
         .then(response => {
           const payload = response.data || {};
@@ -5657,7 +5658,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       if (deptId) params.departmentId = deptId;
       return Promise.allSettled([
         api.get('/hash-signature/events', { params, skipCache: quiet }),
-        api.get('/hash-signature/statistics', { params: { from: params.from, to: params.to, departmentId: deptId || undefined }, skipCache: quiet }),
+        api.get('/hash-signature/statistics', { params: { from: params.from, to: params.to, departmentId: deptId || undefined, systemId: systemId || undefined }, skipCache: quiet }),
       ]).then(([eventsResult, statisticsResult]) => {
         if (eventsResult.status === 'fulfilled') {
           const payload = eventsResult.value.data || {};
@@ -5674,7 +5675,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isServiceMonitoringCapability) {
-      const params = { windowHours: 24, limit: 500, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 500, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/service-monitoring/overview', { params, skipCache: quiet })
         .then(response => {
           const payload = response.data || {};
@@ -5695,7 +5696,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         .finally(() => setLoading(false));
     }
     if (isGeolocationCapability) {
-      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/geolocation/overview', { params, skipCache: quiet })
         .then(async response => {
           let payload = response.data || {};
@@ -5703,7 +5704,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
           if (!next.length) {
             try {
               const fallback = await api.get('/dashboard/alerts/edr', {
-                params: { capabilityId: 23, page: 1, limit: 1000, departmentId: deptId || undefined },
+                params: { capabilityId: 23, page: 1, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined },
                 skipCache: quiet,
               });
               const fallbackRows = fallback.data?.alerts || fallback.data?.events || [];
@@ -5726,7 +5727,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
           try {
             const [fallback, systemResponse] = await Promise.all([
               api.get('/dashboard/alerts/edr', {
-                params: { capabilityId: 23, page: 1, limit: 1000, departmentId: deptId || undefined },
+                params: { capabilityId: 23, page: 1, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined },
                 skipCache: quiet,
               }),
               api.get('/system', { skipCache: quiet }).catch(() => ({ data: {} })),
@@ -5748,7 +5749,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         .finally(() => setLoading(false));
     }
     if (isTimeAnomalyCapability) {
-      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/time-anomaly/overview', { params, skipCache: quiet })
         .then(response => {
           const payload = response.data || {};
@@ -5769,7 +5770,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         .finally(() => setLoading(false));
     }
     if (isScriptMonitoringCapability) {
-      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/script-monitoring/overview', { params, skipCache: quiet })
         .then(response => {
           const payload = response.data || {};
@@ -5790,7 +5791,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         .finally(() => setLoading(false));
     }
     if (isApiMonitoringCapability) {
-      const params = { windowHours: 24, limit: 5000, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 5000, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/api-monitoring/overview', { params, skipCache: quiet })
         .then(response => {
           const payload = response.data || {};
@@ -5811,7 +5812,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         .finally(() => setLoading(false));
     }
     if (isKernelMonitoringCapability) {
-      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: 1000, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/kernel-monitoring/overview', { params, skipCache: quiet })
         .then(response => {
           const payload = response.data || {};
@@ -5832,7 +5833,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         .finally(() => setLoading(false));
     }
     if (isCredentialSecurityCapability) {
-      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined };
+      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/credential-security/dashboard', { params, skipCache: quiet }).then(dashboardResponse => {
         const payload = dashboardResponse.data || {};
         const next = Array.isArray(payload.events) ? payload.events : [];
@@ -5848,7 +5849,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isUebaCapability) {
-      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined };
+      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/ueba/dashboard', { params, skipCache: quiet }).then(dashboardResponse => {
         const payload = dashboardResponse.data || {};
         const next = Array.isArray(payload.events) ? payload.events : [];
@@ -5864,7 +5865,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isDataSecurityCapability) {
-      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined };
+      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/data-security/dashboard', { params, skipCache: quiet }).then(dashboardResponse => {
         const payload = dashboardResponse.data || {};
         const next = Array.isArray(payload.events) ? payload.events : [];
@@ -5880,7 +5881,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isLateralMovementCapability) {
-      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined };
+      const params = { limit: Math.min(capabilityLimit, 250), windowHours: 24, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/lateral-movement/dashboard', { params, skipCache: quiet }).then(dashboardResponse => {
         const payload = dashboardResponse.data || {};
         const next = Array.isArray(payload.events) ? payload.events : [];
@@ -5896,7 +5897,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isPersistenceCapability) {
-      const params = { page: 1, limit: Math.min(capabilityLimit, 1000), windowHours: 24, departmentId: deptId || undefined };
+      const params = { page: 1, limit: Math.min(capabilityLimit, 1000), windowHours: 24, departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/persistence/events', { params, skipCache: quiet }).then(response => {
         const payload = response.data || {};
         const next = Array.isArray(payload.events) ? payload.events : [];
@@ -5909,7 +5910,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isSystemChangesCapability) {
-      const params = { windowHours: 24, limit: Math.min(capabilityLimit, 250), departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: Math.min(capabilityLimit, 250), departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/system-changes/summary', { params, skipCache: quiet }).then(response => {
         const payload = response.data || {};
         const next = Array.isArray(payload.events) ? payload.events : [];
@@ -5925,7 +5926,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isRegistryCapability) {
-      const params = { windowHours: 24, limit: Math.min(capabilityLimit || 250, 1000), departmentId: deptId || undefined };
+      const params = { windowHours: 24, limit: Math.min(capabilityLimit || 250, 1000), departmentId: deptId || undefined, systemId: systemId || undefined };
       return api.get('/registry-monitoring/dashboard', { params, skipCache: quiet }).then(response => {
         const payload = response.data || {};
         const next = Array.isArray(payload.events) ? payload.events : [];
@@ -5941,11 +5942,11 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }).finally(() => setLoading(false));
     }
     if (isNetworkActivityCapability) {
-      const params = { page: 1, limit: 0, hours: 24 };
+      const params = { page: 1, limit: 0, hours: 24, ...(systemId ? { systemId } : {}) };
       return Promise.allSettled([
         api.get('/network/connections', { params, skipCache: quiet }),
         api.get('/network/alerts', { params, skipCache: quiet }),
-        api.get('/network/statistics', { params: { hours: 24 }, skipCache: quiet }),
+        api.get('/network/statistics', { params: { hours: 24, ...(systemId ? { systemId } : {}) }, skipCache: quiet }),
       ]).then(([connectionsResult, alertsResult, statisticsResult]) => {
         if (connectionsResult.status === 'rejected' && alertsResult.status === 'rejected') {
           throw connectionsResult.reason || alertsResult.reason;
@@ -5978,6 +5979,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       if (Number(queryBackendId) === 1) {
         const reportParams = new URLSearchParams({ period: 'daily', category: 'all' });
         if (deptId) reportParams.set('departmentId', deptId);
+        if (systemId) reportParams.set('systemId', systemId);
         return api.get(`/dashboard/process-activity/report?${reportParams}`, { skipCache: quiet })
           .then(response => {
             const payload = response.data || {};
@@ -5997,6 +5999,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       }
       const liveParams = new URLSearchParams({ windowHours: 24, limit: capabilityLimit });
       if (deptId) liveParams.set('departmentId', deptId);
+      if (systemId) liveParams.set('systemId', systemId);
       if (windowEnd && Number(queryBackendId) === 3) liveParams.set('windowEnd', windowEnd);
       return api.get(`/dashboard/capabilities/${queryBackendId}/live?${liveParams}`, { skipCache: quiet })
         .then(response => {
@@ -6022,6 +6025,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
     if (isAdvancedCapability) {
       const liveParams = new URLSearchParams({ windowHours: 24, limit: 500 });
       if (deptId) liveParams.set('departmentId', deptId);
+      if (systemId) liveParams.set('systemId', systemId);
       const liveUrl = Number(queryBackendId) === 29
         ? `/memory-overflow/overview?${liveParams}`
         : `/dashboard/capabilities/${queryBackendId}/live?${liveParams}`;
@@ -6057,7 +6061,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       });
     };
     const fetchAllFimRawLogs = (from) => {
-      const firstParams = new URLSearchParams({ page: 1, limit: FIM_LOG_PAGE_SIZE, logType: 'file', from });
+      const firstParams = new URLSearchParams({ page: 1, limit: FIM_LOG_PAGE_SIZE, logType: 'file', from, ...(systemId ? { systemId } : {}) });
       return api.get(`/logs?${firstParams}`).then(firstRes => {
         const firstRows = firstRes.data?.logs || [];
         const totalRows = Number(firstRes.data?.total || firstRows.length);
@@ -6065,7 +6069,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         if (pages <= 1) return { rows: firstRows, total: totalRows };
         const requests = [];
         for (let pageNo = 2; pageNo <= pages; pageNo += 1) {
-          const pageParams = new URLSearchParams({ page: pageNo, limit: FIM_LOG_PAGE_SIZE, logType: 'file', from });
+          const pageParams = new URLSearchParams({ page: pageNo, limit: FIM_LOG_PAGE_SIZE, logType: 'file', from, ...(systemId ? { systemId } : {}) });
           requests.push(api.get(`/logs?${pageParams}`).catch(() => ({ data: { logs: [] } })));
         }
         return Promise.all(requests).then(results => ({
@@ -6077,7 +6081,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
     const loadNetworkRawLogs = () => {
       const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       return Promise.all(['network', 'ids', 'firewall'].map(logType => {
-        const rawQ = new URLSearchParams({ page: 1, limit: capabilityLimit, logType, from });
+        const rawQ = new URLSearchParams({ page: 1, limit: capabilityLimit, logType, from, ...(systemId ? { systemId } : {}) });
         return api.get(`/logs?${rawQ}`).catch(() => ({ data: { logs: [], total: 0 } }));
       })).then(results => {
         const rawLogs = results.flatMap(r => r.data?.logs || [])
@@ -6096,9 +6100,9 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
       const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const base = { page: 1, limit: 200, from };
       const requests = [
-        new URLSearchParams({ ...base, logType: 'auth' }),
-        new URLSearchParams({ ...base, logType: 'system' }),
-        new URLSearchParams({ ...base, logType: 'edr' }),
+        new URLSearchParams({ ...base, logType: 'auth', ...(systemId ? { systemId } : {}) }),
+        new URLSearchParams({ ...base, logType: 'system', ...(systemId ? { systemId } : {}) }),
+        new URLSearchParams({ ...base, logType: 'edr', ...(systemId ? { systemId } : {}) }),
       ];
       return Promise.all(requests.map(rawQ => api.get(`/logs?${rawQ}`).catch(() => ({ data: { logs: [], total: 0 } }))))
         .then(results => {
@@ -6235,7 +6239,7 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
         return null;
       })
       .finally(() => setLoading(false));
-  }, [category, page, deptId, queryBackendId, capabilityLimit, isAdvancedCapability, isAuthenticationCapability, isApiMonitoringCapability, isKernelMonitoringCapability, isNetworkActivityCapability, isRegistryCapability, isSystemChangesCapability, isPersistenceCapability, isUebaCapability, isDataSecurityCapability, isCredentialSecurityCapability, isLateralMovementCapability, isGeolocationCapability, isHashSignatureCapability, isServiceMonitoringCapability, isTimeAnomalyCapability, isScriptMonitoringCapability, supportsUnifiedLiveAnalytics, windowEnd]);
+  }, [category, page, deptId, systemId, queryBackendId, capabilityLimit, isAdvancedCapability, isAuthenticationCapability, isApiMonitoringCapability, isKernelMonitoringCapability, isNetworkActivityCapability, isRegistryCapability, isSystemChangesCapability, isPersistenceCapability, isUebaCapability, isDataSecurityCapability, isCredentialSecurityCapability, isLateralMovementCapability, isGeolocationCapability, isHashSignatureCapability, isServiceMonitoringCapability, isTimeAnomalyCapability, isScriptMonitoringCapability, supportsUnifiedLiveAnalytics, windowEnd]);
 
   const loadSystems = useCallback(() => {
     const systemCapabilityIds = [1, 2, 3, 4, 15, 17, 18, 25];
@@ -6572,7 +6576,8 @@ function CategoryModal({ title, category, deptId, capabilityId, backendId: direc
             <button onClick={onClose} style={{
               background: 'none', border: 'none',
               color: '#60a5fa', fontSize: 20, cursor: 'pointer', lineHeight: 1
-            }}>✕</button>
+            }} aria-label={systemId ? 'Return to system monitoring' : 'Close capability dashboard'}
+              title={systemId ? 'Return to system monitoring' : 'Close'}>✕</button>
           </div>
         </div>
 
