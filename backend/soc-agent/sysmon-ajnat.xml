@@ -1,0 +1,29 @@
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>sha256</HashAlgorithms>
+  <EventFiltering>
+    <ProcessCreate onmatch="exclude" />
+    <NetworkConnect onmatch="exclude" />
+    <ProcessTerminate onmatch="exclude" />
+    <ImageLoad onmatch="include">
+      <ImageLoaded condition="end with">.dll</ImageLoaded>
+      <ImageLoaded condition="contains">\Temp\</ImageLoaded>
+      <ImageLoaded condition="contains">\Downloads\</ImageLoaded>
+    </ImageLoad>
+    <CreateRemoteThread onmatch="exclude" />
+    <ProcessAccess onmatch="include">
+      <TargetImage condition="end with">\lsass.exe</TargetImage>
+      <GrantedAccess condition="is">0x1FFFFF</GrantedAccess>
+      <GrantedAccess condition="is">0x1F0FFF</GrantedAccess>
+      <GrantedAccess condition="is">0x143A</GrantedAccess>
+      <GrantedAccess condition="is">0x1438</GrantedAccess>
+    </ProcessAccess>
+    <RegistryEvent onmatch="include">
+      <TargetObject condition="contains">\CurrentVersion\Run</TargetObject>
+      <TargetObject condition="contains">\Winlogon</TargetObject>
+      <TargetObject condition="contains">\Image File Execution Options</TargetObject>
+      <TargetObject condition="contains">\Services\</TargetObject>
+    </RegistryEvent>
+    <DnsQuery onmatch="exclude" />
+    <ProcessTampering onmatch="exclude" />
+  </EventFiltering>
+</Sysmon>

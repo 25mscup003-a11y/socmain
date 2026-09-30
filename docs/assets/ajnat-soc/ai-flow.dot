@@ -1,0 +1,14 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.3", ranksep="0.6", fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=9, color="#334155", fillcolor="#f8fafc"];
+  edge [color="#7c3aed", penwidth=1.4, arrowsize=0.65];
+  source [label="Scoped Alert / Incident /\nEDR or Forensic Record"];
+  redact [label="Bound + Redact\nSecrets, email, long fields"];
+  queue [label="Persist AI Job\nBounded in-process queue"];
+  model [label="Configured Azure AI\nResponses or Chat endpoint", fillcolor="#fae8ff"];
+  validate [label="Parse strict JSON\nValidate confidence/output"];
+  result [label="Store Analysis\nSummary, MITRE, IOCs, steps"];
+  analyst [label="Analyst Review\nHuman decision", fillcolor="#dcfce7"];
+  soar [label="Approved SOAR Action", fillcolor="#fee2e2"];
+  source -> redact -> queue -> model -> validate -> result -> analyst -> soar;
+}

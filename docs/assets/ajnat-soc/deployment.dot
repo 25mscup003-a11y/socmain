@@ -1,0 +1,21 @@
+digraph G {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.3", nodesep="0.4", ranksep="0.55", fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=9, color="#334155", fillcolor="#f8fafc"];
+  edge [color="#334155", penwidth=1.3, arrowsize=0.65];
+  endpoints [label="Windows / Linux Endpoints\nand Servers", fillcolor="#dbeafe"];
+  ingress [label="TLS Reverse Proxy / Load Balancer\nRate limits + request limits"];
+  api [label="Stateless Node.js API Replicas\nREST + Socket.IO"];
+  worker [label="Alert / Detection / Archive\nWorker Pools", fillcolor="#ede9fe"];
+  broker [label="Kafka-Compatible Broker\n(optional scaled mode)", fillcolor="#fef3c7"];
+  redis [shape=cylinder, label="Redis\nSocket adapter + nonce state", fillcolor="#fef3c7"];
+  mongo [shape=cylinder, label="MongoDB\nOperational metadata"];
+  click [shape=cylinder, label="ClickHouse\nOptional event analytics", fillcolor="#fef3c7"];
+  object [shape=cylinder, label="S3-Compatible Storage\nOptional cold archive", fillcolor="#fef3c7"];
+  portals [label="Company and Superadmin\nReact Portals", fillcolor="#dcfce7"];
+  ai [label="Azure AI Endpoint\nOptional", fillcolor="#fae8ff"];
+  endpoints -> ingress -> api;
+  portals -> ingress;
+  api -> mongo; api -> redis; api -> broker; api -> ai;
+  broker -> worker; worker -> mongo; worker -> click; worker -> object;
+  mongo -> api; click -> api;
+}

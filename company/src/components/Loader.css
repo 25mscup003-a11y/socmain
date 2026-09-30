@@ -1,0 +1,92 @@
+/* Loader Container Styles */
+.loader-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+}
+
+/* Fullscreen Loader */
+.loader-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(10, 14, 39, 0.95) 0%, rgba(15, 21, 83, 0.95) 100%);
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+/* Inline Loader */
+.loader-inline {
+  min-height: 200px;
+  background-color: transparent;
+}
+
+/* Spinner Animation */
+.loader-spinner {
+  border: 3px solid rgba(59, 130, 246, 0.2);
+  border-top: 3px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1.2s linear infinite;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.3), inset 0 0 10px rgba(59, 130, 246, 0.05);
+}
+
+/* Spinner Sizes */
+.loader-small {
+  width: 32px;
+  height: 32px;
+}
+
+.loader-medium {
+  width: 56px;
+  height: 56px;
+}
+
+.loader-large {
+  width: 80px;
+  height: 80px;
+}
+
+/* Spinner Animation */
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Loader Message */
+.loader-message {
+  color: #60a5fa;
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0;
+  text-align: center;
+  letter-spacing: 0.3px;
+}
+
+/* Fullscreen Loader Message */
+.loader-fullscreen .loader-message {
+  color: #e0f2fe;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+/* Smooth fade in/out */
+.loader-container {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

@@ -1,0 +1,31 @@
+digraph G {
+  graph [rankdir=TB, bgcolor="transparent", pad="0.3", nodesep="0.45", ranksep="0.55", fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=10, color="#334155", fillcolor="#f8fafc"];
+  edge [penwidth=1.5, arrowsize=0.7, fontname="DejaVu Sans", fontsize=8];
+  traffic [label="Network Traffic", fillcolor="#dbeafe"];
+  subgraph cluster_linux {
+    label="Linux"; color="#16a34a"; style="rounded";
+    nft [label="nftables INPUT/OUTPUT\nNFQUEUE"];
+    suril [label="Suricata Inline Engine\nalert/pass/drop/reject"];
+    zeek [label="Zeek Passive Protocol\nTelemetry", fillcolor="#ecfccb"];
+    fwlin [label="Native Firewall\nPersistent IOC/IP blocks", fillcolor="#fee2e2"];
+    nft -> suril [label="queued packet"];
+    suril -> nft [label="verdict"];
+    suril -> zeek [style=dashed, label="parallel telemetry"];
+    suril -> fwlin [style=dashed, label="alert response"];
+  }
+  subgraph cluster_windows {
+    label="Windows / Windows Server"; color="#2563eb"; style="rounded";
+    wd [label="WinDivert NETWORK or\nNETWORK_FORWARD"];
+    suriw [label="WinDivert-enabled Suricata\nalert/pass/drop/reject"];
+    deffw [label="Windows Defender Firewall\nPersistent IOC/IP blocks", fillcolor="#fee2e2"];
+    wd -> suriw [label="intercepted packet"];
+    suriw -> wd [label="verdict/reinject"];
+    suriw -> deffw [style=dashed, label="alert response"];
+  }
+  traffic -> nft; traffic -> wd;
+  suril -> siem [label="EVE JSON"];
+  zeek -> siem [label="JSON logs"];
+  suriw -> siem [label="EVE JSON"];
+  siem [label="AJNAT SIEM / Correlation / SOAR", fillcolor="#ede9fe"];
+}

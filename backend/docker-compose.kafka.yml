@@ -1,0 +1,5 @@
+# Backward-compatible entry point. The canonical AJNAT Kafka stack now lives
+# in ../kafka so configuration, operations scripts, and documentation stay
+# together.
+include:
+  - ../kafka/docker-compose.yml

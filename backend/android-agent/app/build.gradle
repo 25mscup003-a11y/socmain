@@ -1,0 +1,33 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.soc.agent"
+    compileSdk 35
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    defaultConfig {
+        applicationId "com.soc.agent"
+        minSdk 23
+        targetSdk 35
+        // Keep versionCode monotonic so devices with an older APK can install
+        // this release even though the product-facing version was reset.
+        versionCode 17
+        versionName "0.1.4"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
+    // Android's org.json implementation is a runtime stub in local JVM tests.
+    testImplementation "org.json:json:20240303"
+}

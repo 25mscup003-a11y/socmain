@@ -1,0 +1,66 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+android_app {
+    name: "AJNATPrivilegedAgent",
+    manifest: "aosp/privileged/AndroidManifest.xml",
+    srcs: ["app/src/main/java/**/*.java"],
+    resource_dirs: ["app/src/main/res"],
+    asset_dirs: ["app/src/main/assets"],
+    certificate: "platform",
+    privileged: true,
+    product_specific: true,
+    platform_apis: true,
+    min_sdk_version: "23",
+    aaptflags: ["--version-code", "17", "--version-name", "0.1.4"],
+    optimize: {
+        enabled: true,
+        shrink: true,
+    },
+    required: ["privapp-permissions-com.soc.agent.xml", "ajnatd"],
+}
+
+prebuilt_etc {
+    name: "privapp-permissions-com.soc.agent.xml",
+    src: "aosp/permissions/privapp-permissions-com.soc.agent.xml",
+    sub_dir: "permissions",
+    filename_from_src: true,
+    product_specific: true,
+}
+
+cc_binary {
+    name: "ajnatd",
+    product_specific: true,
+    init_rc: ["aosp/init/ajnatd.rc"],
+    srcs: [
+        "native/daemon/main.cpp",
+        "native/daemon/collector_manager.cpp",
+        "native/daemon/event_dispatcher.cpp",
+        "native/daemon/health_monitor.cpp",
+    ],
+    local_include_dirs: ["native/include"],
+    shared_libs: ["libbase", "libcutils", "liblog"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c++17"],
+}
+
+cc_test_host {
+    name: "ajnatd_event_dispatcher_test",
+    srcs: [
+        "native/tests/event_dispatcher_test.cpp",
+        "native/daemon/event_dispatcher.cpp",
+    ],
+    local_include_dirs: ["native/include"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c++17"],
+}
+
+cc_test_host {
+    name: "ajnatd_health_monitor_test",
+    srcs: [
+        "native/tests/health_monitor_test.cpp",
+        "native/daemon/health_monitor.cpp",
+        "native/daemon/event_dispatcher.cpp",
+    ],
+    local_include_dirs: ["native/include"],
+    cflags: ["-Wall", "-Wextra", "-Werror", "-std=c++17"],
+}

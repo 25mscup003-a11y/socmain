@@ -1,0 +1,120 @@
+name: backend
+
+# Local/private AJNAT Kafka stack. The host listener is loopback-only so AJNAT
+# agents can never bypass the authenticated Backend API and publish directly.
+services:
+  kafka:
+    image: ${KAFKA_IMAGE:-confluentinc/cp-kafka:7.6.1}
+    container_name: soc-kafka
+    hostname: kafka
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_HOST_BIND:-127.0.0.1}:${KAFKA_HOST_PORT:-19092}:19092"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,HOST://0.0.0.0:19092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,HOST://localhost:${KAFKA_HOST_PORT:-19092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: ${KAFKA_ALERT_PARTITIONS:-6}
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 536870912
+      KAFKA_LOG_CLEANUP_POLICY: delete
+      KAFKA_COMPRESSION_TYPE: producer
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+    networks:
+      - default
+
+  kafka-init:
+    image: ${KAFKA_IMAGE:-confluentinc/cp-kafka:7.6.1}
+    container_name: soc-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        create_topic() {
+          kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "$${1}" --partitions "$${2}" --replication-factor 1 \
+            --config cleanup.policy=delete --config retention.ms="$${3}" \
+            --config min.insync.replicas=1
+        }
+        create_topic "${BROKER_ALERT_TOPIC:-soc.alerts.v1}" "${KAFKA_ALERT_PARTITIONS:-6}" "${KAFKA_RETENTION_MS:-604800000}"
+        create_topic "${BROKER_ALERT_RETRY_TOPIC:-soc.alerts.retry.v1}" "${KAFKA_ALERT_PARTITIONS:-6}" "${KAFKA_RETENTION_MS:-604800000}"
+        create_topic "${BROKER_ALERT_DLQ_TOPIC:-soc.alerts.dlq.v1}" "${KAFKA_ALERT_PARTITIONS:-6}" "${KAFKA_DLQ_RETENTION_MS:-2592000000}"
+        create_topic "${KAFKA_HEALTH_TOPIC:-soc.health.v1}" 1 86400000
+        kafka-topics --bootstrap-server kafka:9092 --list
+    networks:
+      - default
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: soc-kafka-ui
+    profiles: [tools]
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${KAFKA_UI_HOST_PORT:-18080}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ajnat-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - default
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: soc-kafka-exporter
+    profiles: [tools]
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["--kafka.server=kafka:9092"]
+    ports:
+      - "127.0.0.1:${KAFKA_EXPORTER_HOST_PORT:-19308}:9308"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - default
+
+networks:
+  default:
+    name: backend_default
+
+volumes:
+  kafka-data:
+    name: backend_kafka-data

@@ -1,0 +1,7 @@
+﻿{
+    "timestamp":  "2026-08-25T03:26:53.2711437+05:30",
+    "repaired":  true,
+    "service":  "Running",
+    "healthExitCode":  0,
+    "message":  "ACL repair, service start, and agent health check succeeded."
+}

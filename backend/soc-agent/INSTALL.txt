@@ -1,0 +1,204 @@
+╔══════════════════════════════════════════════════════════════════╗
+║          SOC Agent v0.1.10 — Installation Guide                 ║
+╚══════════════════════════════════════════════════════════════════╝
+
+MODULES INCLUDED:
+  ✅ EDR  — Endpoint Detection & Response (process monitoring, auto-kill)
+  ✅ IDS  — Intrusion Detection System (port scans, C2, brute-force)
+  ✅ IPS  — Intrusion Prevention System v3.0 (auto-block + webhook threat intel)
+  ✅ IPS Webhook — Attack detection: SQLi, XSS, Log4Shell, SSRF, C2, 16 types
+  ✅ Firewall Control — Open/close ports, block/unblock IPs from dashboard
+  ✅ FIM  — File Integrity Monitoring
+  ✅ Network Monitor — Live connection analysis + VT enrichment
+  ✅ USB Monitor — Removable device tracking
+  ✅ YARA Scanner — Malware signature scanning
+  ✅ Log Collector — OS log ingestion + rule matching
+  ✅ Heartbeat — 60-second keepalive with subscription check
+  ✅ Suricata/Zeek Parser — JSON network telemetry ingestion
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PREREQUISITES (all platforms)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  - Python 3.8 or later
+  - pip3 (usually bundled with Python)
+  - Internet access to reach your SOC server
+  - Admin / root privileges for service installation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LINUX (Debian / Ubuntu / Kali / Mint)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — Install dependencies
+  sudo apt update
+  sudo apt install -y python3 python3-pip
+
+STEP 2 — Install Python packages
+  pip3 install -r requirements.txt --break-system-packages
+  # Or in a venv:
+  #   python3 -m venv /opt/soc-venv && source /opt/soc-venv/bin/activate
+  #   pip install -r requirements.txt
+
+STEP 3 — Configure
+  Edit: config/company_config.json
+  Set:  server_url  →  https://your-soc-server.com
+        agent_key   →  (from Dashboard → Systems → Download Agent)
+
+STEP 4 — Test connection (no root needed)
+  python3 agent.py test
+
+STEP 5 — Install as system service
+  sudo python3 agent.py install
+
+STEP 6 — Verify
+  systemctl status soc-agent
+  journalctl -u soc-agent -f
+
+File paths:
+  Service:  /etc/systemd/system/soc-agent.service
+  Logs:     /var/log/soc-agent/agent.log  (rotates at 10 MB)
+  Config:   config/company_config.json
+
+Service management:
+  sudo systemctl start   soc-agent
+  sudo systemctl stop    soc-agent
+  sudo systemctl restart soc-agent
+  sudo systemctl status  soc-agent
+  journalctl -u soc-agent -f          # live log tail
+
+Required permissions:
+  - Root required to: install systemd service, read /var/log/, run iptables (IPS/Firewall)
+  - Without root: agent runs but IPS/Firewall blocking will not work
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LINUX (RHEL / CentOS / Fedora / Rocky Linux)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  sudo dnf install python3 python3-pip   # RHEL 8+
+  pip3 install -r requirements.txt
+  sudo python3 agent.py install
+  systemctl status soc-agent
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WINDOWS (10 / 11 / Server 2016+)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — Install Python from https://python.org (check "Add to PATH")
+
+STEP 2 — Open PowerShell as Administrator, navigate to agent folder
+
+STEP 3 — Install dependencies
+  pip install -r requirements.txt
+
+STEP 4 — Configure
+  Edit: config\company_config.json
+  Set server_url and agent_key
+
+STEP 5 — Test connection
+  python agent.py test
+
+STEP 6 — Install as Windows Service (uses NSSM, auto-downloaded)
+  python agent.py install
+
+  Note: If NSSM is not found, the installer downloads it automatically.
+  Alternatively, run manually: python agent.py run
+
+STEP 7 — Verify
+  Get-Service SOCAgent
+  # Or: Services.msc → look for "SOC Security Agent"
+
+File paths:
+  Logs:   C:\ProgramData\SOCAgent\logs\agent.log
+  Config: config\company_config.json
+
+Service management (PowerShell as Admin):
+  Start-Service SOCAgent
+  Stop-Service SOCAgent
+  Restart-Service SOCAgent
+  Get-Service SOCAgent
+
+Required permissions:
+  - Administrator required to: install service, run netsh firewall rules (IPS/Firewall)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+macOS (12 Monterey+ recommended)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — Install Python (if not already)
+  brew install python    # via Homebrew
+  # or download from https://python.org
+
+STEP 2 — Install dependencies
+  pip3 install -r requirements.txt
+
+STEP 3 — Configure
+  Edit: config/company_config.json
+
+STEP 4 — Test
+  python3 agent.py test
+
+STEP 5 — Install as LaunchDaemon
+  sudo python3 agent.py install
+
+STEP 6 — Verify
+  launchctl list | grep com.soc.agent
+
+File paths:
+  Service:  /Library/LaunchDaemons/com.soc.agent.plist
+  Logs:     /Library/Logs/SOCAgent/agent.log
+  Config:   config/company_config.json
+
+Service management:
+  sudo launchctl load   /Library/LaunchDaemons/com.soc.agent.plist
+  sudo launchctl unload /Library/LaunchDaemons/com.soc.agent.plist
+
+Required permissions:
+  - Root required for LaunchDaemon installation
+  - Grant Full Disk Access to Python in: System Settings → Privacy & Security
+  - IPS/Firewall (pfctl) requires root
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANDROID
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+APK install
+  1. Download soc-agent-android.apk from Dashboard → Download Agent
+  2. Enable "Install unknown apps" in Android Settings → Apps
+  3. Transfer the APK to the device and open it, or run:
+       adb install soc-agent-android.apk
+  4. Open SOC Agent once to start the foreground service
+  5. The APK includes company_config.json and sends heartbeat automatically
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONFIG FILE (config/company_config.json)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "server_url":                 "https://your-soc-server.com",
+  "agent_key":                  "<from dashboard>",
+  "company_id":                 "<auto-filled>",
+  "system_id":                  "<auto-filled>",
+  "heartbeat_interval_seconds": 60,
+  "edr_enabled":                true,
+  "ids_enabled":                true,
+  "ips_enabled":                true,
+  "firewall_enabled":           true,
+  "yara_enabled":               true,
+  "virustotal_api_key":         ""   // optional — leave blank if not using VT
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+API URL & API KEY SETUP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Log into your SOC Dashboard
+2. Go to: Settings → Systems → Add System → Download Agent
+3. Download the bundle for your OS — config is pre-filled automatically
+4. If configuring manually:
+     server_url = "http://<your-server-ip>:<port>"   (e.g. http://192.168.1.100:5000)
+     agent_key  = the 64-char hex key shown in Dashboard → Systems → your system
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  python3 agent.py test          → runs a full connectivity check
+  journalctl -u soc-agent -f    → live log tail (Linux)
+  tail -f /var/log/soc-agent/agent.log
+
+Common issues:
+  ❌ "Unknown agentKey"       → Re-download config from Dashboard → Systems
+  ❌ "Connection refused"     → Check server_url is correct and backend is running
+  ❌ "requests not installed" → pip3 install -r requirements.txt
+  ❌ IPS not blocking         → Run as root/Administrator

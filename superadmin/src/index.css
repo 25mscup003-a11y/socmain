@@ -1,0 +1,136 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --soc-bg: #070b14;
+  --soc-card: #0e1726;
+  --soc-card-hover: #131f33;
+  --soc-border: #1b2a42;
+  --soc-border-hi: #2a3e5e;
+  --soc-cyan: #00f2fe;
+  --soc-blue: #3b82f6;
+  --soc-danger: #ef4444;
+  --soc-warning: #f59e0b;
+  --soc-success: #10b981;
+  --soc-text: #f1f5f9;
+  --soc-text-dim: #94a3b8;
+  --soc-text-mute: #475569;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--soc-bg);
+  color: var(--soc-text);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #080d1a;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Animations */
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.4);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(0, 242, 254, 0.8);
+  }
+}
+
+@keyframes pulseRed {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.9);
+  }
+}
+
+@keyframes radarSweep {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(1000%);
+  }
+}
+
+/* Helper Utilities */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: #38bdf8;
+  font-size: 14px;
+}
+
+input:focus,
+select:focus,
+button:focus {
+  outline: none;
+}
+
+.soc-glass-panel {
+  background: rgba(14, 23, 38, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--soc-border);
+  border-radius: 12px;
+  transition: all 0.25s ease;
+}
+
+.soc-glass-panel:hover {
+  border-color: var(--soc-border-hi);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+
+.soc-glowing-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.soc-glowing-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 242, 254, 0.5), transparent);
+}
+
+.soc-font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', ui-monospace, SFMono-Regular, monospace;
+}

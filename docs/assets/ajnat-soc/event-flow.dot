@@ -1,0 +1,22 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.25", ranksep="0.5", fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=9, color="#334155", fillcolor="#f8fafc"];
+  edge [color="#0f766e", penwidth=1.4, arrowsize=0.65, fontname="DejaVu Sans", fontsize=8];
+  capture [label="1. Capture\nEndpoint / IDS / WAF / Auth"];
+  local [label="2. Local Detection\nRule, anomaly, YARA"];
+  spool [label="3. Durable Agent Spool\nSQLite WAL + retry"];
+  auth [label="4. Authenticate & Validate\nSignature, timestamp, nonce, limits"];
+  norm [label="5. Normalize\nCanonical security fields"];
+  enrich [label="6. Enrich\nAsset + IOC + geo"];
+  correlate [label="7. Correlate\nRules + windows + dedup"];
+  alert [label="8. Alert / Incident\nRisk + evidence + timeline"];
+  action [shape=diamond, label="9. Response?", fillcolor="#fef3c7"];
+  auto [label="Automatic\nSOAR/local policy", fillcolor="#fee2e2"];
+  approval [label="Analyst approval\n& audit", fillcolor="#ede9fe"];
+  endpoint [label="10. Enforce\nDrop, block, isolate, kill, quarantine", fillcolor="#dcfce7"];
+  capture -> local -> spool -> auth -> norm -> enrich -> correlate -> alert -> action;
+  action -> auto [label="approved policy"];
+  action -> approval [label="approval required"];
+  auto -> endpoint; approval -> endpoint;
+  endpoint -> alert [label="result/ack", style=dashed];
+}

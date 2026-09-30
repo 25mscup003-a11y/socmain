@@ -1,0 +1,36 @@
+# ── Core (required) ──────────────────────────────────────────────────────────
+requests>=2.31.0          # HTTP communication with SOC server
+urllib3<2                 # Python 3.9 compatible; newer releases use Python 3.10 typing syntax
+psutil>=5.9.0             # System info: CPU, RAM, network, processes, disks
+cryptography>=42.0.0      # AES-256-GCM encryption for sensitive data at rest
+
+# ── File monitoring (recommended — real-time, event-driven) ──────────────────
+watchdog>=3.0.0           # FIM: file system change events (inotify on Linux)
+
+# ── Malware scanning ─────────────────────────────────────────────────────────
+yara-python>=4.3.0        # YARA rule scanning for malware signatures
+
+# ── Linux USB monitoring (real-time udev events) ──────────────────────────────
+pyudev>=0.24.0; sys_platform == 'linux'
+
+# ── Windows only ─────────────────────────────────────────────────────────────
+pywin32>=306; sys_platform == 'win32'
+wmi>=1.5.1; sys_platform == 'win32'
+
+# ── macOS native CoreLocation bridge ─────────────────────────────────────────
+pyobjc-framework-CoreLocation>=10.0; sys_platform == 'darwin'
+
+# ── Command listener (real-time commands from dashboard via Socket.IO) ────────
+python-socketio[client]>=5.0.0
+websocket-client>=1.0.0
+
+# ── Privacy-safe input activity rates (never records key values/text) ────────
+pynput>=1.7.6
+
+# ── EDR / IDS / IPS (auto-installed above via psutil) ────────────────────────
+# psutil covers: process list, network connections, CPU/RAM monitoring
+# subprocess (stdlib) handles: iptables, netsh, pfctl firewall rules
+# No extra packages needed for EDR/IDS/IPS — all use stdlib + psutil
+
+# ── Optional: VirusTotal enrichment ─────────────────────────────────────────
+# No extra packages needed — uses requests (already required above)

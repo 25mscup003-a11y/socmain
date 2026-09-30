@@ -1,0 +1,100 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.join(__dirname, '..');
+const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
+
+test('UEBA APIs are mounted, authenticated, tenant scoped and bounded', () => {
+  const server = read('src/server.js');
+  const routes = read('src/routes/ueba.routes.js');
+  assert.match(server, /app\.use\('\/api\/ueba', uebaRoutes\)/);
+  assert.match(routes, /router\.use\(authenticate, requireAnalyst\)/);
+  assert.match(routes, /router\.get\('\/dashboard'/);
+  assert.match(routes, /router\.get\('\/baseline'/);
+  assert.match(routes, /router\.get\('\/baseline\/:systemId'/);
+  assert.match(routes, /router\.get\('\/logs'/);
+  assert.match(routes, /router\.get\('\/log\/:id'/);
+  assert.match(routes, /router\.post\('\/respond', requireCompanyAdmin/);
+  assert.match(routes, /router\.get\('\/profile-locks', requireProfileLockManager/);
+  assert.match(routes, /router\.get\('\/profile-locks\/:id', requireProfileLockManager/);
+  assert.match(routes, /router\.post\('\/profile-locks\/:id\/unlock', requireProfileLockManager/);
+  assert.match(routes, /companyScope\(req/);
+  assert.match(routes, /integer\(req\.query\.limit, 250, 1, 500\)/);
+  assert.match(routes, /maxTimeMS: 15000/);
+  assert.match(routes, /BASELINE_WINDOW_DAYS = 30/);
+  assert.match(routes, /limit, 60, 1, 200/);
+  assert.match(routes, /hint: \{ companyId: 1, capabilityIds: 1, createdAt: -1 \}/);
+});
+
+test('UEBA query uses normalized capability evidence and rejects generic Suricata volume', () => {
+  const routes = read('src/routes/ueba.routes.js');
+  const baselineGate = read('src/utils/uebaBaseline.js');
+  assert.match(routes, /uebaCapabilityFilter\(\)/);
+  assert.match(routes, /behaviorCategory/);
+  assert.doesNotMatch(routes, /SURICATA_2210045/);
+  assert.match(routes, /isSynthetic: \{ \$ne: true \}/);
+  assert.match(routes, /observedDates:\s*\{ \$addToSet:/);
+  assert.match(routes, /total:\s*Number\(summary\.total \|\| 0\)/);
+  assert.match(routes, /inputKeyboardRate:\s*\{ \$avg:/);
+  assert.match(routes, /inputMouseRate:\s*\{ \$avg:/);
+  assert.match(baselineGate, /observedDates:\s*\{ \$addToSet:/);
+  assert.match(baselineGate, /row\.observedDates\.length/);
+  assert.match(baselineGate, /hint:\s*\{ companyId: 1, capabilityIds: 1, createdAt: -1 \}/);
+  assert.doesNotMatch(baselineGate, /elapsedDays|now\.getTime\(\)\s*-\s*new Date\(row\.firstSeen/);
+});
+
+test('agent, ingestion and websocket retain normalized UEBA metadata', () => {
+  const agent = read('soc-agent/agent.py');
+  const detector = read('soc-agent/detectors/anomaly.py');
+  const inputCollector = read('soc-agent/collectors/input_behavior.py');
+  const sender = read('soc-agent/core/sender.py');
+  const ingestion = read('src/routes/alert.routes.js');
+  const model = read('src/models/Alert.model.js');
+  assert.match(agent, /AnomalyDetector.*config=config/);
+  assert.match(detector, /'capabilityIds': \[11\]/);
+  assert.match(detector, /'behavior_category'/);
+  assert.match(detector, /'ueba_confidence'/);
+  assert.match(inputCollector, /input_keyboard_rate/);
+  assert.match(inputCollector, /aggregate_counts_only/);
+  assert.doesNotMatch(inputCollector, /typed_text|key_value|cursor_x|cursor_y/);
+  assert.match(sender, /'behaviorCategory'/);
+  assert.match(sender, /'inputKeyboardRate'/);
+  assert.match(ingestion, /normalizeUebaTelemetry/);
+  assert.match(ingestion, /emit\('ueba:event'/);
+  assert.match(model, /behaviorCategory:/);
+  assert.match(model, /peerDeviationScore:/);
+  assert.match(model, /inputUserVerified:/);
+  const lockModel = read('src/models/UebaProfileLockEvent.model.js');
+  const lockService = read('src/services/uebaProfileLock.service.js');
+  assert.match(lockModel, /alertId:.*unique: true/);
+  assert.match(lockService, /UEBA_INPUT_PROFILE_MISMATCH/);
+  assert.match(lockService, /createVerifiedProfileMismatchLock/);
+  assert.match(lockService, /role: 'company_admin'/);
+  assert.match(lockService, /role: 'department_admin'/);
+  assert.match(lockService, /role: 'soc_manager'/);
+});
+
+test('capability 11 UI uses dedicated realtime API and shared report format', () => {
+  const page = read('../company/src/pages/edrdashbordpage/Behavioral Analytics (UEBA).jsx');
+  const dashboard = read('../company/src/pages/EDRDashboardDetails.jsx');
+  const reports = read('../company/src/pages/edrdashbordpage/CapabilityReportsPanel.jsx');
+  assert.match(page, /api\.get\('\/ueba\/dashboard'/);
+  assert.match(page, /api\.get\('\/ueba\/baseline'/);
+  assert.match(page, /Agent Baseline Cards/);
+  assert.match(page, /OPEN MONITORING DASHBOARD/);
+  assert.match(page, /Mouse & Keyboard Activity|Avg typing/);
+  assert.match(page, /socket\.on\('ueba:event'/);
+  assert.match(page, /<CapabilityReportsPanel capabilityId=\{11\} alerts=\{alerts\}/);
+  assert.match(reports, /11:\s*\{[\s\S]*?title:\s*'Behavioral Analytics \(UEBA\)'/);
+  assert.match(dashboard, /import \{ UebaDashboardPanel \} from '\.\/edrdashbordpage\/Behavioral Analytics \(UEBA\)'/);
+  assert.match(dashboard, /api\.get\('\/ueba\/dashboard'/);
+  assert.match(dashboard, /socket\.on\('ueba:event'/);
+  assert.doesNotMatch(page, /john\.doe|185\.220\.101\.5|ajay\.kumar|1,248/);
+  assert.doesNotMatch(dashboard, /ueba-fallback/);
+  const profileLocks = read('../company/src/pages/ProfileLockEventsPage.jsx');
+  assert.match(profileLocks, /\/ueba\/profile-locks/);
+  assert.match(profileLocks, /Unlock Account/);
+  assert.doesNotMatch(profileLocks, /Verification required: anomaly data is a risk signal/);
+});

@@ -1,0 +1,3 @@
+/product/bin/ajnatd    u:object_r:ajnatd_exec:s0
+/dev/socket/ajnatd     u:object_r:ajnatd_socket:s0
+/data/misc/ajnat(/.*)? u:object_r:ajnatd_data_file:s0

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">SOC Agent</string>
+    <string name="device_admin_description">Protects the managed SOC Agent from unauthorized removal.</string>
+</resources>

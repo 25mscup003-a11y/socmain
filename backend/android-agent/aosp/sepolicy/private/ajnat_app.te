@@ -1,0 +1,6 @@
+type ajnat_app, domain;
+app_domain(ajnat_app)
+net_domain(ajnat_app)
+
+allow ajnat_app ajnatd_socket:sock_file write;
+allow ajnat_app ajnatd:unix_stream_socket connectto;

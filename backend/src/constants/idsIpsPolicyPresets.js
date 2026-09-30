@@ -1,0 +1,47 @@
+const POLICY_PRESETS = Object.freeze([
+  { id: 'suricata-sqli', sensor: 'suricata', name: 'Suricata — SQL Injection', description: 'Detect or block SQL injection signatures reported by Suricata.', attackPattern: 'sql injection', protocol: 'http', minimumSeverity: 'high', defaultMode: 'block', category: 'Web attacks' },
+  { id: 'suricata-xss', sensor: 'suricata', name: 'Suricata — Cross-Site Scripting', description: 'Detect or block XSS signatures in HTTP traffic.', attackPattern: 'xss', protocol: 'http', minimumSeverity: 'high', defaultMode: 'block', category: 'Web attacks' },
+  { id: 'suricata-command-injection', sensor: 'suricata', name: 'Suricata — Command Injection', description: 'Block command and OS-command injection signatures in application traffic.', attackPattern: 'command injection', protocol: 'http', minimumSeverity: 'high', defaultMode: 'block', category: 'Web attacks' },
+  { id: 'suricata-exploit', sensor: 'suricata', name: 'Suricata — RCE Exploit', description: 'Respond to remote-code-execution and critical exploit signatures.', attackPattern: 'remote code execution|rce', protocol: 'any', minimumSeverity: 'high', defaultMode: 'block', category: 'Exploitation' },
+  { id: 'suricata-exploit-kit', sensor: 'suricata', name: 'Suricata — Exploit Kit', description: 'Block known exploit-kit traffic and payload-delivery signatures.', attackPattern: 'exploit kit', protocol: 'http', minimumSeverity: 'high', defaultMode: 'block', category: 'Exploitation' },
+  { id: 'suricata-http-attacks', sensor: 'suricata', name: 'Suricata — HTTP Attacks', description: 'Block high-confidence malicious HTTP request and response signatures.', attackPattern: 'http attack|web attack', protocol: 'http', minimumSeverity: 'high', defaultMode: 'block', category: 'Web attacks' },
+  { id: 'suricata-malware', sensor: 'suricata', name: 'Suricata — Malware Traffic', description: 'Respond to malware download and command-and-control signatures.', attackPattern: 'malware', protocol: 'any', minimumSeverity: 'high', defaultMode: 'block', category: 'Malware & C2' },
+  { id: 'suricata-scan', sensor: 'suricata', name: 'Suricata — Port Scan', description: 'Detect reconnaissance and port-scanning signatures.', attackPattern: 'port scan', protocol: 'tcp', minimumSeverity: 'medium', defaultMode: 'block', category: 'Reconnaissance' },
+  { id: 'suricata-brute-force', sensor: 'suricata', name: 'Suricata — Brute Force', description: 'Block repeated authentication and credential-guessing signatures.', attackPattern: 'brute force', protocol: 'any', minimumSeverity: 'high', defaultMode: 'block', category: 'Authentication' },
+  { id: 'suricata-ssh-brute-force', sensor: 'suricata', name: 'Suricata — SSH Brute Force', description: 'Block SSH credential guessing and repeated login attempts.', attackPattern: 'ssh brute force', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'block', category: 'Authentication', destinationPort: 22 },
+  { id: 'suricata-rdp-brute-force', sensor: 'suricata', name: 'Suricata — RDP Brute Force', description: 'Block RDP credential guessing and repeated login attempts.', attackPattern: 'rdp brute force', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'block', category: 'Authentication', destinationPort: 3389 },
+  { id: 'suricata-smb-exploit', sensor: 'suricata', name: 'Suricata — SMB Exploit', description: 'Block SMB exploit, lateral-movement and malicious SMB signatures.', attackPattern: 'smb exploit', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'block', category: 'Lateral movement', destinationPort: 445 },
+  { id: 'suricata-ftp-attack', sensor: 'suricata', name: 'Suricata — FTP Attack', description: 'Block FTP exploit, brute-force and malicious command signatures.', attackPattern: 'ftp', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'block', category: 'Application attacks', destinationPort: 21 },
+  { id: 'suricata-dos', sensor: 'suricata', name: 'Suricata — DoS', description: 'Respond to denial-of-service and flooding signatures.', attackPattern: 'denial of service', protocol: 'any', minimumSeverity: 'high', defaultMode: 'block', category: 'Availability' },
+  { id: 'suricata-ddos', sensor: 'suricata', name: 'Suricata — DDoS Monitoring', description: 'Detect distributed flooding indicators; upstream mitigation may still be required.', attackPattern: 'ddos', protocol: 'any', minimumSeverity: 'high', defaultMode: 'detect', category: 'Availability' },
+  { id: 'windivert-port-scan-guard', sensor: 'suricata', enforcement: 'windivert', supportedPlatforms: ['windows'], name: 'WinDivert — Port Scan Guard', description: 'Detect or drop rapid inbound TCP SYN scans before they reach Windows services.', attackPattern: 'port scan', protocol: 'tcp', minimumSeverity: 'medium', defaultMode: 'block', category: 'Windows network protection' },
+  { id: 'windivert-rdp-brute-force-guard', sensor: 'suricata', enforcement: 'windivert', supportedPlatforms: ['windows'], name: 'WinDivert — RDP Brute-Force Guard', description: 'Detect or drop repeated inbound connection attempts against Windows RDP.', attackPattern: 'rdp brute force', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'block', category: 'Windows remote access', destinationPort: 3389 },
+  { id: 'windivert-smb-exploit-guard', sensor: 'suricata', enforcement: 'windivert', supportedPlatforms: ['windows'], name: 'WinDivert — SMB Exploit Guard', description: 'Detect or drop suspicious inbound SMB1 exploit traffic on TCP 445.', attackPattern: 'smb exploit', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'block', category: 'Windows lateral movement', destinationPort: 445 },
+  { id: 'windivert-syn-flood-guard', sensor: 'suricata', enforcement: 'windivert', supportedPlatforms: ['windows'], name: 'WinDivert — SYN Flood Guard', description: 'Detect or drop high-rate inbound TCP SYN floods at the Windows packet layer.', attackPattern: 'syn flood|denial of service', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'block', category: 'Windows availability' },
+  { id: 'windivert-c2-egress-guard', sensor: 'suricata', enforcement: 'windivert', supportedPlatforms: ['windows'], name: 'WinDivert — C2 Egress Guard', description: 'Detect outbound connection attempts to commonly abused command-and-control ports.', attackPattern: 'command and control|c2', protocol: 'tcp', minimumSeverity: 'high', defaultMode: 'detect', category: 'Windows malware & C2' },
+  { id: 'zeek-notice', sensor: 'zeek', name: 'Zeek — Security Notice', description: 'Create an IDS response for high-confidence Zeek notices.', attackPattern: 'notice', protocol: 'any', minimumSeverity: 'medium', defaultMode: 'detect', category: 'Behavioral monitoring' },
+  { id: 'zeek-weird', sensor: 'zeek', name: 'Zeek — Protocol Anomaly', description: 'Detect unusual or malformed protocol behavior from weird.log.', attackPattern: 'weird', protocol: 'any', minimumSeverity: 'medium', defaultMode: 'detect', category: 'Protocol anomalies' },
+  { id: 'zeek-dns-tunnel', sensor: 'zeek', name: 'Zeek — DNS Tunneling', description: 'Detect suspected DNS tunneling and covert DNS traffic.', attackPattern: 'dns tunnel', protocol: 'dns', minimumSeverity: 'high', defaultMode: 'detect', category: 'DNS security' },
+  { id: 'zeek-c2', sensor: 'zeek', name: 'Zeek — Botnet C2', description: 'Detect command-and-control observations and known C2 behavior.', attackPattern: 'command and control|c2', protocol: 'any', minimumSeverity: 'high', defaultMode: 'detect', category: 'Malware & C2' },
+  { id: 'zeek-beaconing', sensor: 'zeek', name: 'Zeek — Beaconing', description: 'Detect periodic callback and beaconing behavior for investigation.', attackPattern: 'beacon', protocol: 'any', minimumSeverity: 'high', defaultMode: 'detect', category: 'Malware & C2' },
+  { id: 'zeek-arp-spoofing', sensor: 'zeek', name: 'Zeek — ARP Spoofing', description: 'Detect ARP/MAC inconsistencies and suspected local-network spoofing.', attackPattern: 'arp spoof', protocol: 'any', minimumSeverity: 'high', defaultMode: 'detect', category: 'Layer 2 attacks' },
+  { id: 'zeek-data-exfiltration', sensor: 'zeek', name: 'Zeek — Data Exfiltration', description: 'Detect unusual outbound volume and suspected data-exfiltration behavior.', attackPattern: 'exfiltration', protocol: 'any', minimumSeverity: 'high', defaultMode: 'detect', category: 'Data loss' },
+  { id: 'zeek-tls', sensor: 'zeek', name: 'Zeek — Suspicious TLS', description: 'Detect suspicious TLS certificates and handshake observations.', attackPattern: 'ssl', protocol: 'https', minimumSeverity: 'medium', defaultMode: 'detect', category: 'TLS security' },
+  { id: 'zeek-file', sensor: 'zeek', name: 'Zeek — Suspicious File', description: 'Detect suspicious file-transfer observations from files.log.', attackPattern: 'file', protocol: 'any', minimumSeverity: 'high', defaultMode: 'detect', category: 'File analysis' },
+]);
+
+function publicPreset(preset) {
+  return {
+    ...preset,
+    supportedPlatforms: preset.supportedPlatforms
+      || (preset.sensor === 'zeek' ? ['linux'] : ['linux', 'windows', 'macos']),
+  };
+}
+
+function effectivePresetMode(preset, requestedMode) {
+  if (preset?.sensor === 'zeek') return 'detect';
+  if (requestedMode === 'block' || requestedMode === 'detect') return requestedMode;
+  return preset?.defaultMode === 'block' ? 'block' : 'detect';
+}
+
+module.exports = { POLICY_PRESETS, publicPreset, effectivePresetMode };

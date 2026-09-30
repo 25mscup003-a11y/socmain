@@ -1,0 +1,46 @@
+name: SOC validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: backend
+      - run: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=soc-agent python3 -m unittest discover -s test -p 'test_*.py' -v
+        working-directory: backend
+      - run: docker build -t soc-backend:ci backend
+
+  portals:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory: [company, superadmin]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.directory }}/package-lock.json
+      - run: npm ci
+        working-directory: ${{ matrix.directory }}
+      - run: npm run build
+        working-directory: ${{ matrix.directory }}

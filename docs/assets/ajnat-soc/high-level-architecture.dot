@@ -1,0 +1,40 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="transparent", pad="0.3", nodesep="0.35", ranksep="0.65", fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=10, color="#334155", fillcolor="#eef6ff", margin="0.14,0.10"];
+  edge [color="#2563eb", penwidth=1.5, arrowsize=0.7, fontname="DejaVu Sans", fontsize=8];
+
+  subgraph cluster_sources {
+    label="Protected Environment"; color="#94a3b8"; style="rounded,dashed";
+    win [label="Windows / Windows Server\nAJNAT Agent + Suricata/WinDivert"];
+    linux [label="Linux Servers\nAJNAT Agent + Suricata/NFQUEUE + Zeek"];
+    web [label="Web Applications\nAgent WAF / Suricata web rules"];
+    other [label="External Sources\nAPIs, feeds and integrations"];
+  }
+
+  edgegw [label="Authenticated Agent/API\nIngestion", fillcolor="#dbeafe"];
+  normalize [label="Validation, Normalization\nDeduplication & Enrichment"];
+  broker [label="Optional Kafka-Compatible\nDurable Event Broker", fillcolor="#fef3c7"];
+  detect [label="Detection, Correlation\nRisk Scoring", fillcolor="#ede9fe"];
+  mongo [shape=cylinder, label="MongoDB\nMetadata, Alerts, Cases"];
+  click [shape=cylinder, label="Optional ClickHouse\nHot/Warm Events", fillcolor="#fef3c7"];
+  archive [shape=cylinder, label="Optional S3-Compatible\nArchive", fillcolor="#fef3c7"];
+  ai [label="Optional Azure AI\nAnalysis Queue", fillcolor="#fae8ff"];
+  soar [label="SOAR, Approval\n& Response Engine", fillcolor="#fee2e2"];
+  ui [label="React Portals\nSOC / Tenant / Admin", fillcolor="#dcfce7"];
+
+  win -> edgegw; linux -> edgegw; web -> edgegw; other -> edgegw;
+  edgegw -> normalize;
+  normalize -> mongo;
+  normalize -> broker [label="broker mode"];
+  broker -> detect;
+  normalize -> detect [label="direct mode"];
+  detect -> mongo;
+  detect -> click;
+  click -> archive;
+  detect -> ai;
+  ai -> mongo;
+  detect -> soar;
+  soar -> win [label="signed command", color="#dc2626"];
+  soar -> linux [label="signed command", color="#dc2626"];
+  mongo -> ui; click -> ui;
+}

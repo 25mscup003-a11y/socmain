@@ -1,0 +1,217 @@
+/* FormField Styles */
+.form-field {
+  margin-bottom: 1.5rem;
+}
+
+/* Label */
+.form-field-label {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: #e0f2fe;
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: '-0.2px';
+}
+
+/* Required Asterisk */
+.required {
+  color: #f87171;
+  margin-left: 0.25rem;
+}
+
+/* Input Wrapper */
+.form-field-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Input/Textarea/Select */
+.form-field-input,
+.form-field-checkbox {
+  width: 100%;
+  padding: 0.875rem 1rem;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: inherit;
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, rgba(12, 26, 46, 0.5) 0%, rgba(15, 21, 53, 0.3) 100%);
+  color: #e2e8f0;
+  backdrop-filter: blur(4px);
+}
+
+.form-field-input::placeholder {
+  color: #64748b;
+}
+
+/* Checkbox */
+.form-field-checkbox {
+  width: auto;
+  padding: 0.5rem;
+  margin-right: 0.5rem;
+  accent-color: #3b82f6;
+}
+
+/* Focus State */
+.form-field-input:focus,
+.form-field-checkbox:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15), inset 0 0 8px rgba(59, 130, 246, 0.05);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.1) 0%, rgba(29, 78, 216, 0.05) 100%);
+}
+
+/* Disabled State */
+.form-field-input:disabled,
+.form-field-checkbox:disabled {
+  background: rgba(15, 23, 42, 0.3);
+  color: #64748b;
+  cursor: not-allowed;
+  opacity: 0.6;
+  border-color: rgba(30, 58, 95, 0.3);
+}
+
+/* Loading State */
+.form-field-input.loading {
+  padding-right: 2.5rem;
+}
+
+/* Error State */
+.form-field-input.error,
+.form-field-checkbox.error {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.1) 0%, rgba(127, 29, 29, 0.05) 100%);
+}
+
+.form-field-input.error:focus {
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.15), inset 0 0 8px rgba(248, 113, 113, 0.05);
+}
+
+/* Textarea */
+textarea.form-field-input {
+  resize: vertical;
+  min-height: 120px;
+}
+
+/* Select */
+select.form-field-input {
+  cursor: pointer;
+  appearance: none;
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2360a5fa' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-color: transparent;
+}
+
+/* Form Field Loader */
+.form-field-loader {
+  position: absolute;
+  right: 1rem;
+  font-size: 1.2rem;
+  color: #60a5fa;
+  animation: bounce 1.4s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.25rem);
+  }
+}
+
+/* Error Message */
+.form-field-error {
+  color: #f87171;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+  font-weight: 600;
+}
+
+/* Helper Text */
+.form-field-helper {
+  color: #64748b;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+}
+
+/* Character Count */
+.form-field-count {
+  display: block;
+  text-align: right;
+  color: #64748b;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+/* Validation Success State */
+.form-field-input.success {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.1) 0%, rgba(6, 78, 59, 0.05) 100%);
+}
+
+.form-field-input.success:focus {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15), inset 0 0 8px rgba(16, 185, 129, 0.05);
+}
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+/* Floating Label (optional enhancement) */
+.form-field.floating .form-field-label {
+  position: absolute;
+  left: 0;
+  top: -1.5rem;
+  font-size: 0.875rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .form-field {
+    margin-bottom: 1.25rem;
+  }
+
+  .form-field-input,
+  .form-field-checkbox {
+    padding: 1rem; /* Larger touch targets on mobile */
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+}
+
+/* Dark Mode Support (optional) */
+@media (prefers-color-scheme: dark) {
+  .form-field-label,
+  .form-field-helper {
+    color: #d1d5db;
+  }
+
+  .form-field-input,
+  .form-field-checkbox {
+    background-color: #1f2937;
+    color: #f3f4f6;
+    border-color: #4b5563;
+  }
+
+  .form-field-input:focus {
+    background-color: #111827;
+  }
+
+  .form-field-input:disabled {
+    background-color: #111827;
+    border-color: #374151;
+  }
+
+  .form-field-input.error {
+    background-color: #7f1d1d;
+    border-color: #fca5a5;
+  }
+
+  .form-field-input.success {
+    background-color: #064e3b;
+    border-color: #6ee7b7;
+  }
+}

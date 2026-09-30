@@ -1,0 +1,18 @@
+type ajnatd, domain;
+type ajnatd_exec, exec_type, product_file_type, file_type;
+type ajnatd_socket, file_type;
+type ajnatd_data_file, file_type, data_file_type, core_data_file_type;
+
+init_daemon_domain(ajnatd)
+net_domain(ajnatd)
+
+allow ajnatd self:unix_stream_socket create_stream_socket_perms;
+allow ajnatd self:netlink_route_socket { create bind getattr read setopt nlmsg_read };
+allow ajnatd proc:dir { open read search getattr };
+allow ajnatd proc_stat:file r_file_perms;
+allow ajnatd proc_net_type:dir r_dir_perms;
+allow ajnatd proc_net_type:file r_file_perms;
+allow ajnatd sysfs:dir { open read search getattr };
+allow ajnatd sysfs:file { open read getattr };
+allow ajnatd ajnatd_data_file:dir create_dir_perms;
+allow ajnatd ajnatd_data_file:file create_file_perms;

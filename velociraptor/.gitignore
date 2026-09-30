@@ -1,0 +1,6 @@
+*
+!.gitignore
+!client_bundles/
+client_bundles/*
+!client_bundles/windows/
+client_bundles/windows/*

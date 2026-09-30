@@ -1,0 +1,16 @@
+service ajnatd /product/bin/ajnatd
+    class main
+    user system
+    # App UIDs are allocated dynamically. DAC permits connect attempts while
+    # SELinux ajnat_app->ajnatd and SO_PEERSEC enforce the actual allowlist.
+    socket ajnatd stream 0666 system system
+    disabled
+    restart_period 5
+    priority 10
+    oom_score_adjust 200
+    rlimit nofile 256 256
+    rlimit as 268435456 268435456
+
+on property:sys.boot_completed=1
+    mkdir /data/misc/ajnat 0700 system system
+    start ajnatd
