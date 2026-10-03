@@ -1,0 +1,24 @@
+AJNAT SOC / OPERATIONAL CONTROL
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 10 / 12
+TEAMS & ACCOUNTABILITY
+Clear ownership at every stage.
+Role-based workspaces keep investigation, escalation and follow-up organized.
+SOC manager
+Priorities, assignment
+and team oversight.
+L1 analyst
+Initial review, ticket triage
+and escalation.
+L2 / L3 analysts
+Deeper investigation
+and response coordination.
+L4 threat 
+intelligence
+Indicator context and
+threat intelligence work.
+Scoped access
+Company and role context
+Case history
+Owner, decisions and actions
+Reports & audit
+Evidence for review and handover

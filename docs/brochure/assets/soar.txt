@@ -1,0 +1,124 @@
+◈
+SCDC PLATFORM
+☰
+AJNAT Demo Enterprise
+SOC Manager
+● Online
+·
+Shift Active
+▦
+Overview
+🔐
+Profile Lock / Unlock
+🛡
+EDR System Setup
+🏢
+Assigned Companies
+📡
+IDS
+🛡️
+IPS
+🔥
+Firewall
+⚡
+SOAR Catalog
+🔗
+Correlation
+👥
+Analyst Management
+◷
+Shifts
+⇄
+Assignment Queue
+↗
+Escalations
+🔔
+Alerts
+🎟
+Tickets
+⚠️
+Incidents
+⌾
+Threat Intelligence
+💬
+Contact Support
+▤
+Reports
+🛡
+Audit
+⌾
+Threat Audit
+⚙
+Profile
+analyst@example.com
+↪ Logout
+SOC Manager Dashboard
+Home
+/
+Dashboard
+/
+Soar
+◇
+0
+D
+⚡
+SOAR Command Center
+
+Security Orchestration, Automation, and Response Module — Enterprise SOC Enforcement
+
+⚡ + Build New Rule
+↻ Refresh Real-Time
+📊 SOAR Dashboard
+⚙️ Automation Rules
+🎨 Visual Rule Builder
+📘 Playbooks
+📄 Templates
+🧪 Rule Simulator
+📜 Execution History (4)
+⏳ Approval Queue (1)
+⚠️ Failed Actions (0)
+🛡️ Audit Logs (0)
+Total Rules
+12
+Active Rules
+10
+Total Executions
+4
+View logs ↗
+Successful Executions
+4
+View logs ↗
+Failed Executions
+0
+View logs ↗
+Pending Approvals
+1
+Alerts Auto-Resolved
+0
+View logs ↗
+Incidents Created
+1
+View logs ↗
+Tickets Assigned
+1
+View logs ↗
+Avg Automation Time
+910 ms
+Analyst Hours Saved
+0 hrs
+📡 Real-Time Live Execution Feed
+Open Audit ↗
+Rule / Playbook	Trigger	Status	Duration	Started
+Enrich suspicious destination	new_alert	
+COMPLETED	820ms	10:28:00 AM
+Create critical incident	new_alert	
+COMPLETED	1240ms	10:24:00 AM
+Assign Finance SOC analyst	new_alert	
+COMPLETED	650ms	10:20:00 AM
+Record investigation context	new_alert	
+COMPLETED	930ms	10:16:00 AM
+⏳ Urgent Approval Queue
+Isolate endpoint
+FIN-WS-014 · Analyst review required
+Approve
+Reject

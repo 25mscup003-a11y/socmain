@@ -1,0 +1,16 @@
+AJNAT SOC / WHY IT MATTERS
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 11 / 12
+OPERATIONAL VALUE
+Less switching. More connected context.
+Keep the investigation and the response in the same operational conversation.
+FRAGMENTED OPERATIONS WITH AJNAT SOC
+Separate asset and event views → Shared visibility across connected sources
+Manual reconstruction of related activity → Correlated events with investigation context
+Indicators checked in separate tools → Threat intelligence alongside relevant evidence
+Response decisions spread across handoffs → Owned cases, approvals and execution records
+VISIBILITY
+Know what is happening
+CONTEXT
+Understand what matters
+CONTROL
+Choose the next action

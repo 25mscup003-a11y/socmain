@@ -1,0 +1,28 @@
+AJNAT SOC / INCIDENT EXAMPLE
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 09 / 12
+ILLUSTRATIVE SCENARIO
+One endpoint. Three connected signals.
+FIN-WS-014 / Possible account compromise / Requires analyst confirmation
+01
+Failed logins
+Repeated authentication
+failures for finance.user.
+→
+02
+Suspicious execution
+PowerShell activity on
+the same endpoint.
+→
+03
+Outbound connection
+A destination that needs
+indicator enrichment.
+Connect the evidence
+Correlate the host, identity and time 
+window.
+Review the case
+Confirm scope, severity and incident 
+ownership.
+Choose the response
+Approve supported action and record its 
+result.

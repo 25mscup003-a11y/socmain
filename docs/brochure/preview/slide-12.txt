@@ -1,0 +1,16 @@
+AJNAT SOC / PILOT & NEXT STEPS
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 12 / 12
+PUT IT IN CONTEXT
+See AJNAT SOC
+in your environment.
+Start with your critical assets, relevant telemetry and a realistic incident workflow.
+01 Define the scope
+Choose endpoints, sources
+and access roles.
+02 Walk through a case
+Follow detection, investigation
+and an approved response.
+03 Agree on success
+Review coverage, evidence 
+quality
+and handover readiness.

@@ -1,0 +1,415 @@
+◈
+SCDC PLATFORM
+☰
+AJNAT Demo Enterprise
+SOC Manager
+● Online
+·
+Shift Active
+▦
+Overview
+🔐
+Profile Lock / Unlock
+🛡
+EDR System Setup
+🏢
+Assigned Companies
+📡
+IDS
+🛡️
+IPS
+🔥
+Firewall
+⚡
+SOAR Catalog
+🔗
+Correlation
+👥
+Analyst Management
+◷
+Shifts
+⇄
+Assignment Queue
+↗
+Escalations
+🔔
+Alerts
+🎟
+Tickets
+⚠️
+Incidents
+⌾
+Threat Intelligence
+💬
+Contact Support
+▤
+Reports
+🛡
+Audit
+⌾
+Threat Audit
+⚙
+Profile
+analyst@example.com
+↪ Logout
+SOC Manager Dashboard
+Home
+/
+Dashboard
+/
+Edr
+◇
+0
+D
+🛡️
+SOC AI — Endpoint Detection & Response
+Correlation Engine · MITRE ATT&CK · Threat Hunting · Incident Response
+↺ Refresh
+📊 Overview
+🖥 Endpoints
+All 31 EDR Monitoring Capabilities
+Real tenant telemetry · last 24 hours · demo/synthetic rows excluded
+Reporting: 18
+No Events: 13
+24h Reporting: 18/31
+▱
+1
+↗
+REPORTING
+PROCESS ACTIVITY EVENTS (LAST 24H)
+2,480
+Process Activity Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: edr · AJNAT Agent
+▱
+2
+↗
+REPORTING
+LAST 24H EVENT COUNT
+630
+File Activity Monitoring (FIM)
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: file · AJNAT Agent
+▱
+3
+↗
+REPORTING
+CHANGE-ONLY NETWORK LOGS (24H)
+24
+Network Activity Monitoring
+High/Critical: 3 · Unauthorized: 0
+Reporting agents: 1 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent
+▱
+4
+↗
+REPORTING
+LAST 24H EVENT COUNT
+96
+User & Authentication Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: edr · AJNAT Agent
+▱
+5
+↗
+REPORTING
+LAST 24H EVENT COUNT
+80
+Memory Activity Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+6
+↗
+REPORTING
+REGISTRY / CONFIG EVENTS (LAST 24H)
+42
+Registry Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: registry · AJNAT Agent
+▱
+7
+↗
+REPORTING
+LAST 24H EVENT COUNT
+2,480
+System Changes Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+8
+↗
+REPORTING
+LAST 24H EVENT COUNT
+630
+Persistence Mechanism Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+9
+↗
+REPORTING
+LAST 24H EVENT COUNT
+124
+Web & DNS Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent
+▱
+10
+↗
+REPORTING
+LAST 24H EVENT COUNT
+96
+Device Control (USB) Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: usb · AJNAT Agent
+▱
+11
+↗
+REPORTING
+LAST 24H EVENT COUNT
+80
+Behavioral Analytics (UEBA)
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: edr · AJNAT Agent
+▱
+12
+↗
+REPORTING
+LAST 24H EVENT COUNT
+42
+Data Security Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+13
+↗
+REPORTING
+LAST 24H EVENT COUNT
+2,480
+Credential Security Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: file · AJNAT Agent
+▱
+14
+↗
+REPORTING
+LAST 24H EVENT COUNT
+630
+Lateral Movement Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: edr · AJNAT Agent
+▱
+15
+↗
+REPORTING
+LAST 24H EVENT COUNT
+124
+Email Threat Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+16
+↗
+REPORTING
+LAST 24H EVENT COUNT
+96
+Insider Threat Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: edr · AJNAT Agent
+▱
+17
+↗
+REPORTING
+LAST 24H EVENT COUNT
+80
+Patch & Vulnerability Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent
+▱
+18
+↗
+REPORTING
+LAST 24H EVENT COUNT
+42
+Sandbox Analysis
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent
+▱
+19
+↗
+REPORTING
+LAST 24H EVENT COUNT
+2,480
+Kernel-Level Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: edr · AJNAT Agent
+▱
+20
+↗
+REPORTING
+LAST 24H EVENT COUNT
+630
+API Call Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+21
+↗
+REPORTING
+LAST 24H EVENT COUNT
+124
+Script Execution Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent
+▱
+22
+↗
+REPORTING
+LAST 24H EVENT COUNT
+96
+Time-Based Anomaly Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+23
+↗
+REPORTING
+LAST 24H EVENT COUNT
+80
+Geolocation Anomaly Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+24
+↗
+REPORTING
+LAST 24H EVENT COUNT
+42
+Service Monitoring
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+25
+↗
+REPORTING
+LAST 24H EVENT COUNT
+2,480
+Hash/Signature Analysis
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: file · AJNAT Agent
+▱
+26
+↗
+REPORTING
+LAST 24H EVENT COUNT
+630
+Beaconing Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+27
+↗
+REPORTING
+LAST 24H EVENT COUNT
+124
+Encryption / Ransomware Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+28
+↗
+REPORTING
+LAST 24H EVENT COUNT
+96
+Living-off-the-Land (LOLBins) Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: system · AJNAT Agent
+▱
+29
+↗
+REPORTING
+LAST 24H EVENT COUNT
+80
+Memory Overflow Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent
+▱
+30
+↗
+REPORTING
+LAST 24H EVENT COUNT
+42
+DNS Cache Poisoning Detection
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent
+▱
+31
+↗
+REPORTING
+LAST 24H EVENT COUNT
+2,480
+DNS Sinkhole
+High/Critical: 3 · Unauthorized: 1
+Reporting agents: 12 · Missing: 0
+↑ 8% vs previous 24h
+Monitor: network · AJNAT Agent

@@ -1,0 +1,169 @@
+◈
+SCDC PLATFORM
+☰
+AJNAT Demo Enterprise
+SOC Manager
+● Online
+·
+Shift Active
+▦
+Overview
+🔐
+Profile Lock / Unlock
+🛡
+EDR System Setup
+🏢
+Assigned Companies
+📡
+IDS
+🛡️
+IPS
+🔥
+Firewall
+⚡
+SOAR Catalog
+🔗
+Correlation
+👥
+Analyst Management
+◷
+Shifts
+⇄
+Assignment Queue
+↗
+Escalations
+🔔
+Alerts
+🎟
+Tickets
+⚠️
+Incidents
+⌾
+Threat Intelligence
+💬
+Contact Support
+▤
+Reports
+🛡
+Audit
+⌾
+Threat Audit
+⚙
+Profile
+analyst@example.com
+↪ Logout
+SOC Manager Dashboard
+Home
+/
+Dashboard
+/
+Dashboard
+◇
+0
+D
+SOC Manager Dashboard
+
+Backend-verified role scope · Real-time SOC metrics & incident queue● Reconnecting· Synced 10:30:00 AM
+
+Today
+Last 7 Days
+Last 30 Days
+↻ Refresh
+🔐 Profile Lock / Unlock
+2
+Current count
+🛡 EDR System Setup
+48
+Current count
+🏢 Assigned Companies
+3
+Current count
+📡 IDS
+124
+Today
+🛡️ IPS
+18
+Today
+🔥 Firewall
+42
+Current count
+⚡ SOAR Catalog
+12
+Current count
+🔗 Correlation
+1
+Today
+👥 Analyst Management
+6
+Current count
+◷ Shifts
+3
+Current count
+⇄ Assignment Queue
+8
+Today
+↗ Escalations
+2
+Today
+🔔 Alerts
+6
+Today
+🎟 Tickets
+4
+Today
+⚠️ Incidents
+2
+Today
+⌾ Threat Intelligence
+9
+Today
+💬 Contact Support
+0
+Today
+▤ Reports
+5
+Today
+🛡 Audit
+18
+Today
+⌾ Threat Audit
+4
+Today
+Assigned Company IDS/IPS & Firewall
+View all →
+Company	Status	IDS/IPS Today	Active IPS Blocks	Firewall Today	Critical Today
+AJNAT Demo Enterprise	active	124	18	42	1
+Priority Alert Queue
+View all →
+Suspicious PowerShell execution on FIN-WS-014
+AJNAT Demo Enterprise · Alert · 10/3/2026, 10:27:00 AM
+CRITICAL
+Outbound connection to threat-listed destination
+AJNAT Demo Enterprise · Alert · 10/3/2026, 10:26:00 AM
+HIGH
+Repeated failed logins for finance.user
+AJNAT Demo Enterprise · Alert · 10/3/2026, 10:24:00 AM
+HIGH
+New scheduled task created on FIN-WS-014
+AJNAT Demo Enterprise · Alert · 10/3/2026, 10:22:00 AM
+HIGH
+Unusual DNS query pattern observed
+AJNAT Demo Enterprise · Alert · 10/3/2026, 10:18:00 AM
+MEDIUM
+Protected configuration file modified
+AJNAT Demo Enterprise · Alert · 10/3/2026, 10:12:00 AM
+MEDIUM
+Alerts by Severity
+Critical
+1
+High
+3
+Medium
+2
+Low
+0
+Recent Audit Activity
+View all →
+Incident assigned
+INC-DEMO-014
+10/3/2026, 10:28:00 AM

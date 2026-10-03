@@ -1,0 +1,18 @@
+AJNAT SOC / PRODUCT WALKTHROUGH
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 08 / 12
+05 / COORDINATED RESPONSE
+Move from review to a managed response.
+SOAR brings automation rules, execution history and pending approvals into one workspace.
+1
+Orchestrate
+Use rules and playbooks to organize 
+response steps.
+2
+Approve
+Review sensitive actions before they 
+execute.
+3
+Track
+Keep the execution status and 
+outcome with the workflow.
+ACTUAL AJNAT UI / SAMPLE DATA

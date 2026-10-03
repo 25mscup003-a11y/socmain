@@ -1,0 +1,17 @@
+[
+  "/auth/me",
+  "/department",
+  "/edr-cap/live-overview",
+  "/network/alerts",
+  "/network/connections",
+  "/soar/approvals",
+  "/soar/audit-logs",
+  "/soar/connectors",
+  "/soar/dashboard/summary",
+  "/soar/executions",
+  "/soar/playbooks",
+  "/soar/rules",
+  "/soar/templates",
+  "/soc-dashboard/notifications",
+  "/transport/public-key"
+]

@@ -1,0 +1,18 @@
+AJNAT SOC / PRODUCT WALKTHROUGH
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 06 / 12
+03 / EVENT CORRELATION
+Connect signals into an attack story.
+Related events appear together, with the affected host, severity and supporting evidence.
+1
+Pattern
+See which sequence of activity 
+triggered the correlation.
+2
+Context
+Review the endpoint, risk and 
+investigation status.
+3
+Evidence
+Open linked events before 
+confirming the incident.
+ACTUAL AJNAT UI / SAMPLE DATA

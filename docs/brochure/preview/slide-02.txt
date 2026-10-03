@@ -1,0 +1,24 @@
+AJNAT SOC / WHAT IT DOES
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 02 / 12
+THE PLATFORM
+One workspace for the security team.
+A SOC (Security Operations Center) monitors activity, investigates threats and coordinates response.
+SIEM
+Security Information and
+Event Management
+Bring events together
+Collect and connect security logs
+from configured sources.
+EDR
+Endpoint Detection
+and Response
+Understand the endpoint
+Review process, file, network
+and authentication activity.
+SOAR
+Security Orchestration,
+Automation and Response
+Coordinate the next action
+Use rules, playbooks and approvals
+to manage supported actions.
+Connected sources Endpoints / Network / Identity / Web applications

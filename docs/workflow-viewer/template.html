@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AJNAT SOC offline animated workflow, roles, access and complete English guide.">
+  <meta name="color-scheme" content="light">
+  <title>AJNAT SOC · Workflow Explorer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23e9653c'/%3E%3Cpath d='M32 12 49 19v13c0 9-7 17-17 21-10-4-17-12-17-21V19z' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='m24 32 6 6 12-14' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
+  <style>__VIEWER_CSS__</style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <aside class="sidebar">
+    <a class="brand" href="#workflow" aria-label="AJNAT SOC home">
+      <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="m16 4 10 4v8c0 6-5 10-10 12C11 26 6 22 6 16V8z" stroke="currentColor" stroke-width="1.8"/><path d="m11 16 3 3 7-8" stroke="currentColor" stroke-width="2"/></svg></span>
+      <span>AJNAT<span class="brand-sub">SECURITY OPERATIONS</span></span>
+    </a>
+    <div class="workspace-tag"><span class="tiny-dot"></span> Workflow Explorer <span>v1.0</span></div>
+    <p class="nav-label">EXPLORE THE SYSTEM</p>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a class="nav-item active" href="#workflow" data-panel="workflow" aria-current="page"><span class="nav-symbol">↳</span> Workflow demo <span class="nav-arrow">↗</span></a>
+      <a class="nav-item" href="#roles" data-panel="roles"><span class="nav-symbol">◎</span> Roles &amp; access <span class="nav-count">09</span></a>
+      <a class="nav-item" href="#guide" data-panel="guide"><span class="nav-symbol">▤</span> Complete guide <span class="nav-count">24</span></a>
+    </nav>
+    <div class="sidebar-path">
+      <p class="nav-label">THE BIG PICTURE</p>
+      <ol><li>Set up &amp; connect</li><li>Monitor &amp; detect</li><li>Investigate &amp; respond</li><li>Review &amp; improve</li></ol>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="offline-card"><span class="offline-icon">↗</span><strong>One file. Full picture.</strong><p>Open in your browser.<br>No internet required.</p></div>
+      <p>Based on workflow.md<br><span>03 October 2026 · English</span></p>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header class="topbar"><span>Workspace <span class="crumb-slash">/</span> <strong id="breadcrumb">Workflow demo</strong></span><span class="demo-badge"><span class="tiny-dot"></span> ANIMATED DEMO</span></header>
+
+    <section id="panel-workflow" class="panel" aria-labelledby="workflow-heading">
+      <div class="page-heading"><div><p class="eyebrow">FROM FIRST SIGNAL TO FINAL REVIEW</p><h1 id="workflow-heading">The complete security <em>workflow.</em></h1><p class="subtitle">Who does what, how cases are routed, and how incidents are closed.</p></div><a href="#guide" class="text-link">Read the guide <span>↗</span></a></div>
+      <div class="metrics"><div><span class="metric-value">12</span><span>Connected stages</span><span class="metric-icon">↳</span></div><div><span class="metric-value">09</span><span>User roles</span><span class="metric-icon">◎</span></div><div><span class="metric-value">31</span><span>EDR capabilities</span><span class="metric-icon">⌘</span></div><div><span class="metric-value">24</span><span>Guide sections</span><span class="metric-icon">▤</span></div></div>
+
+      <div class="scenario-bar">
+        <div><label class="eyebrow" for="scenario">CHOOSE A SCENARIO</label><select id="scenario"><option value="ransomware">Critical · Ransomware behavior</option><option value="login">Medium · Suspicious login</option><option value="intel">TI · Malicious domain</option><option value="network">Network · IDS / IPS / Firewall ticket</option></select></div>
+        <p id="scenario-summary"></p>
+      </div>
+
+      <div class="workflow-layout">
+        <section class="map-card" aria-label="Animated workflow map">
+          <div class="map-heading"><div><span class="map-kicker">THE END-TO-END JOURNEY</span><h2>A signal. A case. A clear outcome.</h2></div><span id="playback-state" class="map-status"><span class="tiny-dot"></span> Running</span></div>
+          <div class="map-legend"><span><i class="legend-dot done"></i> Completed</span><span><i class="legend-dot current"></i> Current step</span><span><i class="legend-dot"></i> Up next</span><span class="map-hint">Click a step to explore ↗</span></div>
+          <div class="diagram-scroll" tabindex="0" aria-label="Workflow diagram; scroll horizontally on small screens"><svg id="workflow-map" viewBox="0 0 850 430" role="group" aria-label="12 connected workflow stages"></svg></div>
+          <div class="map-bottom"><span id="stage-counter">STEP 01 / 12</span><span id="map-owner">Company Admin</span></div>
+          <div class="playback-controls">
+            <button id="play-toggle" class="primary-button" type="button">Pause</button>
+            <button id="previous" class="icon-button" type="button" title="Previous step" aria-label="Previous step">←</button>
+            <button id="next" class="icon-button" type="button" title="Next step" aria-label="Next step">→</button>
+            <button id="restart" class="quiet-button" type="button">↺ Restart</button>
+            <div class="playback-right"><label for="speed" class="sr-only">Playback speed</label><select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1× speed</option><option value="2">2× speed</option></select><label class="loop-control"><input id="loop" type="checkbox"> Loop</label></div>
+          </div>
+          <div class="playback-progress" role="progressbar" aria-label="Workflow progress" aria-valuemin="1" aria-valuemax="12" aria-valuenow="1"><span id="progress-fill"></span></div>
+        </section>
+
+        <aside class="detail-card" aria-label="Current step details">
+          <div class="detail-top"><span class="eyebrow">STEP SPOTLIGHT</span><span id="detail-number">01</span></div>
+          <h2 id="detail-title"></h2><p id="detail-description"></p>
+          <div class="owner-block"><span id="owner-avatar">CA</span><div><span class="eyebrow">RESPONSIBLE</span><strong id="detail-owner"></strong></div></div>
+          <div class="detail-divider"></div>
+          <div class="detail-field"><span class="eyebrow">WHAT HAPPENS</span><p id="detail-action"></p></div>
+          <div class="detail-field"><span class="eyebrow">OUTPUT / HANDOFF</span><p id="detail-output"></p></div>
+          <div id="detail-note" class="detail-note"></div>
+          <a id="step-reference" class="text-link" href="#guide-10">Source section <span>↗</span></a>
+        </aside>
+      </div>
+
+      <div class="lower-layout">
+        <section class="card stream-card"><div class="card-heading"><h2>Demo event stream</h2><span class="small-tag">SIMULATED</span></div><p class="card-caption">A step-by-step activity trail for the selected scenario.</p><ol id="event-stream" aria-label="Simulated activity events" tabindex="0"></ol></section>
+        <section class="card case-card"><div class="card-heading"><h2>Case journey</h2><span id="case-kind" class="small-tag">INCIDENT</span></div><p class="card-caption">Sample asset <code>DEMO-PC-07</code> · simulated endpoint</p><dl class="case-fields"><div><dt>Assigned role</dt><dd id="case-owner">Awaiting assignment</dd></div><div><dt>Case status</dt><dd id="case-status">Not created</dd></div><div><dt>Endpoint response</dt><dd id="case-response">Not requested</dd></div><div><dt>Closure review</dt><dd id="case-review">Not submitted</dd></div></dl><div class="routing-rule"><span class="eyebrow">WHY THIS ROUTE?</span><p id="routing-reason"></p></div><a class="text-link" href="#guide-16">Assignment rules <span>↗</span></a></section>
+      </div>
+      <section class="handoff-strip"><span class="eyebrow">STANDARD ESCALATION</span><div><span>L1</span><b>→</b><span>L2</span><b>→</b><span>L3</span><b>→</b><span>SOC Manager</span></div><p><strong>L4</strong> is a TI specialist; closure goes to the manager’s threat audit.</p></section>
+      <p class="page-note">This demo uses examples from workflow.md. It has no production connection and performs no real endpoint actions.</p>
+    </section>
+
+    <section id="panel-roles" class="panel" hidden aria-labelledby="roles-heading">
+      <div class="page-heading"><div><p class="eyebrow">THE PEOPLE BEHIND THE PROCESS</p><h1 id="roles-heading">Right role. <em>Right responsibility.</em></h1><p class="subtitle">Select a role to explore its responsibilities, data scope and access boundaries.</p></div></div>
+      <div class="role-layout"><div id="role-list" class="role-list" role="group" aria-label="Select a role"></div><article id="role-detail" class="card role-detail" aria-live="polite"></article></div>
+      <section class="card permissions-card"><div class="card-heading"><h2>Access, straight from the guide</h2><a class="text-link" href="#guide-9">Section 09 ↗</a></div><p class="access-note">Effective access = identity + role + company / department scope + resource ownership + operation checks.</p><div class="document-content">__ACCESS_TABLES__</div></section>
+      <section class="card permissions-card"><div class="card-heading"><h2>Encryption Center</h2><a class="text-link" href="#guide-19">Section 19 ↗</a></div><div class="document-content">__ENCRYPTION_TABLE__</div><p class="access-note">Decryption requires an approved request and fresh MFA. Self-approval is blocked by default.</p></section>
+    </section>
+
+    <section id="panel-guide" class="panel" hidden aria-labelledby="guide-heading">
+      <div class="page-heading"><div><p class="eyebrow">THE COMPLETE REFERENCE</p><h1 id="guide-heading">Every detail. <em>In one place.</em></h1><p class="subtitle">All 24 sections of workflow.md, including tables, source references and implementation notes.</p></div><button id="print-guide" class="secondary-button" type="button">Print / Save PDF ↗</button></div>
+      <div class="guide-toolbar"><label for="guide-search">Search the guide</label><input id="guide-search" type="search" placeholder="Search: L4, encryption, assignment…"><span id="search-count" role="status">24 sections</span></div>
+      <div class="guide-layout"><nav class="guide-nav" aria-label="Guide sections">__GUIDE_NAV__</nav><div class="document-content guide-content"><div class="guide-intro">__GUIDE_INTRO__</div><p id="search-empty" class="empty-state" hidden>No sections found. Try another keyword.</p>__GUIDE_SECTIONS__</div></div>
+    </section>
+    <footer><span>AJNAT SOC <span class="footer-dot">/</span> Workflow Explorer</span><span>Offline-ready · Source snapshot: 03 Oct 2026</span></footer>
+  </main>
+  <noscript><div class="noscript-note">Enable JavaScript in your browser for the animated demo. The complete guide is available below.</div><style>#panel-guide[hidden]{display:block!important}.guide-nav{position:static}.noscript-note{position:fixed;bottom:0;background:#fff3da;padding:16px;z-index:10}</style></noscript>
+  <script>__VIEWER_JS__</script>
+</body>
+</html>

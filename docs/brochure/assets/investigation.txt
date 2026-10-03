@@ -1,0 +1,189 @@
+◈
+SCDC PLATFORM
+☰
+AJNAT Demo Enterprise
+SOC Manager
+● Online
+·
+Shift Active
+▦
+Overview
+🔐
+Profile Lock / Unlock
+🛡
+EDR System Setup
+🏢
+Assigned Companies
+📡
+IDS
+🛡️
+IPS
+🔥
+Firewall
+⚡
+SOAR Catalog
+🔗
+Correlation
+👥
+Analyst Management
+◷
+Shifts
+⇄
+Assignment Queue
+↗
+Escalations
+🔔
+Alerts
+🎟
+Tickets
+⚠️
+Incidents
+⌾
+Threat Intelligence
+💬
+Contact Support
+▤
+Reports
+🛡
+Audit
+⌾
+Threat Audit
+⚙
+Profile
+analyst@example.com
+↪ Logout
+SOC Manager Dashboard
+Home
+/
+Dashboard
+/
+Investigate
+◇
+0
+D
+🔍 Threat Investigation
+Security detections · Investigation timeline · Correlation evidence
+↺
+TOTAL DETECTIONS
+6
+CRITICAL ON PAGE
+1
+INVESTIGATING
+3
+IOC MATCHES
+1
+📋 Timeline
+🔍 Search
+Severity
+Critical
+High
+Medium
+Low
+Category
+Malware
+Network
+File
+Edr
+Usb
+System
+Isolation
+Status
+Open
+Investigating
+Resolved
+False_positive
+Source
+IAM
+IDS
+IPS
+ZEEK
+THREAT_FEED
+Action
+Detected
+Allowed
+Blocked
+Dropped
+Rejected
+Quarantined
+IOC Match
+True
+False
+→
+Security Detections
+6 total
+👤
+Suspicious PowerShell execution on FIN-WS-014
+EDR AJNAT Demo Enterprise · Finance
+CRITICAL
+10:27:00 AM
+IP: 192.0.2.14 · Proc: powershell.exe
+DETECTED
+🌐
+Outbound connection to threat-listed destination
+IDS AJNAT Demo Enterprise · Finance
+HIGH
+10:26:00 AM
+IP: 192.0.2.14
+IOC MATCH
+DETECTED
+🖥
+Repeated failed logins for finance.user
+EDR AJNAT Demo Enterprise · Finance
+HIGH
+10:24:00 AM
+IP: 192.0.2.14
+DETECTED
+🖥
+New scheduled task created on FIN-WS-014
+EDR AJNAT Demo Enterprise · Finance
+HIGH
+10:22:00 AM
+IP: 192.0.2.14
+DETECTED
+🌐
+Unusual DNS query pattern observed
+IDS AJNAT Demo Enterprise · Finance
+MEDIUM
+10:18:00 AM
+IP: 192.0.2.14
+DETECTED
+📁
+Protected configuration file modified
+EDR AJNAT Demo Enterprise · Finance
+MEDIUM
+10:12:00 AM
+IP: 192.0.2.14
+DETECTED
+←
+1/1
+→
+👤 Suspicious PowerShell execution on FIN-WS-014
+CRITICAL
+EDR
+INVESTIGATING
+10/3/2026, 10:27:00 AM
+Overview
+Timeline
+Correlated Events
+IOC Intelligence
+Raw Logs
+Analyst Notes
+Response Actions
+Source / Vendor	EDR · AJNAT
+Confidence	94/100
+Risk Score	92/100
+Severity	critical
+Category	edr
+Status	investigating
+Agent/System	FIN-WS-014
+Assigned Analyst	Demo Analyst
+Correlation ID	CORR-DEMO-014
+Source Events	3
+Hostname	FIN-WS-014
+Department	Finance
+Source IP	192.0.2.14
+Destination IP	198.51.100.45
+Process	powershell.exe
+User	finance.user
+Action	detected
+MITRE	T1059.001

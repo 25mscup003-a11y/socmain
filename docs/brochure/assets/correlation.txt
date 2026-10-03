@@ -1,0 +1,122 @@
+◈
+SCDC PLATFORM
+☰
+AJNAT Demo Enterprise
+SOC Manager
+● Online
+·
+Shift Active
+▦
+Overview
+🔐
+Profile Lock / Unlock
+🛡
+EDR System Setup
+🏢
+Assigned Companies
+📡
+IDS
+🛡️
+IPS
+🔥
+Firewall
+⚡
+SOAR Catalog
+🔗
+Correlation
+👥
+Analyst Management
+◷
+Shifts
+⇄
+Assignment Queue
+↗
+Escalations
+🔔
+Alerts
+🎟
+Tickets
+⚠️
+Incidents
+⌾
+Threat Intelligence
+💬
+Contact Support
+▤
+Reports
+🛡
+Audit
+⌾
+Threat Audit
+⚙
+Profile
+analyst@example.com
+↪ Logout
+SOC Manager Dashboard
+Home
+/
+Dashboard
+/
+Correlation
+◇
+0
+D
+🔗
+Attack Chain & Event Correlation
+
+Automated multi-step threat correlation engine and incident pattern analysis
+
+⚙ Correlation Rule Setup
+🔄 Refresh
+SECURITY SIGNALS ANALYSED (24H)
+12480
+Last log 03/10/2026, 10:27:00 IST
+OPEN CORRELATION CHAINS
+1
+1 critical chain need immediate review
+LOW 0
+MEDIUM 0
+HIGH 0
+CRITICAL 1
+ACTIVE PATTERNS
+12
+EDR coverage: 18/31 capabilities
+⚡ Trigger Correlation Engine
+🛡️
+Correlation Matches
+(1)
+All Severities
+Critical
+High
+Medium
+Low
+All Statuses
+Open
+Investigating
+Resolved
+False Positive
+Benign
+Latest activity
+Highest risk
+⚠️
+Account compromise & suspicious execution
+Repeated authentication failures, PowerShell activity and an outbound network connection are linked to the same endpoint.
+Target Host/Agent: FIN-WS-014
+Incident: INC-DEMO-014
+Confidence Score: 94%
+Risk: 92/100
+Occurrences: 1
+Pattern Code: AUTH-EXEC-NET
+CRITICAL
+INVESTIGATING
+Last activity: 03/10/2026, 10:27:00 IST
+LATEST VERIFIED EVIDENCE (3)
+●
+Suspicious PowerShell execution on FIN-WS-014
+●
+Outbound connection to threat-listed destination
+●
+Repeated failed logins for finance.user
+1 correlation matches · Page 1 of 1
+← Previous
+Next →

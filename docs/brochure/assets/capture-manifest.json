@@ -1,0 +1,44 @@
+[
+  {
+    "name": "dashboard",
+    "route": "/soc-manager/dashboard",
+    "image": "dashboard.png",
+    "source": "Repository React UI, browser-local sample API fixtures",
+    "errors": []
+  },
+  {
+    "name": "correlation",
+    "route": "/soc-manager/correlation",
+    "image": "correlation.png",
+    "source": "Repository React UI, browser-local sample API fixtures",
+    "errors": []
+  },
+  {
+    "name": "investigation",
+    "route": "/soc-manager/investigate",
+    "image": "investigation.png",
+    "source": "Repository React UI, browser-local sample API fixtures",
+    "errors": []
+  },
+  {
+    "name": "soar",
+    "route": "/soc-manager/soar",
+    "image": "soar.png",
+    "source": "Repository React UI, browser-local sample API fixtures",
+    "errors": []
+  },
+  {
+    "name": "playbooks",
+    "route": "/soc-manager/playbooks",
+    "image": "playbooks.png",
+    "source": "Repository React UI, browser-local sample API fixtures",
+    "errors": []
+  },
+  {
+    "name": "edr",
+    "route": "/edr",
+    "image": "edr.png",
+    "source": "Repository React UI, browser-local sample API fixtures",
+    "errors": []
+  }
+]

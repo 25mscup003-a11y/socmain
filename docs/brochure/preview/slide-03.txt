@@ -1,0 +1,29 @@
+AJNAT SOC / HOW IT WORKS
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 03 / 12
+THE OPERATING FLOW
+From raw events to a clear next step.
+Each stage adds context so an analyst can make an informed decision.
+01
+Collect
+Endpoint, network,
+web and login events
+Shared event visibility
+→
+02
+Correlate
+Related activity,
+entities and indicators
+A connected attack story
+→
+03
+Investigate
+Severity, timeline,
+evidence and ownership
+An analyst assessment
+→
+04
+Respond
+Approvals, supported
+actions and execution 
+logs
+A recorded outcome

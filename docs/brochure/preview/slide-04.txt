@@ -1,0 +1,18 @@
+AJNAT SOC / PRODUCT WALKTHROUGH
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 04 / 12
+01 / SOC OVERVIEW
+Start with operational priorities.
+A manager view brings company coverage, work queues and security activity together.
+1
+Coverage
+Review assigned companies and 
+security modules.
+2
+Work queues
+See alerts, incidents and escalations 
+in one view.
+3
+Follow-up
+Open reports and audit views to 
+support review and handover.
+ACTUAL AJNAT UI / SAMPLE DATA

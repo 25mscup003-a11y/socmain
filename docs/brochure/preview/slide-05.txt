@@ -1,0 +1,18 @@
+AJNAT SOC / PRODUCT WALKTHROUGH
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 05 / 12
+02 / ENDPOINT VISIBILITY
+Understand activity on the endpoint.
+Monitoring modules organize device activity into focused investigation views.
+1
+Processes & files
+Inspect execution activity and file 
+changes.
+2
+Network & identity
+Review connections, DNS and 
+authentication signals.
+3
+Focused coverage
+Choose modules for the endpoint 
+platform and enabled sensors.
+ACTUAL AJNAT UI / SAMPLE DATA

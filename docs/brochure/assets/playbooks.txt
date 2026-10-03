@@ -1,0 +1,106 @@
+◈
+SCDC PLATFORM
+☰
+AJNAT Demo Enterprise
+SOC Manager
+● Online
+·
+Shift Active
+▦
+Overview
+🔐
+Profile Lock / Unlock
+🛡
+EDR System Setup
+🏢
+Assigned Companies
+📡
+IDS
+🛡️
+IPS
+🔥
+Firewall
+⚡
+SOAR Catalog
+🔗
+Correlation
+👥
+Analyst Management
+◷
+Shifts
+⇄
+Assignment Queue
+↗
+Escalations
+🔔
+Alerts
+🎟
+Tickets
+⚠️
+Incidents
+⌾
+Threat Intelligence
+💬
+Contact Support
+▤
+Reports
+🛡
+Audit
+⌾
+Threat Audit
+⚙
+Profile
+analyst@example.com
+↪ Logout
+SOC Manager Dashboard
+Home
+/
+Dashboard
+/
+Playbooks
+◇
+0
+D
+⚡
+SOAR Command Center
+
+Security Orchestration, Automation, and Response Module — Enterprise SOC Enforcement
+
+⚡ + Build New Rule
+↻ Refresh Real-Time
+📊 SOAR Dashboard
+⚙️ Automation Rules
+🎨 Visual Rule Builder
+📘 Playbooks
+📄 Templates
+🧪 Rule Simulator
+📜 Execution History (4)
+⏳ Approval Queue (1)
+⚠️ Failed Actions (0)
+🛡️ Audit Logs (0)
+📘 SOAR Response Playbooks
++ Create Playbook
+Playbook Name	Steps Count	Mode	Status	Actions
+
+Endpoint containment
+PREBUILT
+Review, approve, isolate a supported host and retain the outcome.
+	4 steps	approval_required	
+COMPLETED	
+Edit Playbook
+
+
+Suspicious destination response
+PREBUILT
+Enrich the indicator, review evidence and apply supported controls.
+	4 steps	approval_required	
+COMPLETED	
+Edit Playbook
+
+
+Credential compromise triage
+PREBUILT
+Link authentication evidence, assign an owner and track follow-up.
+	4 steps	approval_required	
+COMPLETED	
+Edit Playbook

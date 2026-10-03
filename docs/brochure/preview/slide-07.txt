@@ -1,0 +1,18 @@
+AJNAT SOC / PRODUCT WALKTHROUGH
+AJNAT SOC · VISIBILITY. CONTEXT. CONTROL. 07 / 12
+04 / INVESTIGATION
+Read the evidence before taking action.
+Follow the event timeline and inspect the details behind a suspicious signal.
+1
+Find
+Filter by severity, source, status or 
+an indicator.
+2
+Inspect
+Review host, user, process and 
+network details.
+3
+Assess
+Use the timeline, raw logs and 
+analyst notes for the decision.
+ACTUAL AJNAT UI / SAMPLE DATA
