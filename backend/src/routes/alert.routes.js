@@ -1828,6 +1828,9 @@ router.post('/', async (req, res) => {
       return res.status(200).json({ ok: true, duplicate: true });
     }
     console.error('[alert] POST error:', err.message);
+    if (err.statusCode === 503) {
+      return res.set('Retry-After', '5').status(503).json({ message: err.message });
+    }
     res.status(400).json({ message: err.message });
   }
 });
@@ -2430,6 +2433,9 @@ router.post('/batch', async (req, res) => {
       return res.status(207).json({ ok: true, inserted, errors: err.writeErrors?.length });
     }
     console.error('[alert/batch] error:', err.message);
+    if (err.statusCode === 503) {
+      return res.set('Retry-After', '5').status(503).json({ message: err.message });
+    }
     res.status(400).json({ message: err.message });
   }
 });

@@ -34,6 +34,7 @@ test('producer uses durable acknowledgement and compressed batches', async () =>
   class FakeKafka {
     producer(options) {
       assert.equal(options.idempotent, true);
+      assert.equal(options.retry.retries, Number.MAX_SAFE_INTEGER);
       return { connect: async () => {}, send: async value => sent.push(value), disconnect: async () => {} };
     }
   }
@@ -74,4 +75,80 @@ test('Kafka config rejects TLS files unless TLS is enabled', () => {
   withKafkaEnv({ KAFKA_BROKERS: 'localhost:19092', KAFKA_SSL_CA_FILE: '/missing/ca.pem' }, () => {
     assert.throws(() => kafkaConfig(), /KAFKA_SSL_CA_FILE is not readable/);
   });
+});
+
+test('concurrent publishes share one connection and reject overload before sending', async () => {
+  let connected;
+  let connections = 0;
+  const sends = [];
+  class FakeKafka {
+    producer() {
+      return {
+        connect: () => { connections += 1; return new Promise(resolve => { connected = resolve; }); },
+        send: async value => { sends.push(value); },
+      };
+    }
+  }
+  const broker = new EventBroker({ KafkaClass: FakeKafka, config: {}, maxPendingPublishes: 2 });
+  const first = broker.publishAlerts([{ eventId: '1' }]);
+  const second = broker.publishAlerts([{ eventId: '2' }]);
+  await assert.rejects(broker.publishAlerts([{ eventId: '3' }]), { code: 'BROKER_BACKPRESSURE', statusCode: 503 });
+  assert.equal(connections, 1);
+  assert.equal(sends.length, 0);
+  connected();
+  await Promise.all([first, second]);
+  assert.equal(sends.length, 2);
+  assert.equal(broker.pendingPublishes, 0);
+  assert.equal(broker.pendingBytes, 0);
+});
+
+test('failed delivery releases producer capacity and returns a retryable response', async () => {
+  class FakeKafka {
+    producer() { return { connect: async () => {}, send: async () => { throw new Error('broker offline'); } }; }
+  }
+  const broker = new EventBroker({ KafkaClass: FakeKafka, config: {}, maxPendingPublishes: 1 });
+  await assert.rejects(broker.publishAlerts([{ eventId: '1' }]), { code: 'BROKER_UNAVAILABLE', statusCode: 503 });
+  assert.equal(broker.pendingPublishes, 0);
+  assert.equal(broker.pendingBytes, 0);
+});
+
+test('publisher bounds serialized bytes even when request count is low', async () => {
+  let calls = 0;
+  class FakeKafka {
+    producer() { return { connect: async () => { calls += 1; } }; }
+  }
+  const broker = new EventBroker({ KafkaClass: FakeKafka, config: {}, maxPendingBytes: 16 });
+  await assert.rejects(broker.publishAlerts([{ eventId: '1', raw: 'x'.repeat(100) }]), { code: 'BROKER_BACKPRESSURE' });
+  assert.equal(calls, 0);
+  assert.equal(broker.pendingBytes, 0);
+});
+
+test('caller deadline returns 503 while outstanding delivery retains its queue budget', async () => {
+  let acknowledge;
+  class FakeKafka {
+    producer() { return { connect: async () => {}, send: () => new Promise(resolve => { acknowledge = resolve; }) }; }
+  }
+  const broker = new EventBroker({ KafkaClass: FakeKafka, config: {}, deliveryTimeoutMs: 20, maxPendingPublishes: 1 });
+  await assert.rejects(broker.publishAlerts([{ eventId: 'late-ack' }]), { code: 'BROKER_ACK_TIMEOUT', statusCode: 503 });
+  assert.equal(broker.pendingPublishes, 1);
+  assert.ok(broker.pendingBytes > 0);
+  await assert.rejects(broker.publishAlerts([{ eventId: 'same-id-retry' }]), { code: 'BROKER_BACKPRESSURE' });
+  acknowledge();
+  await Promise.all([...broker.deliveries]);
+  assert.equal(broker.pendingPublishes, 0);
+  assert.equal(broker.pendingBytes, 0);
+});
+
+test('a late producer failure is handled and frees capacity after the caller times out', async () => {
+  let fail;
+  class FakeKafka {
+    producer() { return { connect: async () => {}, send: () => new Promise((_, reject) => { fail = reject; }) }; }
+  }
+  const broker = new EventBroker({ KafkaClass: FakeKafka, config: {}, deliveryTimeoutMs: 20 });
+  await assert.rejects(broker.publishAlerts([{ eventId: 'late-failure' }]), { code: 'BROKER_ACK_TIMEOUT' });
+  const pending = [...broker.deliveries];
+  fail(new Error('offline'));
+  await Promise.allSettled(pending);
+  assert.equal(broker.pendingBytes, 0);
+  assert.equal(broker.deliveries.size, 0);
 });

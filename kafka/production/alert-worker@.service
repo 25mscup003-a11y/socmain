@@ -1,0 +1,27 @@
+[Unit]
+Description=AJNAT Kafka alert worker %i
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ajnat
+Group=ajnat
+WorkingDirectory=/opt/ajnat/backend
+EnvironmentFile=/etc/ajnat/backend.env
+ExecStart=/usr/bin/env NODE_ENV=production KAFKA_CLIENT_ID=ajnat-alert-worker-%H-%i DOTENV_CONFIG_PATH=/dev/null /usr/bin/node --disable-warning=TimeoutNegativeWarning /opt/ajnat/backend/src/workers/alertIngestion.worker.js
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+KillSignal=SIGTERM
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+MemoryHigh=1536M
+MemoryMax=2G
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+kafka:
+  clusters:
+    - name: ajnat-production
+      bootstrapServers: kafka-1.internal:9093,kafka-2.internal:9093,kafka-3.internal:9093
+      readOnly: true
+      properties:
+        security.protocol: SSL
+        ssl.truststore.type: PEM
+        ssl.truststore.location: /run/secrets/kafka-ca.pem
+        ssl.keystore.type: PEM
+        ssl.keystore.location: /run/secrets/kafka-ui.pem
+        ssl.endpoint.identification.algorithm: https
+      audit:
+        consoleAuditEnabled: true
+        topicAuditEnabled: false
+        level: ALL

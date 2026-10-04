@@ -88,12 +88,20 @@ The included React dashboard provides:
 # Install backend dependencies
 npm install
 
-# Copy environment config
-cp .env .env.local
+# Create environment config on a new setup (preserve an existing .env)
+cp -n .env.example .env
+
+# Edit .env: set MONGO_URI and IPS_WEBHOOK_SECRET to match backend/.env.
+# Set MAIN_DB_NAME to the database used by the main backend.
 
 # Start the webhook server (port 5050)
 npm start
 ```
+
+The server loads `ipsserver/back-end/.env` regardless of the working directory.
+MongoDB stores IPS data in `soc4_ips` and reads company records from
+`MAIN_DB_NAME`. Without `MONGO_URI`, it runs in memory-only mode and loses
+in-memory blocks on restart.
 
 ### Dashboard Setup
 

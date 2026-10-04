@@ -165,8 +165,11 @@ router.get('/overview', requireAnalyst, async (req, res) => {
         { $match: { ...alertFilter, createdAt: { $gte: since24h }, isSynthetic: { $ne: true } } },
         { $group: {
           _id: { $dateToString: { format: '%Y-%m-%dT%H:00:00.000Z', date: '$createdAt', timezone: 'UTC' } },
+          total: { $sum: 1 },
           critical: { $sum: { $cond: [{ $eq: [{ $toLower: { $ifNull: ['$severity', 'low'] } }, 'critical'] }, 1, 0] } },
           high: { $sum: { $cond: [{ $eq: [{ $toLower: { $ifNull: ['$severity', 'low'] } }, 'high'] }, 1, 0] } },
+          medium: { $sum: { $cond: [{ $eq: [{ $toLower: { $ifNull: ['$severity', 'low'] } }, 'medium'] }, 1, 0] } },
+          low: { $sum: { $cond: [{ $eq: [{ $toLower: { $ifNull: ['$severity', 'low'] } }, 'low'] }, 1, 0] } },
           investigated: { $sum: { $cond: [{ $in: [{ $toLower: { $ifNull: ['$status', 'open'] } }, ['investigating', 'resolved', 'under_observation']] }, 1, 0] } },
           mitigated: { $sum: { $cond: [{ $eq: [{ $toLower: { $ifNull: ['$status', 'open'] } }, 'resolved'] }, 1, 0] } },
         } },

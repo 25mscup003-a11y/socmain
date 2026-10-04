@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: process.env.DOTENV_CONFIG_PATH || require('path').resolve(__dirname, '../../.env') });
 const mongoose = require('mongoose');
 const { Kafka } = require('kafkajs');
 const connectDB = require('../config/db');
@@ -10,6 +10,7 @@ const { TOPICS, kafkaConfig, getEventBroker } = require('../services/eventBroker
 const { isRoutineSecurityTelemetry } = require('../utils/routineTelemetry');
 const { ingestNetworkTelemetry } = require('../services/networkMonitoring.service');
 const { persistCurrentGpsState } = require('../services/geolocation.service');
+const { persistWithStorageRetry } = require('../utils/brokerStorageRetry');
 
 const maxRetries = Math.max(1, Number(process.env.BROKER_MAX_RETRIES || 8));
 let shuttingDown = false;
@@ -141,6 +142,43 @@ async function persistBatch(documents, { heartbeat = async () => {} } = {}) {
   }
 }
 
+async function processAlertBatch({ batch, resolveOffset, heartbeat, commitOffsetsIfNecessary, isRunning, isStale }, {
+  broker = getEventBroker(), persist = persistBatch,
+} = {}) {
+  const persistBatchSize = Math.max(10, Math.min(500, Number(process.env.BROKER_PERSIST_BATCH_SIZE || 50)));
+  for (let index = 0; index < batch.messages.length; index += persistBatchSize) {
+    if (!isRunning() || isStale()) return;
+    const messages = batch.messages.slice(index, index + persistBatchSize);
+    const chunk = [];
+    for (const message of messages) {
+      try {
+        chunk.push({ message, document: decodeMessage(message) });
+      } catch (error) {
+        await broker.publishDeadLetter({ raw: message.value.toString('utf8') }, error.message, retryCount(message));
+      }
+    }
+    try {
+      const persisted = await persistWithStorageRetry(chunk.map(item => item.document), {
+        persist, heartbeat, isRunning, isStale,
+      });
+      if (!persisted || !isRunning() || isStale()) return;
+    } catch (error) {
+      if (error.brokerControlError || !isRunning() || isStale()) throw error;
+      for (const item of chunk) {
+        const nextRetry = retryCount(item.message) + 1;
+        if (nextRetry >= maxRetries) await broker.publishDeadLetter(item.document, error.message, nextRetry);
+        else await broker.publishAlerts([item.document], { topic: TOPICS.retry, retryCount: nextRetry });
+      }
+    }
+    // Offsets must advance in order. Resolving an invalid record before an
+    // earlier valid record is persisted can skip that valid record on restart.
+    if (!isRunning() || isStale()) return;
+    messages.forEach(message => resolveOffset(message.offset));
+    await commitOffsetsIfNecessary();
+    await heartbeat();
+  }
+}
+
 async function run() {
   await connectDB();
   const kafka = new Kafka(kafkaConfig());
@@ -148,59 +186,47 @@ async function run() {
     groupId: process.env.KAFKA_ALERT_GROUP_ID || 'soc-alert-storage-v1',
     allowAutoTopicCreation: false,
     maxBytesPerPartition: Number(process.env.KAFKA_CONSUMER_MAX_PARTITION_BYTES || 5_242_880),
+    maxBytes: Number(process.env.KAFKA_CONSUMER_MAX_BYTES || 16_777_216),
+    minBytes: Number(process.env.KAFKA_CONSUMER_MIN_BYTES || 1),
+    maxWaitTimeInMs: Number(process.env.KAFKA_CONSUMER_MAX_WAIT_MS || 1000),
+    sessionTimeout: Number(process.env.KAFKA_CONSUMER_SESSION_TIMEOUT_MS || 60000),
+    heartbeatInterval: Number(process.env.KAFKA_CONSUMER_HEARTBEAT_MS || 3000),
   });
   run.consumer = consumer;
+  consumer.on(consumer.events.CRASH, ({ payload }) => {
+    console.error(JSON.stringify({ event: 'broker_consumer_crash', restart: payload.restart, error: payload.error?.name }));
+    // KafkaJS can stop after a non-retriable failure while leaving Node alive.
+    // Exit so the backend/supervisor can replace that stalled worker.
+    if (!payload.restart && !shuttingDown) shutdown('consumer_crash', 1);
+  });
   await consumer.connect();
-  await consumer.subscribe({ topic: TOPICS.alerts, fromBeginning: false });
-  await consumer.subscribe({ topic: TOPICS.retry, fromBeginning: false });
+  // Existing committed offsets still win. A new/uncommitted partition must
+  // start at its earliest retained event, including after a broker failover.
+  // Starting at the end can silently skip events accepted during a rebalance.
+  await consumer.subscribe({ topic: TOPICS.alerts, fromBeginning: true });
+  await consumer.subscribe({ topic: TOPICS.retry, fromBeginning: true });
   await consumer.run({
     partitionsConsumedConcurrently: Number(process.env.KAFKA_CONSUMER_PARTITION_CONCURRENCY || 3),
+    // Without a threshold/interval, commitOffsetsIfNecessary is a no-op until
+    // the whole fetched batch finishes. Bound replay after a worker restart.
+    autoCommitInterval: Number(process.env.KAFKA_CONSUMER_COMMIT_INTERVAL_MS || 5000),
     eachBatchAutoResolve: false,
-    eachBatch: async ({ batch, resolveOffset, heartbeat, commitOffsetsIfNecessary }) => {
-      const valid = [];
-      const broker = getEventBroker();
-      for (const message of batch.messages) {
-        try {
-          valid.push({ message, document: decodeMessage(message) });
-        } catch (error) {
-          await broker.publishDeadLetter({ raw: message.value.toString('utf8') }, error.message, retryCount(message));
-          resolveOffset(message.offset);
-        }
-      }
-
-      // A broker batch can contain thousands of retained events. Persist it in
-      // bounded chunks and heartbeat between chunks so Kafka does not evict the
-      // consumer and replay the same backlog indefinitely.
-      const persistBatchSize = Math.max(10, Math.min(500, Number(process.env.BROKER_PERSIST_BATCH_SIZE || 50)));
-      for (let index = 0; index < valid.length; index += persistBatchSize) {
-        const chunk = valid.slice(index, index + persistBatchSize);
-        try {
-          await persistBatch(chunk.map(item => item.document), { heartbeat });
-          chunk.forEach(item => resolveOffset(item.message.offset));
-        } catch (error) {
-          for (const item of chunk) {
-            const nextRetry = retryCount(item.message) + 1;
-            if (nextRetry >= maxRetries) await broker.publishDeadLetter(item.document, error.message, nextRetry);
-            else await broker.publishAlerts([item.document], { topic: TOPICS.retry, retryCount: nextRetry });
-            resolveOffset(item.message.offset);
-          }
-        }
-        await commitOffsetsIfNecessary();
-        await heartbeat();
-      }
-    },
+    eachBatch: processAlertBatch,
   });
 }
 
-async function shutdown(signal) {
+async function shutdown(signal, exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  const forceTimer = setTimeout(() => process.exit(1), 15000);
+  forceTimer.unref();
   console.log(JSON.stringify({ level: 'info', event: 'worker_shutdown', signal }));
   if (run.consumer) await run.consumer.disconnect().catch(() => {});
   await getEventBroker().disconnect().catch(() => {});
   await closeClickHouse().catch(() => {});
   await mongoose.disconnect().catch(() => {});
-  process.exit(0);
+  clearTimeout(forceTimer);
+  process.exit(exitCode);
 }
 
 process.once('SIGTERM', () => shutdown('SIGTERM'));
@@ -213,4 +239,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { decodeMessage, retryCount, persistBatch, run };
+module.exports = { decodeMessage, retryCount, persistBatch, processAlertBatch, run };

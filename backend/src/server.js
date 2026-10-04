@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 require('./observability/runtimeLogging').installConsolePolicy();
 require('./observability/telemetry').startTelemetry();
 const express = require('express'); // application HTTP server
@@ -191,7 +191,7 @@ function validateCriticalConfig() {
     problems.push('ClickHouse hot storage requires INGESTION_MODE=broker');
   }
   if (problems.length) {
-    throw new Error(`Unsafe backend configuration: ${problems.join('; ')}`);
+    throw new Error(`Unsafe backend configuration: ${problems.join('; ')}. Check backend/.env; for a new local setup, run npm run setup:env in backend.`);
   }
 }
 
@@ -908,12 +908,13 @@ if (CLUSTER_MODE && isMaster) {
       // When INGESTION_MODE=broker, alerts land in Kafka and the worker
       // is the only process that persists them to MongoDB. Fork it here so
       // a single `npm run dev` / `npm start` is all you need to run.
-      if (process.env.INGESTION_MODE === 'broker') {
+      if (process.env.INGESTION_MODE === 'broker' && process.env.KAFKA_AUTO_START_WORKER !== 'false') {
         const workerPath = path.join(__dirname, 'workers', 'alertIngestion.worker.js');
         let workerRestarts = 0;
-        const MAX_WORKER_RESTARTS = 5;
 
         const spawnWorker = () => {
+          if (shuttingDown) return;
+          const startedAt = Date.now();
           const worker = fork(workerPath, [], {
             env: process.env,
             silent: false,
@@ -922,14 +923,14 @@ if (CLUSTER_MODE && isMaster) {
 
           worker.on('exit', (code, signal) => {
             if (shuttingDown) return; // parent is shutting down — expected
+            if (Date.now() - startedAt >= 60_000) workerRestarts = 0;
             workerRestarts += 1;
-            if (workerRestarts > MAX_WORKER_RESTARTS) {
-              console.error(`[Kafka Worker] Crashed ${MAX_WORKER_RESTARTS} times — giving up. Fix the worker and restart the server.`);
-              return;
-            }
-            const delay = Math.min(1000 * workerRestarts, 10000);
+            // A prolonged infrastructure outage must not permanently disable
+            // ingestion. Retry with capped backoff; shutdown stops the timer.
+            const delay = Math.min(1000 * 2 ** Math.min(workerRestarts - 1, 6), 60_000);
             console.warn(`[Kafka Worker] Exited (code=${code}, signal=${signal}). Restart #${workerRestarts} in ${delay}ms…`);
-            setTimeout(spawnWorker, delay);
+            const restartTimer = setTimeout(spawnWorker, delay);
+            restartTimer.unref();
           });
 
           // Expose reference so the shutdown handler can kill it cleanly

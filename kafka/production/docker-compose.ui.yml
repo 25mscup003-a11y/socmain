@@ -1,0 +1,37 @@
+name: ajnat-production-ui
+services:
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:18080:8080'
+    env_file:
+      - ../.runtime-secrets/ui.env
+    environment:
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/kafbat/ui.yml
+      DYNAMIC_CONFIG_ENABLED: 'false'
+      JAVA_OPTS: '-Xms128m -Xmx512m'
+      KAFKA_POLLING_MAXPAGESIZE: 200
+      KAFKA_POLLING_DEFAULTPAGESIZE: 100
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+      SERVER_REACTIVE_SESSION_TIMEOUT: 30m
+    volumes:
+      - './ui-config.yml:/etc/kafbat/ui.yml:ro'
+      - '${KAFKA_UI_TLS_DIR:?Set KAFKA_UI_TLS_DIR to the private UI certificate directory}:/run/secrets:ro'
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/actuator/health']
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: '5'

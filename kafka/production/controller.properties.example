@@ -1,0 +1,19 @@
+# Three dedicated KRaft controllers. Use IDs 101/102/103 and unique certificates.
+process.roles=controller
+node.id=101
+controller.quorum.voters=101@controller-1.internal:9094,102@controller-2.internal:9094,103@controller-3.internal:9094
+controller.listener.names=CONTROLLER
+listeners=CONTROLLER://0.0.0.0:9094
+inter.broker.listener.name=BROKER
+listener.security.protocol.map=CONTROLLER:SSL,BROKER:SSL
+ssl.keystore.type=PEM
+ssl.keystore.location=/run/secrets/controller.pem
+ssl.truststore.type=PEM
+ssl.truststore.location=/run/secrets/kafka-ca.pem
+ssl.client.auth=required
+ssl.enabled.protocols=TLSv1.3
+ssl.endpoint.identification.algorithm=https
+authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
+allow.everyone.if.no.acl.found=false
+super.users=User:CN=kafka-1;User:CN=kafka-2;User:CN=kafka-3;User:CN=controller-1;User:CN=controller-2;User:CN=controller-3;User:CN=kafka-admin
+metadata.log.dir=/var/lib/kafka/metadata

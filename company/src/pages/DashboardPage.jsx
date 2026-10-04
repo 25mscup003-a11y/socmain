@@ -381,91 +381,130 @@ function MiniPanel({ title, children, action }) {
   );
 }
 
-function catmullRom2bezier(points) {
+function activityLinePath(points) {
   if (!points || points.length === 0) return '';
   if (points.length === 1) return `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
   let d = `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
   for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[Math.max(i - 1, 0)];
     const p1 = points[i];
     const p2 = points[i + 1];
-    const p3 = points[Math.min(i + 2, points.length - 1)];
-
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-
-    d += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+    // Keep every curve inside its two actual readings: no negative counts or
+    // invented peaks between cumulative readings.
+    const midX = (p1.x + p2.x) / 2;
+    d += ` C ${midX.toFixed(1)},${p1.y.toFixed(1)} ${midX.toFixed(1)},${p2.y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
   }
   return d;
 }
 
-function CommandCenterChart({ activity = [], posture = 75, postureColor = '#34d399' }) {
+const ACTIVITY_SERIES = [
+  { key: 'total', label: 'Total', color: '#a78bfa', icon: 'Σ', dash: '7 4' },
+  { key: 'critical', label: 'Critical', color: '#fb4b68', icon: '🛡' },
+  { key: 'high', label: 'High', color: '#f59e0b', icon: '⬡' },
+  { key: 'medium', label: 'Medium', color: '#facc15', icon: '◇' },
+  { key: 'low', label: 'Low', color: '#34d399', icon: '▽' },
+  { key: 'investigated', label: 'Investigated', color: '#22d3ee', icon: '⌾', dash: '3 3' },
+];
+
+const activityChartCss = `
+  .security-activity-layout { display: grid; grid-template-columns: minmax(0,1fr) minmax(120px,.18fr); gap: 24px; margin-top: 18px; }
+  .security-activity-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+  .security-activity-posture { border-left: 1px solid #1e3a5f; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding-left: 20px; }
+  .security-activity-toggle:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 4px; border-radius: 4px; }
+  @media (max-width: 900px) {
+    .security-activity-layout { grid-template-columns: minmax(0,1fr); }
+    .security-activity-posture { border-left: 0; border-top: 1px solid #1e3a5f; padding: 18px 0 0; }
+    .security-activity-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  }
+  @media (max-width: 480px) {
+    .security-activity-metrics { grid-template-columns: minmax(0,1fr); }
+  }
+`;
+
+function CommandCenterChart({ activity = [], updatedAt, posture = 75, postureColor = '#34d399' }) {
   const [hoverIndex, setHoverIndex] = React.useState(null);
-  const [visibleSeries, setVisibleSeries] = React.useState({ critical: true, high: true, investigated: true });
+  const [scale, setScale] = React.useState('log');
+  const [focusedSeries, setFocusedSeries] = React.useState(null);
+  const [visibleSeries, setVisibleSeries] = React.useState(() => Object.fromEntries(ACTIVITY_SERIES.map(({ key }) => [key, true])));
   const rowMap = new Map((Array.isArray(activity) ? activity : []).map(row => [row._id, row]));
-  const hour = new Date();
+  const snapshot = React.useMemo(() => new Date(updatedAt || Date.now()), [activity, updatedAt]);
+  const windowStart = new Date(snapshot.getTime() - 24 * 3600000);
+  const hour = new Date(snapshot);
   hour.setUTCMinutes(0, 0, 0);
 
-  const buckets = Array.from({ length: 24 }, (_, index) => {
-    const at = new Date(hour.getTime() - ((23 - index) * 3600000));
+  // Include both partial hours at the edges of the rolling 24-hour window.
+  const hourlyBuckets = Array.from({ length: 25 }, (_, index) => {
+    const at = new Date(hour.getTime() - ((24 - index) * 3600000));
     const key = at.toISOString();
-    return { at, ...(rowMap.get(key) || {}) };
+    const row = rowMap.get(key) || {};
+    return {
+      at,
+      ...row,
+      total: Number(row.total ?? (Number(row.critical || 0) + Number(row.high || 0) + Number(row.medium || 0) + Number(row.low || 0))),
+    };
   });
+  // The graph and summary share one running total. Each point includes all
+  // alerts through that time, so the final point is exactly the 24h summary.
+  let runningTotal = { ...Object.fromEntries(ACTIVITY_SERIES.map(({ key }) => [key, 0])), mitigated: 0 };
+  const buckets = [{ at: windowStart, ...runningTotal }, ...hourlyBuckets.map(row => {
+    runningTotal = {
+      ...Object.fromEntries(ACTIVITY_SERIES.map(({ key }) => [key, runningTotal[key] + Number(row[key] || 0)])),
+      mitigated: runningTotal.mitigated + Number(row.mitigated || 0),
+    };
+    return { at: new Date(Math.min(row.at.getTime() + 3600000, snapshot.getTime())), ...runningTotal };
+  })];
+  const lastIndex = buckets.length - 1;
+  const totals = buckets[lastIndex];
 
-  const totals = buckets.reduce((sum, row) => ({
-    critical: sum.critical + Number(row.critical || 0),
-    high: sum.high + Number(row.high || 0),
-    investigated: sum.investigated + Number(row.investigated || 0),
-    mitigated: sum.mitigated + Number(row.mitigated || 0),
-  }), { critical: 0, high: 0, investigated: 0, mitigated: 0 });
+  const activeSeries = ACTIVITY_SERIES.filter(({ key }) => visibleSeries[key]);
 
-  const maxVal = Math.max(
-    ...buckets.flatMap(row => [
-      visibleSeries.critical ? (row.critical || 0) : 0,
-      visibleSeries.high ? (row.high || 0) : 0,
-      visibleSeries.investigated ? (row.investigated || 0) : 0,
-    ]),
-    10
+  const maxVal = Math.max(...buckets.flatMap(row => activeSeries.map(({ key }) => Number(row[key] || 0))), 1);
+  const logMax = 10 ** Math.ceil(Math.log10(Math.max(10, maxVal)));
+  const magnitude = 10 ** Math.floor(Math.log10(maxVal / 4));
+  const linearStep = Math.max(1, Math.ceil(maxVal / 4 / magnitude) * magnitude);
+  const scaleMax = scale === 'log' ? logMax : linearStep * 4;
+  const yTicks = scale === 'log'
+    ? [0, ...Array.from({ length: Math.round(Math.log10(logMax)) + 1 }, (_, index) => 10 ** index)]
+    : Array.from({ length: 5 }, (_, index) => index * linearStep);
+  const plot = { left: 56, right: 776, top: 24, bottom: 220 };
+  const xForTime = at => plot.left + ((at.getTime() - windowStart.getTime()) / (24 * 3600000)) * (plot.right - plot.left);
+  const xAt = index => xForTime(buckets[index].at);
+  const yAt = value => plot.bottom - (plot.bottom - plot.top) * (
+    scale === 'log' ? Math.log10(1 + value) / Math.log10(1 + scaleMax) : value / scaleMax
   );
 
   const getPointsArr = (field) => buckets.map((row, index) => {
-    const x = 20 + ((index / 23) * 680);
     const val = Number(row[field] || 0);
-    const displayVal = val;
-    const y = 175 - ((displayVal / maxVal) * 135);
-    return { x, y, val, displayVal, row };
+    return { x: xAt(index), y: yAt(val), val };
   });
 
-  const investigatedArr = getPointsArr('investigated');
-  const highArr = getPointsArr('high');
-  const criticalArr = getPointsArr('critical');
-
-  const investigatedPath = catmullRom2bezier(investigatedArr);
-  const highPath = catmullRom2bezier(highArr);
-  const criticalPath = catmullRom2bezier(criticalArr);
-
-  const investigatedArea = investigatedPath ? `${investigatedPath} L 700 185 L 20 185 Z` : '';
-  const highArea = highPath ? `${highPath} L 700 185 L 20 185 Z` : '';
+  const plottedSeries = activeSeries.map(series => {
+    const points = getPointsArr(series.key);
+    return { ...series, points, path: activityLinePath(points) };
+  });
 
   const trend = totals.investigated > 0
     ? Number(((totals.mitigated / totals.investigated) * 100).toFixed(1))
     : 0;
 
   const handleMouseMove = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const svgX = (mouseX / rect.width) * 720;
-    const idx = Math.round(((svgX - 20) / 680) * 23);
-    setHoverIndex(Math.max(0, Math.min(23, idx)));
+    const point = e.currentTarget.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    const svgX = point.matrixTransform(e.currentTarget.getScreenCTM().inverse()).x;
+    const nearest = buckets.reduce((closest, _, index) => (
+      Math.abs(xAt(index) - svgX) <= Math.abs(xAt(closest) - svgX) ? index : closest
+    ), 0);
+    setHoverIndex(nearest);
   };
 
-  const activeHoverBucket = hoverIndex !== null ? buckets[hoverIndex] : null;
+  const selectedIndex = hoverIndex === null ? lastIndex : Math.min(hoverIndex, lastIndex);
+  const activeHoverBucket = buckets[selectedIndex];
+  const showHistoricalTotal = selectedIndex !== lastIndex;
 
   return (
     <div style={{ minWidth: 0, width: '100%', border: '1px solid rgba(34,211,238,.42)', borderRadius: 20, padding: 22, background: 'radial-gradient(circle at 85% 15%,rgba(14,165,233,.09),transparent 33%),linear-gradient(145deg,#061426,#07182d)', boxShadow: '0 22px 54px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.04)', position: 'relative' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+      <style>{activityChartCss}</style>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div>
           <div style={{ color: '#7dd3fc', fontSize: 10, fontWeight: 950, letterSpacing: '.12em', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22d3ee', boxShadow: '0 0 10px #22d3ee' }} />
@@ -477,73 +516,78 @@ function CommandCenterChart({ activity = [], posture = 75, postureColor = '#34d3
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 12px #34d399' }} /> LIVE TELEMETRY
         </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(150px,.22fr)', alignItems: 'stretch', gap: 24, marginTop: 18 }}>
-        <div style={{ position: 'relative' }}>
-          <div style={{ display: 'flex', gap: 24, marginBottom: 8, color: '#94a3b8', fontSize: 11 }}>
-            {[['Critical', '#fb4b68'], ['High', '#f59e0b'], ['Investigated', '#22d3ee']].map(([label, color]) => (
-              <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+      <div className="security-activity-layout">
+        <div style={{ position: 'relative', minWidth: 0 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 20px', marginBottom: 8, color: '#94a3b8', fontSize: 11 }}>
+            {ACTIVITY_SERIES.map(({ key, label, color }) => (
+              <button key={key} type="button" className="security-activity-toggle" aria-pressed={visibleSeries[key]} title={`${visibleSeries[key] ? 'Hide' : 'Show'} ${label.toLowerCase()} in graph`} onMouseEnter={() => setFocusedSeries(key)} onMouseLeave={() => setFocusedSeries(null)} onFocus={() => setFocusedSeries(key)} onBlur={() => setFocusedSeries(null)} onClick={() => setVisibleSeries(current => ({ ...current, [key]: !current[key] }))} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'none', border: 0, padding: '4px 0', color: 'inherit', font: 'inherit', cursor: 'pointer', opacity: visibleSeries[key] ? 1 : .45 }}>
                 <i style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 8px ${color}` }} />
-                {label} ({totals[label.toLowerCase()] || 0})
-              </span>
+                {label} ({totals[key].toLocaleString()})
+              </button>
             ))}
           </div>
 
-          {/* SVG Graph */}
-          <svg viewBox="0 0 720 220" role="img" aria-label="Critical, high and investigated alerts over the last 24 hours" onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIndex(null)} style={{ width: '100%', minHeight: 240, overflow: 'visible', cursor: 'crosshair' }}>
-            <defs>
-              <linearGradient id="activityArea" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#22d3ee" stopOpacity=".38" />
-                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-              </linearGradient>
-              <filter id="neonGlowCyan" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="3" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-            {[36, 74, 112, 150, 185].map(y => <line key={y} x1="14" y1={y} x2="706" y2={y} stroke="#1e3a5f" strokeWidth="1" strokeDasharray="4 5" />)}
-            {[16, 188, 360, 532, 704].map(x => <line key={x} x1={x} y1="34" x2={x} y2="185" stroke="#1e3a5f" strokeWidth="1" strokeDasharray="4 5" />)}
-            
-            {investigatedArea && <path d={investigatedArea} fill="url(#activityArea)" />}
-            {investigatedPath && <path d={investigatedPath} fill="none" stroke="#22d3ee" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" filter="url(#neonGlowCyan)" />}
-            {highPath && <path d={highPath} fill="none" stroke="#f59e0b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />}
-            {criticalPath && <path d={criticalPath} fill="none" stroke="#fb4b68" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />}
-            
-            {/* Live Pulsing Node at Latest Hour */}
-            {investigatedArr[23] && (
-              <g transform={`translate(${investigatedArr[23].x}, ${investigatedArr[23].y})`}>
-                <circle r="7" fill="#22d3ee" opacity=".4">
-                  <animate attributeName="r" values="4;10;4" dur="2s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values=".6;.1;.6" dur="2s" repeatCount="indefinite" />
-                </circle>
-                <circle r="4" fill="#22d3ee" />
-              </g>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10, margin: '14px 0 6px' }}>
+            <span style={{ color: '#94a3b8', fontSize: 11 }}>Cumulative alerts · Last 24 hours · {scale === 'log' ? 'Logarithmic' : 'Linear'} scale</span>
+            <div role="group" aria-label="Graph scale" style={{ display: 'flex', gap: 4, padding: 3, background: '#0c2037', border: '1px solid #1e3a5f', borderRadius: 8 }}>
+              {['log', 'linear'].map(value => <button key={value} type="button" className="security-activity-toggle" aria-pressed={scale === value} onClick={() => setScale(value)} style={{ border: 0, borderRadius: 5, padding: '5px 10px', font: 'inherit', fontSize: 11, cursor: 'pointer', color: scale === value ? '#e2e8f0' : '#94a3b8', background: scale === value ? '#244263' : 'transparent' }}>{value === 'log' ? 'Log scale' : 'Linear scale'}</button>)}
+            </div>
+          </div>
+          <div style={{ position: 'relative' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <svg viewBox="0 0 800 258" role="img" aria-label={`Cumulative total, critical, high, medium, low and investigated alerts over the last 24 hours; NOW matches the summary counts, ${scale === 'log' ? 'logarithmic' : 'linear'} scale`} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIndex(null)} style={{ display: 'block', width: '100%', minWidth: 600, cursor: 'crosshair' }}>
+                {yTicks.map(value => (
+                  <g key={value}>
+                    <line x1={plot.left} y1={yAt(value)} x2={plot.right} y2={yAt(value)} stroke="#1e3a5f" strokeWidth="1" strokeDasharray={value ? '4 5' : undefined} />
+                    <text x={plot.left - 10} y={yAt(value) + 4} fill="#94a3b8" fontSize="10" textAnchor="end">{value.toLocaleString()}</text>
+                  </g>
+                ))}
+                {Array.from({ length: 7 }, (_, index) => {
+                  const at = new Date(windowStart.getTime() + index * 4 * 3600000);
+                  const x = xForTime(at);
+                  return <g key={at.toISOString()}>
+                    <line x1={x} y1={plot.top} x2={x} y2={plot.bottom} stroke="#1e3a5f" strokeWidth="1" strokeDasharray="4 5" />
+                    <text x={x} y="246" fill="#94a3b8" fontSize="10" textAnchor={index === 0 ? 'start' : index === 6 ? 'end' : 'middle'}>{index === 6 ? 'NOW' : at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>
+                  </g>;
+                })}
+                {hoverIndex !== null && <line x1={xAt(selectedIndex)} x2={xAt(selectedIndex)} y1={plot.top} y2={plot.bottom} stroke="#94a3b8" strokeDasharray="3 4" />}
+                {plottedSeries.map(({ key, label, color, dash, path, points }) => (
+                  <g key={key} opacity={focusedSeries && visibleSeries[focusedSeries] && focusedSeries !== key ? .18 : 1}>
+                    <path data-series={key} d={path} fill="none" stroke={color} strokeWidth={focusedSeries === key ? 3.5 : key === 'total' ? 2 : 2.5} strokeDasharray={dash} strokeLinecap="round" strokeLinejoin="round">
+                      <title>{label}: {totals[key].toLocaleString()} in the last 24 hours</title>
+                    </path>
+                    {points.map((point, index) => ((point.val > 0 && (point.val !== points[index - 1]?.val || index === selectedIndex)) || index === lastIndex) && <circle key={index} data-point-series={key} data-value={point.val} data-latest={index === lastIndex} cx={point.x} cy={point.y} r={index === selectedIndex ? 4.5 : 2.5} fill={color} stroke="#07182d" strokeWidth="1.5" />)}
+                  </g>
+                ))}
+                {activeSeries.length === 0 && <text x="416" y="115" fill="#94a3b8" fontSize="12" textAnchor="middle">Select a category above to show its activity</text>}
+              </svg>
+            </div>
+            {activeSeries.length > 0 && (
+              <div role="tooltip" style={{ position: 'absolute', top: 8, ...(selectedIndex > lastIndex / 2 ? { left: 60 } : { right: 12 }), width: showHistoricalTotal ? 260 : 195, maxWidth: 'calc(100% - 60px)', padding: 12, borderRadius: 10, border: '1px solid #334155', background: 'rgba(7,20,38,.97)', boxShadow: '0 8px 24px #0006', pointerEvents: 'none', fontSize: 11 }}>
+                <div style={{ color: '#cbd5e1', marginBottom: 8 }}>{showHistoricalTotal ? `Up to ${activeHoverBucket.at.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'NOW · Last 24 hours'}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: showHistoricalTotal ? '1fr 1fr 1fr' : '1fr 1fr', gap: 8, alignItems: 'center' }}>
+                  <span style={{ color: '#94a3b8', fontSize: 10 }}>Category</span>
+                  {showHistoricalTotal && <span style={{ color: '#94a3b8', fontSize: 10, textAlign: 'right' }}>At this point</span>}
+                  <span style={{ color: '#94a3b8', fontSize: 10, textAlign: 'right' }}>24h total</span>
+                  {ACTIVITY_SERIES.map(({ key, label, color }) => <React.Fragment key={key}><span style={{ color }}>{label}</span>{showHistoricalTotal && <span style={{ color, textAlign: 'right' }}>{Number(activeHoverBucket[key] || 0).toLocaleString()}</span>}<strong style={{ color, textAlign: 'right' }}>{totals[key].toLocaleString()}</strong></React.Fragment>)}
+                </div>
+              </div>
             )}
-
-            {buckets.filter((_, index) => index % 4 === 0 || index === 23).map((row, index) => {
-              const originalIndex = index === 6 ? 23 : index * 4;
-              const x = 16 + ((originalIndex / 23) * 688);
-              return <text key={row.at.toISOString()} x={x} y="212" fill="#64748b" fontSize="10" textAnchor={originalIndex === 0 ? 'start' : originalIndex === 23 ? 'end' : 'middle'}>{originalIndex === 23 ? 'NOW' : row.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>;
-            })}
-          </svg>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 12 }}>
-            {[
-              ['🛡', 'CRITICAL', totals.critical, '#fb4b68'],
-              ['⬡', 'HIGH', totals.high, '#f59e0b'],
-              ['⌾', 'MITIGATED', totals.mitigated, '#22d3ee'],
-            ].map(([icon, label, value, color]) => <div key={label} style={{ padding: '14px 16px', borderRadius: 12, border: `1px solid ${color}66`, background: `${color}0b`, display: 'flex', alignItems: 'center', gap: 12 }}><span style={{ width: 38, height: 38, borderRadius: 9, display: 'grid', placeItems: 'center', color, background: `${color}18`, fontSize: 19 }}>{icon}</span><span style={{ color, fontSize: 11, fontWeight: 950, letterSpacing: '.12em' }}>{label}</span><strong style={{ color, marginLeft: 'auto', fontSize: 25 }}>{Number(value).toLocaleString()}</strong></div>)}
+          </div>
+          <div style={{ color: '#94a3b8', fontSize: 10, lineHeight: 1.5, margin: '4px 0 16px' }}>Each line shows the running total within the last 24 hours. NOW matches the counts above.{scale === 'log' ? ' Log scale keeps small counts visible.' : ''}</div>
+          <div className="security-activity-metrics">
+            {ACTIVITY_SERIES.map(({ key, icon, label, color }) => <div key={key} style={{ minWidth: 0, padding: '14px 12px', borderRadius: 12, border: `1px solid ${color}66`, background: `${color}0b`, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}><span aria-hidden="true" style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 9, display: 'grid', placeItems: 'center', color, background: `${color}18`, fontSize: 19 }}>{icon}</span><span style={{ color, fontSize: 10, fontWeight: 950, letterSpacing: '.06em', textTransform: 'uppercase' }}>{label}</span><strong style={{ color, marginLeft: 'auto', fontSize: 25, overflowWrap: 'anywhere' }}>{totals[key].toLocaleString()}</strong></div>)}
           </div>
         </div>
-        <div style={{ borderLeft: '1px solid #1e3a5f', display: 'grid', placeItems: 'center', paddingLeft: 20 }}>
+        <div className="security-activity-posture">
           <div style={{ width: 78, height: 78, borderRadius: '50%', display: 'grid', placeItems: 'center', background: `conic-gradient(${postureColor} ${posture * 3.6}deg, rgba(30,58,95,.65) 0deg)`, boxShadow: `0 0 28px ${postureColor}28` }}>
             <div style={{ width: 60, height: 60, borderRadius: '50%', background: '#071426', display: 'grid', placeItems: 'center', border: '1px solid #1e3a5f', textAlign: 'center' }}>
               <span><strong style={{ display: 'block', color: postureColor, fontSize: 18 }}>{posture}%</strong><small style={{ color: '#64748b', fontSize: 7, fontWeight: 900 }}>POSTURE</small></span>
             </div>
           </div>
-          <div style={{ color: '#34d399', fontSize: 13, fontWeight: 950, marginTop: -35 }}>↗ {trend}%</div>
-          <div style={{ color: '#64748b', fontSize: 10, marginTop: -45 }}>mitigation coverage</div>
+          <div style={{ color: '#34d399', fontSize: 13, fontWeight: 950 }}>↗ {trend}%</div>
+          <div style={{ color: '#64748b', fontSize: 10 }}>mitigation coverage</div>
+          <div style={{ color: '#22d3ee', fontSize: 11 }}>Mitigated: {totals.mitigated.toLocaleString()}</div>
         </div>
       </div>
     </div>
@@ -623,7 +667,7 @@ function CompanyAdminSummaryDashboard({ summary, loading, error, navigate, isDep
             <div style={{ color: '#38bdf8', fontSize: 12, fontWeight: 900, letterSpacing: '.08em', textTransform: 'uppercase' }}>{isDeptAdmin ? 'Department Admin Dashboard' : 'Company Admin Dashboard'}</div>
             <h1 style={{ margin: '8px 0 0', fontSize: 'clamp(28px,4vw,42px)', color: '#f8fafc', letterSpacing: '-.04em' }}>Spartan Cyber Defense Center (SCDC)</h1>
           </div>
-          <CommandCenterChart activity={summary?.alertActivity} posture={posture} postureColor={postureColor} />
+          <CommandCenterChart activity={summary?.alertActivity} updatedAt={overview.sourcesUpdatedAt} posture={posture} postureColor={postureColor} />
         </div>
       </section>
 

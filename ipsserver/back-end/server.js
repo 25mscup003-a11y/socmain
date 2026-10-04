@@ -14,7 +14,7 @@
  */
 
 // Single .env — ipsserver/back-end/.env (sab settings yahan hain)
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 
 const http     = require('http');
 const { Server: SocketIOServer } = require('socket.io');
@@ -139,4 +139,3 @@ async function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // restart trigger
-

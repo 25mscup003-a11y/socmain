@@ -34,10 +34,13 @@ services:
       KAFKA_MESSAGE_MAX_BYTES: 10485760
       KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9997
+      KAFKA_JMX_HOSTNAME: kafka
+      KAFKA_JMX_OPTS: "-Dcom.sun.management.jmxremote=true -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.port=9997 -Dcom.sun.management.jmxremote.rmi.port=9997 -Djava.rmi.server.hostname=kafka"
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "KAFKA_JMX_OPTS='' JMX_PORT='' kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -77,23 +80,96 @@ services:
       - default
 
   kafka-ui:
-    image: provectuslabs/kafka-ui:v0.7.2
+    image: soc-kafka-ui:local
+    build:
+      context: ./ui
+      args:
+        KAFKA_UI_IMAGE: ${KAFKA_UI_IMAGE:-kafbat/kafka-ui:v1.5.0}
     container_name: soc-kafka-ui
     profiles: [tools]
     restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:${KAFKA_UI_HOST_PORT:-18080}:8080"
+    env_file:
+      - ./.runtime-secrets/ui.env
     environment:
-      KAFKA_CLUSTERS_0_NAME: ajnat-local
+      KAFKA_CLUSTERS_0_NAME: ${KAFKA_UI_CLUSTER_NAME:-ajnat-local}
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_METRICS_TYPE: JMX
+      KAFKA_CLUSTERS_0_METRICS_PORT: 9997
+      KAFKA_CLUSTERS_0_AUDIT_CONSOLEAUDITENABLED: "true"
+      KAFKA_CLUSTERS_0_AUDIT_TOPICAUDITENABLED: "false"
+      KAFKA_CLUSTERS_0_AUDIT_LEVEL: ALTER_ONLY
+      KAFKA_POLLING_MAXPAGESIZE: 200
+      KAFKA_POLLING_DEFAULTPAGESIZE: 100
       DYNAMIC_CONFIG_ENABLED: "false"
+      JAVA_OPTS: "-Xms128m -Xmx512m"
+      LOGGING_LEVEL_ROOT: INFO
+      LOGGING_LEVEL_IO_KAFBAT_UI: INFO
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,prometheus
+      SERVER_REACTIVE_SESSION_TIMEOUT: 30m
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
     security_opt:
       - no-new-privileges:true
     networks:
       - default
+      - ui-private
+
+  kafka-ui-auth:
+    image: soc-kafka-ui-auth:local
+    build:
+      context: ./ui-auth
+    container_name: soc-kafka-ui-auth
+    profiles: [tools]
+    restart: unless-stopped
+    depends_on:
+      kafka-ui:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${KAFKA_UI_HOST_PORT:-18080}:8080"
+    env_file:
+      - ./.runtime-secrets/ui.env
+    environment:
+      KAFKA_UI_UPSTREAM: http://kafka-ui:8080
+      SMTP_CONFIG_FILE: /run/secrets/ui-mail.json
+    volumes:
+      - ./.runtime-secrets/ui-mail.json:/run/secrets/ui-mail.json:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/actuator/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - ui-private
+      - ui-entry
 
   kafka-exporter:
     image: danielqsj/kafka-exporter:v1.7.0
@@ -106,6 +182,13 @@ services:
     command: ["--kafka.server=kafka:9092"]
     ports:
       - "127.0.0.1:${KAFKA_EXPORTER_HOST_PORT:-19308}:9308"
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     security_opt:
       - no-new-privileges:true
     networks:
@@ -114,6 +197,9 @@ services:
 networks:
   default:
     name: backend_default
+  ui-private:
+    internal: true
+  ui-entry:
 
 volumes:
   kafka-data:

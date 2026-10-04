@@ -1,0 +1,12 @@
+{
+  "name": "ajnat-kafka-ui-auth",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test ../tests/ui-auth.test.js"
+  },
+  "dependencies": {
+    "nodemailer": "10.0.14"
+  }
+}

@@ -41,5 +41,12 @@ latency and recovery time. Reconcile:
 
     generated = rejected + accepted_unique + accepted_duplicate
 
-The current script measures API acknowledgement into MongoDB, not future broker
-quorum durability.
+In direct mode the script measures API acknowledgement after MongoDB insertion.
+In broker mode HTTP 202 means Kafka has acknowledged the publish with `acks=-1`;
+it does not mean the worker has persisted the event yet. Measure stored unique
+events and consumer lag separately. HTTP 503 includes Retry-After for publisher
+overload or failed broker acknowledgement; the real agent must retain and retry
+the same event IDs. This load driver counts failures rather than retrying them.
+
+For the 30,000-agent sizing assumptions, topology and acceptance criteria, see
+`kafka/production/README.md`.

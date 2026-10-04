@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {
+    "setup:env": "node scripts/setup-env.js",
     "dev": "NODE_OPTIONS=--disable-warning=TimeoutNegativeWarning nodemon --legacy-watch --watch src --ext js,mjs,cjs,json src/server.js",
     "start": "NODE_OPTIONS=--disable-warning=TimeoutNegativeWarning node src/server.js",
     "worker:alerts": "NODE_OPTIONS=--disable-warning=TimeoutNegativeWarning node src/workers/alertIngestion.worker.js",
     "worker:archive": "node src/workers/archive.worker.js",
     "broker:provision": "NODE_OPTIONS=--disable-warning=TimeoutNegativeWarning node scripts/provision-broker-topics.js",
+    "broker:provision-storage": "node scripts/provision-broker-storage.js",
     "benchmark:codecs": "node scripts/benchmark-ingestion-codecs.js",
     "migrate:clickhouse": "node scripts/migrate-clickhouse.js",
     "archive:provision": "node scripts/provision-archive-bucket.js",
