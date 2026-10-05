@@ -1,3 +1,4 @@
+import { authStorage } from '../api/authStorage';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Swal from 'sweetalert2';
 import api from '../api/axios';
@@ -179,16 +180,16 @@ function Empty({ icon = '📭', msg = 'No data' }) {
 
 function getCompanyIdFromStorage() {
   try {
-    const user = JSON.parse(localStorage.getItem('co_user') || '{}');
-    const company = JSON.parse(localStorage.getItem('co_company') || '{}');
+    const user = JSON.parse(authStorage.getItem('co_user') || '{}');
+    const company = JSON.parse(authStorage.getItem('co_company') || '{}');
     return user.companyId || user.company || company._id || company.id || '';
   } catch { return ''; }
 }
 
 function getStoredAuthorizationContext() {
   try {
-    const user = JSON.parse(localStorage.getItem('co_user') || '{}');
-    const company = JSON.parse(localStorage.getItem('co_company') || '{}');
+    const user = JSON.parse(authStorage.getItem('co_user') || '{}');
+    const company = JSON.parse(authStorage.getItem('co_company') || '{}');
     return {
       company: company.name || company.companyName || user.companyName || '',
       department: user.departmentId?.name || user.department?.name || user.departmentName || '',

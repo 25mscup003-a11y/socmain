@@ -1,3 +1,4 @@
+import { authStorage, incomingImpersonationToken } from '../api/authStorage';
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axios';
 import { getCachedBrowserLocation } from '../utils/browserLocation';
@@ -20,45 +21,48 @@ export function AuthProvider({ children }) {
   const lastPersistedActivityRef = useRef(0);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const impersonationToken = params.get('impersonationToken');
+    const impersonationToken = incomingImpersonationToken
+      || (authStorage.getItem('co_impersonation') && authStorage.getItem('co_token'));
     if (impersonationToken) {
-      localStorage.setItem('co_token', impersonationToken);
-      localStorage.setItem('co_impersonation', JSON.stringify({
+      authStorage.setItem('co_token', impersonationToken);
+      authStorage.setItem('co_impersonation', JSON.stringify({
         active: true,
-        banner: 'You are logged in as Partner Admin via Super Admin',
+        banner: 'You are logged in via Super Admin',
       }));
       api.defaults.headers.common['Authorization'] = `Bearer ${impersonationToken}`;
       api.get('/auth/me')
         .then(({ data }) => {
+          if (!data.user || data.user.role === 'superadmin') throw new Error('Invalid company session');
           const partnerUser = data.user;
           if (data.token) {
-            localStorage.setItem('co_token', data.token);
+            authStorage.setItem('co_token', data.token);
             api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
           }
-          localStorage.setItem('co_user', JSON.stringify(partnerUser));
-          if (data.company) localStorage.setItem('co_company', JSON.stringify(data.company));
-          else localStorage.removeItem('co_company');
+          authStorage.setItem('co_user', JSON.stringify(partnerUser));
+          if (data.company) authStorage.setItem('co_company', JSON.stringify(data.company));
+          else authStorage.removeItem('co_company');
           setUser(partnerUser);
           setCompany(data.company || null);
-          setImpersonation(data.impersonation || { active: true, banner: 'You are logged in as Partner Admin via Super Admin' });
-          window.history.replaceState({}, document.title, window.location.pathname);
+          authStorage.setItem('co_impersonation', JSON.stringify(data.impersonation));
+          setImpersonation(data.impersonation);
         })
         .catch((error) => {
-          if (error.response?.status === 401 || error.response?.status === 404) {
-            localStorage.removeItem('co_token');
-            localStorage.removeItem('co_user');
-            localStorage.removeItem('co_impersonation');
+          if (error.response?.status === 401 || error.response?.status === 404 || error.message === 'Invalid company session') {
+            authStorage.removeItem('co_token');
+            authStorage.removeItem('co_user');
+            authStorage.removeItem('co_impersonation');
+            authStorage.removeItem('co_company');
+            delete api.defaults.headers.common['Authorization'];
           }
         })
         .finally(() => setLoading(false));
       return;
     }
 
-    const token     = localStorage.getItem('co_token');
-    const savedUser = localStorage.getItem('co_user');
-    const savedCo   = localStorage.getItem('co_company');
-    const savedImp   = localStorage.getItem('co_impersonation');
+    const token     = authStorage.getItem('co_token');
+    const savedUser = authStorage.getItem('co_user');
+    const savedCo   = authStorage.getItem('co_company');
+    const savedImp   = authStorage.getItem('co_impersonation');
     if (token && savedUser) {
       const parsed = JSON.parse(savedUser);
       if (parsed.role !== 'superadmin') {
@@ -67,21 +71,21 @@ export function AuthProvider({ children }) {
           .then(({ data }) => {
             if (!data?.user || data.user.role === 'superadmin') throw new Error('Invalid company session');
             if (data.token) {
-              localStorage.setItem('co_token', data.token);
+              authStorage.setItem('co_token', data.token);
               api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
             }
-            localStorage.setItem('co_user', JSON.stringify(data.user));
+            authStorage.setItem('co_user', JSON.stringify(data.user));
             setUser(data.user);
             if (data.company) {
-              localStorage.setItem('co_company', JSON.stringify(data.company));
+              authStorage.setItem('co_company', JSON.stringify(data.company));
               setCompany(data.company);
             } else if (savedCo) setCompany(JSON.parse(savedCo));
-            if (savedImp) setImpersonation(JSON.parse(savedImp));
+            setImpersonation(data.impersonation || null);
           })
           .catch((error) => {
             const sessionRejected = error.response?.status === 401 || error.response?.status === 404;
             if (sessionRejected || error.message === 'Invalid company session') {
-              ['co_token','co_user','co_company','co_impersonation'].forEach(key => localStorage.removeItem(key));
+              ['co_token','co_user','co_company','co_impersonation'].forEach(key => authStorage.removeItem(key));
               delete api.defaults.headers.common['Authorization'];
               setUser(null); setCompany(null); setImpersonation(null);
               return;
@@ -103,13 +107,13 @@ export function AuthProvider({ children }) {
     const { data } = await api.post('/auth/login', { email, password, location });
     if (data.user.role === 'superadmin')
       throw new Error('Use the superadmin portal to sign in');
-    localStorage.setItem('co_token',   data.token);
-    localStorage.setItem('co_user',    JSON.stringify(data.user));
-    if (data.company) localStorage.setItem('co_company', JSON.stringify(data.company));
-    localStorage.removeItem('co_impersonation');
+    authStorage.setItem('co_token',   data.token);
+    authStorage.setItem('co_user',    JSON.stringify(data.user));
+    if (data.company) authStorage.setItem('co_company', JSON.stringify(data.company));
+    authStorage.removeItem('co_impersonation');
     api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
-    localStorage.setItem(`soc_last_activity:${data.user._id || data.user.id}`, String(Date.now()));
-    localStorage.removeItem(`soc_session_locked:${data.user._id || data.user.id}`);
+    authStorage.setItem(`soc_last_activity:${data.user._id || data.user.id}`, String(Date.now()));
+    authStorage.removeItem(`soc_session_locked:${data.user._id || data.user.id}`);
     setUser(data.user);
     setCompany(data.company || null);
     setImpersonation(null);
@@ -118,15 +122,15 @@ export function AuthProvider({ children }) {
 
   // Load auth data from localStorage (call after login to update context)
   const loadFromStorage = () => {
-    const token     = localStorage.getItem('co_token');
-    const savedUser = localStorage.getItem('co_user');
-    const savedCo   = localStorage.getItem('co_company');
+    const token     = authStorage.getItem('co_token');
+    const savedUser = authStorage.getItem('co_user');
+    const savedCo   = authStorage.getItem('co_company');
     if (token && savedUser) {
       const parsed = JSON.parse(savedUser);
       setUser(parsed);
       if (savedCo) setCompany(JSON.parse(savedCo));
-      const savedImp = localStorage.getItem('co_impersonation');
-      if (savedImp) setImpersonation(JSON.parse(savedImp));
+      const savedImp = authStorage.getItem('co_impersonation');
+      setImpersonation(savedImp ? JSON.parse(savedImp) : null);
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     }
   };
@@ -138,7 +142,7 @@ export function AuthProvider({ children }) {
       const { data } = await api.get('/payment/status');
       if (data) {
         setCompany(data);
-        localStorage.setItem('co_company', JSON.stringify(data));
+        authStorage.setItem('co_company', JSON.stringify(data));
       }
     } catch (err) {
       console.error('[AuthContext] refreshCompany failed:', err.message);
@@ -147,13 +151,16 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(({ reason = 'manual' } = {}) => {
     const accountId = user?._id || user?.id;
-    const logoutRequest = localStorage.getItem('co_token')
-      ? api.post('/auth/logout', { reason, location: getCachedBrowserLocation() }).catch(() => null)
+    const token = authStorage.getItem('co_token');
+    const logoutRequest = token
+      ? api.post('/auth/logout', { reason, location: getCachedBrowserLocation() }, {
+        headers: { Authorization: `Bearer ${token}` }, timeout: 10000,
+      }).catch(() => null)
       : Promise.resolve(null);
-    ['co_token','co_user','co_company','co_tenant','co_impersonation'].forEach(k => localStorage.removeItem(k));
+    ['co_token','co_user','co_company','co_tenant','co_impersonation'].forEach(k => authStorage.removeItem(k));
     if (accountId) {
-      localStorage.removeItem(`soc_last_activity:${accountId}`);
-      localStorage.removeItem(`soc_session_locked:${accountId}`);
+      authStorage.removeItem(`soc_last_activity:${accountId}`);
+      authStorage.removeItem(`soc_session_locked:${accountId}`);
     }
     try { sessionStorage.removeItem('partner_plan'); } catch {}
     delete api.defaults.headers.common['Authorization'];
@@ -173,8 +180,8 @@ export function AuthProvider({ children }) {
     const now = Date.now();
     lastActivityRef.current = now;
     lastPersistedActivityRef.current = now;
-    localStorage.setItem(`soc_last_activity:${accountId}`, String(now));
-    localStorage.removeItem(`soc_session_locked:${accountId}`);
+    authStorage.setItem(`soc_last_activity:${accountId}`, String(now));
+    authStorage.removeItem(`soc_session_locked:${accountId}`);
     lockedRef.current = false;
     setSessionLocked(false);
     setIdleLogoutSeconds(0);
@@ -187,10 +194,10 @@ export function AuthProvider({ children }) {
     if (reason === 'manual_screen_lock') {
       lastActivityRef.current = lockedAt;
       lastPersistedActivityRef.current = lockedAt;
-      localStorage.setItem(`soc_last_activity:${accountId}`, String(lockedAt));
+      authStorage.setItem(`soc_last_activity:${accountId}`, String(lockedAt));
     }
     lockedRef.current = true;
-    localStorage.setItem(`soc_session_locked:${accountId}`, String(lockedAt));
+    authStorage.setItem(`soc_session_locked:${accountId}`, String(lockedAt));
     setSessionLocked(true);
     api.post('/auth/session-event', { action: 'screen_locked', reason }).catch(() => null);
   }, [user?._id, user?.id]);
@@ -200,12 +207,12 @@ export function AuthProvider({ children }) {
     if (!accountId) return undefined;
     const activityKey = `soc_last_activity:${accountId}`;
     const lockKey = `soc_session_locked:${accountId}`;
-    const storedActivity = Number(localStorage.getItem(activityKey));
+    const storedActivity = Number(authStorage.getItem(activityKey));
     const now = Date.now();
     lastActivityRef.current = Number.isFinite(storedActivity) && storedActivity > 0 ? storedActivity : now;
     lastPersistedActivityRef.current = lastActivityRef.current;
-    if (!storedActivity) localStorage.setItem(activityKey, String(now));
-    const storedLock = Number(localStorage.getItem(lockKey));
+    if (!storedActivity) authStorage.setItem(activityKey, String(now));
+    const storedLock = Number(authStorage.getItem(lockKey));
     lockedRef.current = Number.isFinite(storedLock) && storedLock > 0;
     setSessionLocked(lockedRef.current);
     autoLogoutRef.current = false;
@@ -230,10 +237,11 @@ export function AuthProvider({ children }) {
       lastActivityRef.current = activityAt;
       if (activityAt - lastPersistedActivityRef.current >= 5000) {
         lastPersistedActivityRef.current = activityAt;
-        localStorage.setItem(activityKey, String(activityAt));
+        authStorage.setItem(activityKey, String(activityAt));
       }
     };
     const syncAcrossTabs = event => {
+      if (authStorage === sessionStorage) return;
       if (event.key === activityKey && event.newValue && !lockedRef.current) {
         lastActivityRef.current = Number(event.newValue) || Date.now();
       }
@@ -269,6 +277,15 @@ export function AuthProvider({ children }) {
       isAdmin, isDeptAdmin, isAnalyst, isManager,
       selectedDeptId, setSelectedDeptId,
     }}>
+      {impersonation?.active && user && (
+        <div role="status" style={{ padding: '10px 18px', background: '#7f1d1d', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
+          <span>{impersonation.banner || `Logged in as ${user.email} via Super Admin`}</span>
+          <button type="button" onClick={async () => { await logout(); window.close(); window.location.replace('/login'); }}
+            style={{ padding: '7px 12px', border: '1px solid #fca5a5', borderRadius: 6, background: 'transparent', color: '#fff', cursor: 'pointer' }}>
+            End user session
+          </button>
+        </div>
+      )}
       {children}
       {user && sessionLocked && (
         <div role="dialog" aria-modal="true" aria-label="Session locked" style={sessionLockBackdrop}>

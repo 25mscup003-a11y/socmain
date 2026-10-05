@@ -28,12 +28,12 @@ import SettingsPage from './pages/SettingsPage';
 import SystemMonitoringDashboard from './pages/SystemMonitoringDashboard';
 import PaymentManagementPage from './pages/PaymentManagementPage';
 import PartnersPage from './pages/PartnersPage';
-import PartnerDashboardPage from './pages/PartnerDashboardPage';
 import FraudDashboardPage from './pages/FraudDashboardPage';
 import SOCManagersPage from './pages/SOCManagersPage';
 import SoarPage from './pages/SoarPage';
 import AgentSecurityPage from './pages/AgentSecurityPage';
 import UserPasswordsPage from './pages/UserPasswordsPage';
+import AuditPage from './pages/AuditPage';
 import CorrelationPage from './pages/CorrelationPage';
 import ForensicsPage from './pages/ForensicsPage';
 
@@ -70,9 +70,6 @@ export default function App() {
         <Route path="companies" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
         <Route path="support" element={<RoleOnly roles={['superadmin']}><SupportPage /></RoleOnly>} />
         <Route path="partners" element={<RoleOnly roles={['superadmin']}><PartnersPage /></RoleOnly>} />
-        <Route path="partner-dashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
-        <Route path="partnerdashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
-        <Route path="partnerdashbos" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
         <Route path="partner-company" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
         <Route path="partnercompany" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
         <Route path="partnercompanies" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
@@ -109,6 +106,7 @@ export default function App() {
         <Route path="ajant-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="agent-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="user-passwords" element={<RoleOnly roles={['superadmin']}><UserPasswordsPage /></RoleOnly>} />
+        <Route path="audit" element={<RoleOnly roles={['superadmin']}><AuditPage /></RoleOnly>} />
         <Route path="agentsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
       </Route>
 
@@ -119,9 +117,6 @@ export default function App() {
         <Route path="companies" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
         <Route path="support" element={<RoleOnly roles={['superadmin']}><SupportPage /></RoleOnly>} />
         <Route path="partners" element={<RoleOnly roles={['superadmin']}><PartnersPage /></RoleOnly>} />
-        <Route path="partner-dashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
-        <Route path="partnerdashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
-        <Route path="partnerdashbos" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
         <Route path="partner-company" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
         <Route path="partnercompany" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
         <Route path="partnercompanies" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
@@ -158,6 +153,7 @@ export default function App() {
         <Route path="ajant-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="agent-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="user-passwords" element={<RoleOnly roles={['superadmin']}><UserPasswordsPage /></RoleOnly>} />
+        <Route path="audit" element={<RoleOnly roles={['superadmin']}><AuditPage /></RoleOnly>} />
         <Route path="agentsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
       </Route>
 

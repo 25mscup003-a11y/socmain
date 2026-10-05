@@ -27,6 +27,18 @@ const PartnerSchema = new mongoose.Schema({
     subscriptionPurchase:  { type: Boolean, default: false },
   },
   agentPricing: {
+    system: {
+      monthly: { type: Number, min: 0 },
+      yearly: { type: Number, min: 0 },
+    },
+    server: {
+      monthly: { type: Number, min: 0 },
+      yearly: { type: Number, min: 0 },
+    },
+    android: {
+      monthly: { type: Number, min: 0 },
+      yearly: { type: Number, min: 0 },
+    },
     monthly:    { type: Number, default: 0 },
     sixMonthly: { type: Number, default: 0 },
     yearly:     { type: Number, default: 0 },
@@ -85,6 +97,7 @@ const PartnerSchema = new mongoose.Schema({
     paymentId:     { type: String, default: '' },
     signature:     { type: String, default: '' },
     agentQuantity: { type: Number, default: 0 },
+    agentType: { type: String, enum: ['system', 'server', 'android'], default: 'system' },
     consumedQuantity: { type: Number, default: 0 },
     planType:      { type: String, enum: ['monthly', 'six_monthly', 'yearly'], default: 'monthly' },
     pricePerAgent: { type: Number, default: 0 },
@@ -154,6 +167,10 @@ const PartnerSchema = new mongoose.Schema({
     paidAt:    { type: Date },
   },
   profile: {
+    designation:     { type: String, default: 'Partner Admin' },
+    alternatePhone:  { type: String, default: '' },
+    language:        { type: String, default: 'English' },
+    timezone:        { type: String, default: '(GMT +05:30) Asia/Kolkata' },
     razorpayKeyId:    { type: String, default: '' },
     razorpaySecret:   { type: String, default: '' },
     bankAccount:      { type: String, default: '' },

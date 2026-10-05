@@ -1,3 +1,4 @@
+const { emitCompanyPartnerUpdate } = require('../utils/partnerRealtime');
 /**
  * Heartbeat Sweeper Service
  * Periodically checks all active systems and marks them offline
@@ -47,6 +48,10 @@ async function sweep(io) {
           lastSeen: sys.lastSeen,
         });
       }
+    }
+
+    for (const companyId of new Set(stale.map(system => String(system.companyId || '')).filter(Boolean))) {
+      void emitCompanyPartnerUpdate(io, companyId, 'agent_status');
     }
 
     console.log(`[HeartbeatSweeper] Marked ${stale.length} system(s) as disconnected`);

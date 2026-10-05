@@ -1,5 +1,6 @@
+const { emitPartnerUpdate } = require('../utils/partnerRealtime');
+const { normalizeAgentPricingUpdate, AGENT_TYPES } = require('../utils/partnerAgentPricing');
 const router = require('express').Router();
-const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -14,13 +15,18 @@ const Alert = require('../models/Alert.model');
 const System = require('../models/System.model');
 const Department = require('../models/Department.model');
 const PaymentHistory = require('../models/PaymentHistory.model');
+const { getPartnerCompanies, summarizePartnerCompanies, companyPaymentScope, getPartnerDirectoryRevenue } = require('../services/partnerDashboard.service');
 const LoginActivity = require('../models/LoginActivity.model');
+const SuperadminLoginAudit = require('../models/SuperadminLoginAudit.model');
+const { buildSuperadminAuditEvents, legacySuperadminLoginAudits } = require('../utils/superadminAudit');
 const AgentSecurityAudit = require('../models/AgentSecurityAudit.model');
 const PartnerNotification = require('../models/PartnerNotification.model');
 const PartnerSupportTicket = require('../models/PartnerSupportTicket.model');
 const CompanySupportTicket = require('../models/CompanySupportTicket.model');
 const { directSupportCompanies, requireDirectSupportCompany, emitCompanySupport, supportText, validSupportId, markCompanySupportRead } = require('../utils/companySupport');
 const { authenticate, requireSuperAdmin } = require('../middleware/auth.middleware');
+const { requireActiveSuperadminSession, requireOriginalSuperadminSession } = require('../middleware/superadminSession.middleware');
+const { createSuperadminLoginToken } = require('../services/superadminLogin.service');
 const { normalizeSlug, buildRegistrationUrl } = require('../utils/tenant');
 const { validatePassword } = require('../utils/validate');
 const { sendMail, partnerInvitationEmailHtml } = require('../utils/email');
@@ -31,11 +37,15 @@ const { CONTROL_KEYS, REQUIRED_CONTROLS, desktopSecuritySupported, securityPolic
 
 router.use(authenticate, requireSuperAdmin);
 
-function withTimeout(promise, fallback, ms = 10000) {
-  return Promise.race([
-    promise,
-    new Promise(resolve => setTimeout(() => resolve(fallback), ms)),
-  ]).catch(() => fallback);
+async function withTimeout(promise, fallback, ms = 10000) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => resolve(fallback), ms); })]);
+  } catch {
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function hasConfiguredEnv(...keys) {
@@ -82,27 +92,6 @@ function certificatePosture(system, now = Date.now()) {
   };
 }
 
-async function requireActiveSuperadminSession(req, res, next) {
-  try {
-    const userId = req.user?.id || req.user?._id;
-    const user = userId
-      ? await User.findOne({
-        _id: userId, role: 'superadmin', isActive: true,
-        $or: [{ accountStatus: 'active' }, { accountStatus: { $exists: false } }],
-      })
-        .select('_id name email role passwordChangedAt').lean()
-      : null;
-    if (!user) return res.status(401).json({ message: 'Superadmin session is no longer active' });
-    if (user.passwordChangedAt && req.user.iat
-      && user.passwordChangedAt.getTime() > Number(req.user.iat) * 1000) {
-      return res.status(401).json({ message: 'Session expired after credential change' });
-    }
-    req.activeUser = user;
-    next();
-  } catch (err) {
-    next(err);
-  }
-}
 
 function serializeSecurityAgent(system, now = Date.now()) {
   const lastSeen = system.lastSeen ? new Date(system.lastSeen) : null;
@@ -668,7 +657,8 @@ router.get('/partners', async (_req, res) => {
       .populate('ownerUserId', 'name email phone forcePasswordReset')
       .lean()
       .sort({ createdAt: -1 });
-    res.json(partners.map(partner => sanitizePartnerUploadedFiles(recalcAgentLicenses(partner))));
+    const revenue = await getPartnerDirectoryRevenue(partners.map(partner => partner._id));
+    res.json(partners.map(partner => ({ ...sanitizePartnerUploadedFiles(recalcAgentLicenses(partner)), nonPlatformRevenue: revenue.get(String(partner._id)) || 0 })));
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
@@ -769,11 +759,11 @@ router.get('/partners/:id/overview', async (req, res) => {
       return res.status(400).json({ message: 'Invalid partner id' });
     }
 
-    const partner = await withTimeout(Partner.findById(req.params.id)
+    const partner = await Partner.findById(req.params.id)
       .select('-profile.avatarDataUrl -profile.kycDocuments.gstCertificateDataUrl -profile.kycDocuments.panCardDataUrl -profile.kycDocuments.businessRegistrationDataUrl')
       .populate('tenantId', 'name slug subdomain status')
       .populate('ownerUserId', 'name email phone forcePasswordReset')
-      .lean(), null);
+      .lean();
     if (!partner) return res.status(404).json({ message: 'Partner not found' });
     sanitizePartnerUploadedFiles(recalcAgentLicenses(partner));
 
@@ -784,64 +774,26 @@ router.get('/partners/:id/overview', async (req, res) => {
         ...(partner.ownerUserId?.email ? [{ email: partner.ownerUserId.email }] : []),
       ],
     };
-    const [
-      companies,
-      agents,
-      payments,
-      supportTickets,
-      loginActivities,
-      companyCount,
-      activeCompanies,
-      inactiveCompanies,
-      totalAgents,
-      activeAgents,
-      offlineAgents,
-      activePlans,
-      expiringPlans,
-      revenueAgg,
-      pendingAgg,
-      monthlyTrend,
-    ] = await Promise.all([
-      withTimeout(Company.find(filter).sort({ createdAt: -1 }).limit(50).lean(), []),
-      withTimeout(System.find(filter).populate('companyId', 'name').sort({ updatedAt: -1 }).limit(50).lean(), []),
-      withTimeout(PaymentHistory.find(filter).populate('companyId', 'name').sort({ createdAt: -1 }).limit(50).lean(), []),
-      withTimeout(PartnerSupportTicket.find(filter).sort({ createdAt: -1 }).limit(100).lean(), []),
-      loginFilter.$or.length ? withTimeout(LoginActivity.find(loginFilter).sort({ createdAt: -1 }).limit(50).lean(), []) : Promise.resolve([]),
-      withTimeout(Company.countDocuments(filter), 0),
-      withTimeout(Company.countDocuments({ ...filter, status: 'active' }), 0),
-      withTimeout(Company.countDocuments({ ...filter, status: { $ne: 'active' } }), 0),
-      withTimeout(System.countDocuments(filter), 0),
-      withTimeout(System.countDocuments({ ...filter, status: 'active' }), 0),
-      withTimeout(System.countDocuments({ ...filter, status: { $in: ['inactive', 'disconnected', 'pending'] } }), 0),
-      withTimeout(Company.countDocuments({ ...filter, 'plan.isActive': true }), 0),
-      withTimeout(Company.countDocuments({
-        ...filter,
-        'plan.isActive': true,
-        'plan.expiresAt': { $lte: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000) },
-      }), 0),
-      withTimeout(PaymentHistory.aggregate([
-        { $match: { partnerId: partner._id, status: 'captured', source: { $ne: 'partner_checkout' }, planType: { $ne: 'partner_enterprise' } } },
-        { $group: { _id: null, total: { $sum: '$amountInr' } } },
-      ]), []),
-      withTimeout(PaymentHistory.aggregate([
-        { $match: { partnerId: partner._id, status: 'created', source: { $ne: 'partner_checkout' }, planType: { $ne: 'partner_enterprise' } } },
-        { $group: { _id: null, total: { $sum: '$amountInr' } } },
-      ]), []),
-      withTimeout(PaymentHistory.aggregate([
-        { $match: { partnerId: partner._id, status: 'captured', paidAt: { $ne: null }, source: { $ne: 'partner_checkout' }, planType: { $ne: 'partner_enterprise' } } },
-        {
-          $group: {
-            _id: { $dateToString: { format: '%Y-%m', date: '$paidAt' } },
-            total: { $sum: '$amountInr' },
-          }
-        },
-        { $sort: { _id: 1 } },
-        { $limit: 12 },
-      ]), []),
+    const companies = await getPartnerCompanies(partner._id);
+    const companyIds = companies.map(company => company._id);
+    const summary = summarizePartnerCompanies(companies);
+    const [agents, payments, supportTickets, loginActivities, trend] = await Promise.all([
+      System.find({ companyId: { $in: companyIds } })
+        .select('name hostname companyId agentType os osType ip status lastSeen agentVersion isActive createdAt installDate')
+        .populate('companyId', 'name').sort({ updatedAt: -1 }).lean(),
+      PaymentHistory.find(filter).populate('companyId', 'name').sort({ createdAt: -1 }).lean(),
+      PartnerSupportTicket.find(filter).sort({ createdAt: -1 }).lean(),
+      loginFilter.$or.length ? LoginActivity.find(loginFilter).sort({ createdAt: -1 }).limit(50).lean() : [],
+      PaymentHistory.aggregate([
+        { $match: { ...companyPaymentScope(partner._id, companyIds), status: 'captured' } },
+        { $group: {
+          _id: { $dateToString: { format: '%Y-%m', date: { $ifNull: ['$paidAt', '$createdAt'] } } },
+          total: { $sum: '$amountInr' },
+        } },
+        { $sort: { _id: -1 } }, { $limit: 12 },
+      ]),
     ]);
-
-    const paidRevenue = revenueAgg[0]?.total || 0;
-    const pendingRevenue = pendingAgg[0]?.total || 0;
+    const monthlyTrend = trend.reverse();
     const resourceRequests = normalizeResourceRequestHistory(partner);
     const recentActivity = [
       {
@@ -880,7 +832,7 @@ router.get('/partners/:id/overview', async (req, res) => {
         date: log.createdAt,
       })),
       ...payments.slice(0, 5).map(payment => ({
-        type: 'Payment Received',
+        type: payment.status === 'captured' ? 'Payment Received' : `Payment ${payment.status || 'created'}`,
         detail: `₹${Number(payment.amountInr || 0).toLocaleString('en-IN')} via Razorpay`,
         date: payment.paidAt || payment.createdAt,
       })),
@@ -898,25 +850,10 @@ router.get('/partners/:id/overview', async (req, res) => {
 
     res.json({
       partner,
-      summary: {
-        companyCount,
-        activeCompanies,
-        inactiveCompanies,
-        totalAgents,
-        activeAgents,
-        offlineAgents,
-        paidRevenue,
-        pendingRevenue,
-        totalRevenue: paidRevenue + pendingRevenue,
-        totalCollected: paidRevenue,
-        totalDue: pendingRevenue,
-        platformCommission: Math.round(paidRevenue * 0.2),
-        partnerProfit: paidRevenue - Math.round(paidRevenue * 0.2),
-        activePlans,
-        expiringPlans,
-      },
+      summary,
+      updatedAt: new Date().toISOString(),
       companies,
-      agents,
+      agents: agents.map(agent => ({ ...agent, isOnline: isSystemOnline(agent) })),
       payments,
       monthlyTrend,
       resourceRequests,
@@ -978,9 +915,15 @@ router.patch('/partners/:id', async (req, res) => {
       partner.partner_linked_account_id = String(req.body.partnerLinkedAccountId || req.body.partner_linked_account_id || '').trim();
     }
     if (req.body.agentPricing) {
+      const pricingUpdate = normalizeAgentPricingUpdate(req.body.agentPricing);
       partner.agentPricing = partner.agentPricing || {};
       ['monthly', 'sixMonthly', 'yearly'].forEach(key => {
-        if (req.body.agentPricing[key] !== undefined) partner.agentPricing[key] = Math.max(Number(req.body.agentPricing[key] || 0), 0);
+        if (pricingUpdate[key] !== undefined) partner.agentPricing[key] = pricingUpdate[key];
+      });
+      AGENT_TYPES.forEach(type => {
+        if (!pricingUpdate[type]) return;
+        partner.agentPricing[type] = partner.agentPricing[type] || {};
+        for (const [period, price] of Object.entries(pricingUpdate[type])) partner.agentPricing[type][period] = price;
       });
       partner.agentPricing.currency = 'INR';
       partner.agentPricing.updatedAt = new Date();
@@ -1166,36 +1109,19 @@ router.patch('/partners/:id/approve-resource-limit', async (req, res) => {
   }
 });
 
-router.post('/partners/:id/impersonate', async (req, res) => {
+router.post('/partners/:id/impersonate', requireActiveSuperadminSession, requireOriginalSuperadminSession, async (req, res) => {
   try {
     const partner = await Partner.findById(req.params.id)
       .populate('tenantId', 'name slug subdomain status')
-      .populate('ownerUserId', 'name email phone role tenantId partnerId forcePasswordReset');
+      .populate('ownerUserId', 'name email phone role tenantId partnerId forcePasswordReset isActive accountStatus');
     if (!partner?.ownerUserId) return res.status(404).json({ message: 'Partner admin not found' });
 
     const user = partner.ownerUserId;
-    const token = jwt.sign({
-      id: user._id,
-      email: user.email,
-      role: user.role,
+    const token = await createSuperadminLoginToken(req, user, 'support_debug', {
       tenantId: user.tenantId || partner.tenantId?._id || partner.tenantId,
-      partnerId: partner._id,
-      companyId: null,
-      departmentId: null,
-      impersonatedBy: req.user.id,
-      impersonatedByRole: 'superadmin',
-      impersonationMode: 'support_debug',
-    }, process.env.JWT_SECRET, { expiresIn: '4h' });
-
-    await LoginActivity.create({
-      userId: user._id,
-      email: user.email,
-      action: 'superadmin_impersonation_started',
-      success: true,
-      failReason: `by:${req.user.id}`,
-      ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
-      userAgent: req.get('user-agent') || '',
+      partnerId: partner._id, companyId: null, departmentId: null,
     });
+    res.set('Cache-Control', 'no-store');
 
     res.json({
       token,
@@ -1210,7 +1136,7 @@ router.post('/partners/:id/impersonate', async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   }
 });
 
@@ -1643,6 +1569,7 @@ router.patch('/companies/:id', async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
+      emitPartnerUpdate(io, company.partnerId, 'company_updated', company._id);
       io.to('superadmin').emit('company:update', { companyId: company._id, company });
       io.to(`company:${company._id}`).emit('company:update', { companyId: company._id, company });
       io.to(`company:${company._id}`).emit('notification:new', { companyId: company._id });
@@ -1686,6 +1613,7 @@ router.patch('/companies/:id/plan', async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
+      emitPartnerUpdate(io, company.partnerId, 'company_updated', company._id);
       io.to('superadmin').emit('company:update', { companyId: company._id, company });
       io.to(`company:${company._id}`).emit('company:update', { companyId: company._id, company });
       io.to(`company:${company._id}`).emit('notification:new', { companyId: company._id });
@@ -1695,7 +1623,7 @@ router.patch('/companies/:id/plan', async (req, res) => {
 });
 
 // POST /api/superadmin/companies/:id/impersonate — login as company admin
-router.post('/companies/:id/impersonate', async (req, res) => {
+router.post('/companies/:id/impersonate', requireActiveSuperadminSession, requireOriginalSuperadminSession, async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
     if (!company) return res.status(404).json({ message: 'Company not found' });
@@ -1720,29 +1648,11 @@ router.post('/companies/:id/impersonate', async (req, res) => {
       });
     }
 
-    const token = jwt.sign({
-      id: user._id,
-      email: user.email,
-      role: user.role,
+    const token = await createSuperadminLoginToken(req, user, 'company_admin_login', {
       tenantId: user.tenantId || company.tenantId,
       companyId: company._id,
-      departmentId: user.departmentId || null,
-      impersonatedBy: req.user.id,
-      impersonatedByRole: 'superadmin',
-      impersonationMode: 'company_admin_login',
-    }, process.env.JWT_SECRET, { expiresIn: '4h' });
-
-    const LoginActivity = require('../models/LoginActivity.model');
-    await LoginActivity.create({
-      userId: user._id,
-      companyId: null,
-      email: user.email,
-      action: 'superadmin_company_impersonation_started',
-      success: true,
-      failReason: `by:${req.user.id}`,
-      ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
-      userAgent: req.get('user-agent') || '',
     });
+    res.set('Cache-Control', 'no-store');
 
     const companyPortalUrl = process.env.COMPANY_PORTAL_URL || 'http://localhost:3000';
     res.json({
@@ -1758,7 +1668,7 @@ router.post('/companies/:id/impersonate', async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   }
 });
 
@@ -1893,6 +1803,67 @@ router.get('/users', requireActiveSuperadminSession, async (req, res) => {
       .sort({ createdAt: -1 });
     res.json(users);
   } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+router.get('/user-login-audits', requireActiveSuperadminSession, async (req, res) => {
+  try {
+    const [audits, superadmins, legacyLogins] = await Promise.all([
+      SuperadminLoginAudit.find({}).sort({ updatedAt: -1, createdAt: -1 }).limit(50).lean(),
+      User.find({ role: 'superadmin' }).select('_id name email').lean(),
+      LoginActivity.find({
+        action: { $in: ['superadmin_impersonation_started', 'superadmin_company_impersonation_started'] },
+        success: true, failReason: { $regex: '^by:[a-f0-9]{24}(?:;|$)', $options: 'i' },
+      }).select('_id userId email action failReason createdAt ipAddress userAgent')
+        .populate('userId', 'name email role').sort({ createdAt: -1 }).limit(50).lean(),
+    ]);
+    // OTP challenges and session refreshes are not new logins.
+    const activityFilter = {
+      userId: { $in: superadmins.map(admin => admin._id) },
+      action: { $in: ['login_success', 'logout', 'auto_logout'] }, success: true,
+    };
+    const fields = '_id userId email action sessionId createdAt ipAddress userAgent browser os device';
+    const activity = superadmins.length ? await LoginActivity.find(activityFilter).select(fields)
+      .sort({ createdAt: -1, _id: -1 }).limit(50).lean() : [];
+    // Include the matching login when a session's logout is inside the recent
+    // window but its login occurred before that window.
+    const sessionIds = [...new Set(activity.map(event => event.sessionId).filter(Boolean))];
+    const sessionActivity = sessionIds.length ? await LoginActivity.find({
+      ...activityFilter, sessionId: { $in: sessionIds },
+    }).select(fields).sort({ createdAt: 1, _id: 1 }).lean() : [];
+    const events = buildSuperadminAuditEvents(
+      [...audits, ...legacySuperadminLoginAudits(legacyLogins, superadmins)],
+      [...activity, ...sessionActivity], superadmins,
+    );
+    res.set('Cache-Control', 'no-store');
+    res.json(events);
+  } catch {
+    res.status(500).json({ message: 'Unable to load superadmin login activity.' });
+  }
+});
+
+router.post('/users/:id/impersonate', requireActiveSuperadminSession, requireOriginalSuperadminSession, async (req, res) => {
+  if (!mongoose.isObjectIdOrHexString(req.params.id)) {
+    return res.status(400).json({ message: 'Invalid user ID' });
+  }
+  try {
+    const user = await User.findById(req.params.id)
+      .select('_id name email role tenantId partnerId companyId departmentId isActive accountStatus');
+    if (!user) return res.status(404).json({ message: 'User account not found' });
+    if (!user.isActive || (user.accountStatus && user.accountStatus !== 'active')) {
+      return res.status(403).json({ message: 'This account is not active. Activate it before logging in.' });
+    }
+
+    const token = await createSuperadminLoginToken(req, user);
+
+    const portalUrl = user.role === 'superadmin'
+      ? (process.env.SUPERADMIN_ORIGIN || 'http://localhost:3001').split(',')[0].trim()
+      : (process.env.COMPANY_PORTAL_URL || process.env.COMPANY_FRONTEND_URL
+        || process.env.COMPANY_ORIGIN || 'http://localhost:3000').split(',')[0].trim();
+    res.set('Cache-Control', 'no-store');
+    res.json({ token, user, portalUrl });
+  } catch {
+    res.status(500).json({ message: 'Unable to log in as this user. Please try again.' });
+  }
 });
 
 // Use document.save() so the User model hashes the new password with Argon2id.

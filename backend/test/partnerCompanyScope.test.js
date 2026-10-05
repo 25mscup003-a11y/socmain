@@ -32,11 +32,11 @@ function setup(t) {
   });
   t.mock.method(Company, 'find', filter => {
     calls.companies.push(filter);
-    return query([ownCompany, otherCompany].filter(company => !filter.partnerId || company.partnerId === filter.partnerId));
+    return query([ownCompany, otherCompany].filter(company => !filter.partnerId || company.partnerId === String(filter.partnerId)));
   });
   t.mock.method(Company, 'findOne', filter => {
     calls.companies.push(filter);
-    return query([ownCompany, otherCompany].find(company => company._id === filter._id && company.partnerId === filter.partnerId) || null);
+    return query([ownCompany, otherCompany].find(company => company._id === filter._id && company.partnerId === String(filter.partnerId)) || null);
   });
   for (const model of [Company, User, Referral, System]) {
     t.mock.method(model, 'countDocuments', filter => { calls.related.push(filter); return Promise.resolve(1); });
@@ -77,7 +77,7 @@ test('company summary only includes companies belonging to the authenticated par
   const response = await request({ extra: { partnerId: otherPartnerId, companyId: otherCompany._id } });
   assert.equal(response.status, 200);
   assert.deepEqual(response.body.map(company => company._id), [ownCompany._id]);
-  assert.deepEqual(calls.companies, [{ partnerId }]);
+  assert.deepEqual(calls.companies.map(filter => ({ partnerId: String(filter.partnerId) })), [{ partnerId }]);
   for (const filter of calls.related) assert.deepEqual(filter.companyId, { $in: [ownCompany._id] });
 });
 
@@ -88,7 +88,10 @@ test('dashboard totals are scoped to the authenticated partner despite query ove
   assert.equal(response.body.partial, undefined);
   assert.equal(response.body.companies, 1);
   assert.ok(calls.related.length > 0);
-  for (const filter of calls.related) assert.equal(filter.partnerId, partnerId);
+  for (const filter of calls.related) {
+    if (filter.partnerId) assert.equal(String(filter.partnerId), partnerId);
+    else assert.deepEqual(filter.companyId, { $in: [ownCompany._id] });
+  }
 });
 
 test('a company belonging to another partner cannot be opened from a dashboard link', async t => {
@@ -104,7 +107,7 @@ test('partner two receives only its own company records, even when asking for pa
   const response = await request({ scope: otherPartnerId, extra: { partnerId } });
   assert.equal(response.status, 200);
   assert.deepEqual(response.body.map(company => company._id), [otherCompany._id]);
-  assert.deepEqual(calls.companies, [{ partnerId: otherPartnerId }]);
+  assert.deepEqual(calls.companies.map(filter => ({ partnerId: String(filter.partnerId) })), [{ partnerId: otherPartnerId }]);
   for (const filter of calls.related) assert.deepEqual(filter.companyId, { $in: [otherCompany._id] });
 });
 
@@ -127,4 +130,52 @@ test('captured payment totals take precedence over the latest pending payment', 
   const response = await request();
   assert.equal(response.body[0].revenue, 12000);
   assert.equal(response.body[0].pendingRevenue, 5000);
+});
+
+
+test('purchased capacity never inflates installed or online agent totals', async t => {
+  setup(t);
+  t.mock.method(Company, 'find', () => query([{ ...ownCompany, agentLicenseAllocation: 100, plan: { systemCount: 80 } }]));
+  t.mock.method(System, 'aggregate', async () => [{ _id: ownCompany._id, totalAgents: 3, active: 1 }]);
+  const companies = await request();
+  const dashboard = await request({ path: '/dashboard' });
+  assert.equal(companies.body[0].totalAgents, 3);
+  assert.equal(companies.body[0].inactiveAgents, 2);
+  assert.equal(dashboard.body.totalAgents, 3);
+  assert.equal(dashboard.body.activeAgents, 1);
+  assert.equal(dashboard.body.offlineAgents, 2);
+});
+
+test('company revenue and dashboard revenue use the same captured payments and zero commission', async t => {
+  setup(t);
+  t.mock.method(PaymentHistory, 'aggregate', async pipeline => {
+    const match = pipeline[0].$match;
+    assert.equal(match.partnerId.constructor.name, 'ObjectId');
+    assert.deepEqual(match.source.$nin, ['partner_checkout', 'partner_agent_license']);
+    return [{ _id: ownCompany._id, totalCollection: 12000, pendingCollection: 5000, paymentCount: 2, platformCommission: 0, partnerPayout: 0 }];
+  });
+  const dashboard = await request({ path: '/dashboard' });
+  assert.equal(dashboard.body.totalRevenue, 12000);
+  assert.equal(dashboard.body.totalDue, 5000);
+  assert.equal(dashboard.body.settlement.platformCommission, 0);
+  assert.equal(dashboard.body.settlement.partnerPayout, 0);
+});
+
+test('dashboard failures are reported as unavailable instead of successful paid accounts with zero totals', async t => {
+  setup(t);
+  t.mock.method(System, 'aggregate', async () => { throw new Error('Database unavailable'); });
+  const response = await request({ path: '/dashboard' });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.partner, undefined);
+  assert.equal(response.body.companies, undefined);
+});
+
+test('company and subscription totals are not truncated at fifty records and exclude expired plans', async t => {
+  setup(t);
+  const companies = Array.from({ length: 65 }, (_, i) => ({ ...ownCompany, _id: i.toString(16).padStart(24, '0'), plan: { isActive: true, expiresAt: i ? '2099-01-01' : '2020-01-01' } }));
+  t.mock.method(Company, 'find', () => query(companies));
+  const response = await request({ path: '/dashboard' });
+  assert.equal(response.body.companies, 65);
+  assert.equal(response.body.activePlans, 64);
+  assert.equal(response.body.expiringPlans, 0);
 });

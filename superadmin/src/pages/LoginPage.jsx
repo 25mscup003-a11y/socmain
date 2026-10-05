@@ -1,3 +1,4 @@
+import { authStorage } from '../api/authStorage';
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -73,8 +74,9 @@ export default function LoginPage() {
         return;
       }
 
-      localStorage.setItem('sa_token', data.token);
-      localStorage.setItem('sa_user',  JSON.stringify(data.user));
+      authStorage.setItem('sa_token', data.token);
+      authStorage.setItem('sa_user',  JSON.stringify(data.user));
+      authStorage.removeItem('sa_impersonation');
       api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
       setTimeout(() => navigate('/'), 50);
     } catch (err) {

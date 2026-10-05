@@ -10,10 +10,10 @@ import {
   Users,
   CreditCard,
   Handshake,
-  BarChart3,
   ShieldAlert,
   Lock,
   KeyRound,
+  ClipboardList,
   LogOut,
   ShieldCheck,
   Activity,
@@ -52,11 +52,11 @@ export default function Layout() {
     { to: '/superadmin/users?role=analyst', Icon: Users, label: 'Analysts' },
     { to: '/superadmin/payment-management', Icon: CreditCard, label: 'Payment Control' },
     { to: '/superadmin/partners', Icon: Handshake, label: 'Partners' },
-    { to: '/superadmin/partner-dashboard', Icon: BarChart3, label: 'Partner Metrics' },
     { to: '/superadmin/partner-company', Icon: Building2, label: 'Partner Companies' },
     { to: '/superadmin/fraud-intelligence', Icon: ShieldAlert, label: 'Fraud Intel' },
     { to: '/superadmin/agent-security', Icon: Lock, label: 'AJNAT Security' },
     { to: '/superadmin/user-passwords', Icon: KeyRound, label: 'User Passwords' },
+    { to: '/superadmin/audit', Icon: ClipboardList, label: 'Audit' },
   ];
 
   return (

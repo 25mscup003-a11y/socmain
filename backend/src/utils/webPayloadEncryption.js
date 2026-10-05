@@ -194,7 +194,13 @@ async function webPayloadEncryption(req, res, next) {
     // one; encrypted metadata (including Authorization) remains mandatory.
     const contentLength = Number(req.headers['content-length'] || 0);
     const hasWireBody = contentLength > 0 || Boolean(req.headers['transfer-encoding']);
-    if (!['GET', 'HEAD'].includes(req.method) && hasWireBody && req.body && typeof req.body === 'object') {
+    // FormData carries native multipart bytes, with authentication encrypted in
+    // metadata above. Express can initialize req.body to {} before multer runs;
+    // that placeholder is not a JSON encryption envelope. Leave the stream for
+    // the route's upload parser while keeping response encryption installed.
+    const contentType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+    const isMultipart = contentType === 'multipart/form-data';
+    if (!isMultipart && !['GET', 'HEAD'].includes(req.method) && hasWireBody && req.body && typeof req.body === 'object') {
       const decrypted = JSON.parse(decryptWebPayload(req.body, key, REQUEST_AAD).toString('utf8'));
       req.body = Object.prototype.hasOwnProperty.call(decrypted, 'value') ? decrypted.value : decrypted;
     }

@@ -24,10 +24,14 @@ export default function SOCManagersPage() {
   const handleImpersonate = async (e, id) => {
     if (e && e.stopPropagation) e.stopPropagation();
     const newWindow = window.open('about:blank', '_blank');
+    if (newWindow) newWindow.opener = null;
     try {
       setImpersonatingId(id);
       const { data } = await api.post(`/super-admin/soc-managers/${id}/impersonate`);
-      const targetUrl = data.redirectUrl || `http://localhost:3000/?impersonationToken=${data.token}`;
+      const url = new URL(data.redirectUrl || import.meta.env.VITE_COMPANY_ORIGIN || 'http://localhost:3000');
+      url.searchParams.delete('impersonationToken');
+      url.hash = new URLSearchParams({ impersonationToken: data.token }).toString();
+      const targetUrl = url.toString();
       if (newWindow) {
         newWindow.location.href = targetUrl;
       } else {

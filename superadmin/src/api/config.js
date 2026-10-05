@@ -1,3 +1,4 @@
+import { authStorage } from './authStorage';
 import { io as socketIO } from 'socket.io-client';
 
 const DEFAULT_API_URL = typeof window !== 'undefined' && window.location.origin
@@ -41,7 +42,7 @@ export function io(url, opts = {}) {
       ...socketOptions,
       ...opts,
       auth: opts.auth || ((callback) => callback({
-        token: localStorage.getItem('sa_token') || '',
+        token: authStorage.getItem('sa_token') || '',
       })),
       transports: ['websocket', 'polling']
     };

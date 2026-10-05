@@ -23,10 +23,14 @@ export default function CompaniesPage() {
     e.stopPropagation();
     // Synchronously open blank tab before async request so browser popup blocker does not block it
     const newWindow = window.open('about:blank', '_blank');
+    if (newWindow) newWindow.opener = null;
     try {
       setImpersonatingId(companyId);
       const { data } = await api.post(`/superadmin/companies/${companyId}/impersonate`);
-      const targetUrl = data.redirectUrl || `http://localhost:3000/?impersonationToken=${data.token}`;
+      const url = new URL(data.redirectUrl || import.meta.env.VITE_COMPANY_ORIGIN || 'http://localhost:3000');
+      url.searchParams.delete('impersonationToken');
+      url.hash = new URLSearchParams({ impersonationToken: data.token }).toString();
+      const targetUrl = url.toString();
       if (newWindow) {
         newWindow.location.href = targetUrl;
       } else {

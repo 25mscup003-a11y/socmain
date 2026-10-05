@@ -6,7 +6,7 @@ import { SOCKET_URL, connectSocket, io } from '../api/config';
 import PartnerLayout from './PartnerLayout';
 
 export default function Layout() {
-  const { user, company, logout, isAdmin, isDeptAdmin, isAnalyst, impersonation, isImpersonating } = useAuth();
+  const { user, company, logout, isAdmin, isDeptAdmin, isAnalyst } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [openSection, setOpenSection] = useState('System Setup');
@@ -166,8 +166,6 @@ export default function Layout() {
         user={user}
         notificationCount={notificationCount}
         logout={logout}
-        impersonation={impersonation}
-        isImpersonating={isImpersonating}
       />
     );
   }
@@ -375,7 +373,7 @@ export default function Layout() {
 
         {/* User Profile */}
         <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(30, 58, 95, 0.4)', background: 'rgba(15, 23, 42, 0.6)', flexShrink: 0 }}>
-          <button onClick={() => { logout(); window.location.href = '/'; }} style={{
+          <button onClick={async () => { await logout(); window.location.href = '/'; }} style={{
             width: '100%',
             background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%)',
             border: '1px solid rgba(59, 130, 246, 0.4)',
@@ -404,14 +402,6 @@ export default function Layout() {
       </aside>
 
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {isImpersonating && (
-          <div style={{ ...impersonationBanner, marginBottom: 18, borderRadius: 8 }}>
-            <span>{impersonation?.banner || 'You are logged in as Partner Admin via Super Admin'}</span>
-            <button type="button" onClick={() => { logout(); window.location.href = 'http://localhost:3001/partners'; }} style={bannerButton}>
-              Back to Super Admin
-            </button>
-          </div>
-        )}
         <header style={{ height: 58, background: '#0c1a2e', borderBottom: '1px solid #1e3a5f', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0 28px', flexShrink: 0 }}>
           <div />
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
@@ -479,29 +469,3 @@ export default function Layout() {
     </div>
   );
 }
-
-const impersonationBanner = {
-  minHeight: 42,
-  background: '#7f1d1d',
-  borderBottom: '1px solid #fca5a5',
-  color: '#fff',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 12,
-  padding: '8px 18px',
-  fontSize: 13,
-  fontWeight: 900,
-  boxSizing: 'border-box',
-};
-
-const bannerButton = {
-  border: '1px solid rgba(255,255,255,.55)',
-  borderRadius: 6,
-  background: 'rgba(255,255,255,.12)',
-  color: '#fff',
-  padding: '7px 10px',
-  fontSize: 12,
-  fontWeight: 900,
-  cursor: 'pointer',
-};

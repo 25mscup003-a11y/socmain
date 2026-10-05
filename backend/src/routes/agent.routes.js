@@ -1,3 +1,4 @@
+const { emitPartnerUpdate } = require('../utils/partnerRealtime');
 const router = require('express').Router();
 const path = require('path');
 const fs = require('fs');
@@ -641,7 +642,7 @@ router.post('/heartbeat', async (req, res) => {
 
     const systemFilter = auth.ok ? { _id: auth.system._id } : { agentKey: agent_key };
     const system = await System.findOne(systemFilter)
-      .populate('companyId', 'name plan status')
+      .populate('companyId', 'name plan status partnerId')
       .lean();
 
     if (!system) return res.status(404).json({ stop_monitoring: true, message: 'Unknown agent key' });
@@ -997,6 +998,9 @@ router.post('/heartbeat', async (req, res) => {
         : { pendingCommands: { command: 'update' } };
     }
     await System.findByIdAndUpdate(system._id, heartbeatWrite);
+    if (system.status !== heartbeatUpdate.status || system.isActive !== heartbeatUpdate.isActive || !system.agentVersion) {
+      emitPartnerUpdate(req.app?.get?.('io'), company?.partnerId, 'agent_status', company?._id);
+    }
     if (pendingUpdateCommand?.auditId && (updateRequestConfirmed || failedUpdateRequestConfirmed)) {
       await AgentSecurityAudit.updateOne({ _id: pendingUpdateCommand.auditId, systemId: system._id, result: 'queued' }, {
         $set: { result: updateRequestConfirmed ? 'success' : 'failed', 'newValue.completedAt': now,

@@ -1,3 +1,4 @@
+import { authStorage } from '../api/authStorage';
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import api from '../api/axios';
@@ -23,8 +24,8 @@ export default function AcceptInvitePage() {
         name:     form.name,
         password: form.password,
       });
-      localStorage.setItem('co_token', data.token);
-      localStorage.setItem('co_user',  JSON.stringify(data.user));
+      authStorage.setItem('co_token', data.token);
+      authStorage.setItem('co_user',  JSON.stringify(data.user));
       api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
       setDone(true);
       setTimeout(() => navigate('/'), 1500);

@@ -1,6 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Activity as ActivityIcon, ArrowLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronRight, Clock3, CreditCard, FileText, Handshake, Headphones, IndianRupee, LayoutDashboard, LogIn, Mail, Monitor, MoreHorizontal, Pencil, Plus, RefreshCw, ShieldCheck, ShieldOff, UserRound, Wallet } from 'lucide-react';
 import api from '../api/axios';
+import PartnerOverviewSummaries from '../components/PartnerOverviewSummaries';
 import { SOCKET_URL, connectSocket, socketOptions, io } from '../api/config';
+import './PartnersPage.css';
+
+const partnerTabs = [
+  ['overview', 'Overview', LayoutDashboard],
+  ['edit', 'Edit', Pencil],
+  ['companies', 'Companies', Building2],
+  ['agents', 'Agents', Monitor],
+  ['requests', 'Total Agent', ShieldCheck],
+  ['agentAutoPay', 'Auto Pay', RefreshCw],
+  ['approvedRequests', 'Agent Payment Control System', Wallet],
+  ['subscriptions', 'Subscriptions', CreditCard],
+  ['documents', 'Documents', FileText],
+  ['activity', 'Activity', ActivityIcon],
+  ['support', 'Support', Headphones],
+];
+
+const agentPricingTypes = [
+  { type: 'system', label: 'System', tone: '#60a5fa' },
+  { type: 'server', label: 'Server', tone: '#a78bfa' },
+  { type: 'android', label: 'Android', tone: '#34d399' },
+];
+const agentPriceField = (type, period) => `agentPrice_${type}_${period}`;
+const agentPricingPayload = form => Object.fromEntries(agentPricingTypes.map(({ type }) => [type,
+  Object.fromEntries(['monthly', 'yearly'].map(period => [period, form[agentPriceField(type, period)]])),
+]));
 
 const initialForm = {
   name: '',
@@ -30,9 +57,7 @@ const initialEditForm = {
   agreementFileName: '',
   agreementFileType: '',
   agreementFilePath: '',
-  agentPriceMonthly: '',
-  agentPriceSixMonthly: '',
-  agentPriceYearly: '',
+  ...Object.fromEntries(agentPricingTypes.flatMap(({ type }) => ['monthly', 'yearly'].map(period => [agentPriceField(type, period), '']))),
 };
 
 const displayFileName = value => {
@@ -48,6 +73,34 @@ const displayFileName = value => {
     .trim() || 'Uploaded document';
 };
 
+const settingsFields = ['name', 'adminName', 'adminEmail', 'phone', 'status', 'platformPaymentAmount', 'pricingPlan', 'razorpayStatus', 'partnerLinkedAccountId', 'kycStatus'];
+const pricingFields = agentPricingTypes.flatMap(({ type }) => ['monthly', 'yearly'].map(period => agentPriceField(type, period)));
+const tabFields = { edit: settingsFields, approvedRequests: pricingFields };
+
+function partnerEditValues(partner) {
+  return {
+    name: partner.name || '',
+    adminName: partner.ownerUserId?.name || '',
+    adminEmail: partner.ownerUserId?.email || '',
+    phone: partner.ownerUserId?.phone || partner.mobile || '',
+    status: statusForEdit(partner.status),
+    companyLimit: partner.resourceRequest?.numberOfCompanies ?? '',
+    agentLimit: partner.resourceRequest?.numberOfAgents ?? '',
+    commissionPercent: partner.commissionPercent ?? partner.resourceRequest?.proposedCommission ?? '',
+    platformPaymentAmount: partner.plan?.quote?.amountInr ?? '',
+    pricingPlan: partner.plan?.type || 'enterprise',
+    razorpayStatus: partner.profile?.razorpayKeyId ? 'connected' : 'not_connected',
+    partnerLinkedAccountId: partner.partner_linked_account_id || '',
+    kycStatus: partner.profile?.kycStatus || 'not_submitted',
+    notes: partner.notes || '',
+    agreementDetails: partner.agreementDetails || '',
+    agreementFileName: partner.agreementFileName || '',
+    agreementFileType: partner.agreementFileType || '',
+    agreementFilePath: partner.agreementFilePath || '',
+    ...Object.fromEntries(agentPricingTypes.flatMap(({ type }) => ['monthly', 'yearly'].map(period => [agentPriceField(type, period), partner.agentPricing?.[type]?.[period] ?? partner.agentPricing?.[period] ?? 0]))),
+  };
+}
+
 export default function PartnersPage() {
   const [partners, setPartners] = useState([]);
   const [form, setForm] = useState(initialForm);
@@ -60,25 +113,37 @@ export default function PartnersPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
-  const [agreementDirty, setAgreementDirty] = useState(false);
+  const [editingTabs, setEditingTabs] = useState({});
   const selectedIdRef = useRef('');
   const agreementInputRef = useRef(null);
+  const listSequence = useRef(0);
+  const detailSequence = useRef(0);
+  const dirtyFields = useRef(new Set());
+  const editPartnerId = useRef('');
+  const refreshRef = useRef(() => {});
+  const [refreshing, setRefreshing] = useState(false);
+  const [dataError, setDataError] = useState('');
+  const [detailError, setDetailError] = useState('');
 
-  const load = async () => {
-    setLoading(true);
-    setMessage('');
+  const load = async ({ silent = false } = {}) => {
+    const sequence = ++listSequence.current;
+    if (!silent && !selectedIdRef.current) setLoading(true);
     try {
       const { data } = await api.get('/superadmin/partners');
+      if (sequence !== listSequence.current) return;
+      if (!Array.isArray(data)) throw new Error('Invalid partner list');
       setPartners(data);
+      setDataError('');
     } catch (err) {
-      setMessage(err.response?.data?.message || 'Partners load nahi ho paye');
+      if (sequence === listSequence.current) setDataError(err.response?.data?.message || 'Unable to refresh partners. Please retry.');
     } finally {
-      setLoading(false);
+      if (sequence === listSequence.current) setLoading(false);
     }
   };
 
   const loadPartnerOverview = async (partnerId, { silent = false } = {}) => {
     if (!partnerId) return null;
+    const sequence = ++detailSequence.current;
     if (partners.length && !partners.some(partner => String(partner._id) === String(partnerId))) {
       setSelectedId('');
       selectedIdRef.current = '';
@@ -89,9 +154,12 @@ export default function PartnersPage() {
     if (!silent) setDetailLoading(true);
     try {
       const { data } = await api.get(`/superadmin/partners/${partnerId}/overview`);
+      if (sequence !== detailSequence.current || String(selectedIdRef.current) !== String(partnerId)) return null;
       setPartnerDetail(data);
+      setDetailError('');
       return data;
     } catch (err) {
+      if (sequence !== detailSequence.current || String(selectedIdRef.current) !== String(partnerId)) return null;
       if (err.response?.status === 404) {
         setSelectedId('');
         selectedIdRef.current = '';
@@ -100,10 +168,10 @@ export default function PartnersPage() {
         setMessage('');
         return null;
       }
-      setMessage(err.response?.data?.message || 'Partner overview load nahi ho paya');
+      setDetailError(err.response?.data?.message || 'Unable to refresh partner details. Previously loaded data is still shown.');
       return null;
     } finally {
-      if (!silent) setDetailLoading(false);
+      if (sequence === detailSequence.current && String(selectedIdRef.current) === String(partnerId)) setDetailLoading(false);
     }
   };
 
@@ -113,20 +181,51 @@ export default function PartnersPage() {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
+  const refreshAll = async () => {
+    setRefreshing(true);
+    await Promise.allSettled([
+      load({ silent: true }),
+      selectedIdRef.current ? loadPartnerOverview(selectedIdRef.current, { silent: true }) : Promise.resolve(),
+    ]);
+    setRefreshing(false);
+  };
+  refreshRef.current = refreshAll;
+
   useEffect(() => {
     const socket = io(SOCKET_URL);
-    socket.emit('join:superadmin');
-    const onPartnerUpdate = async (event) => {
-      await load();
-      if (selectedIdRef.current && String(event.partnerId) === String(selectedIdRef.current)) {
-        await loadPartnerOverview(selectedIdRef.current, { silent: true });
-      }
+    let disposed = false;
+    let timer;
+    let running = false;
+    let queued = false;
+    const run = async () => {
+      if (disposed) return;
+      if (running) { queued = true; return; }
+      running = true;
+      await refreshRef.current();
+      running = false;
+      if (queued && !disposed) { queued = false; schedule(); }
     };
-    socket.on('partner:update', onPartnerUpdate);
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
+    const onConnect = () => { socket.emit('join:superadmin'); schedule(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') schedule(); };
+    const events = ['partner:update', 'company:update', 'support:ticket_new', 'support:message_new', 'support:ticket_updated'];
+    socket.emit('join:superadmin');
+    socket.on('connect', onConnect);
+    events.forEach(event => socket.on(event, schedule));
     const disconnectSocket = connectSocket(socket);
-    
+    const interval = setInterval(onVisible, 30000);
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
-      socket.off('partner:update', onPartnerUpdate);
+      disposed = true;
+      clearTimeout(timer);
+      clearInterval(interval);
+      listSequence.current++;
+      detailSequence.current++;
+      events.forEach(event => socket.off(event, schedule));
+      socket.off('connect', onConnect);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
       disconnectSocket();
     };
   }, []);
@@ -136,12 +235,7 @@ export default function PartnersPage() {
       setPartnerDetail(null);
       return;
     }
-    let cancelled = false;
-    loadPartnerOverview(selectedId).then(data => {
-      if (cancelled || !data) return;
-      setPartnerDetail(data);
-    });
-    return () => { cancelled = true; };
+    loadPartnerOverview(selectedId);
   }, [selectedId]);
 
   useEffect(() => {
@@ -173,7 +267,6 @@ export default function PartnersPage() {
     partnerName: detailPartner?.name || '-',
   })).sort((a, b) => new Date(b.requestedAt || 0) - new Date(a.requestedAt || 0));
   const selectedResourceRequests = resourceRequestRows.filter(request => openResourceStatuses.includes(request.status));
-  const selectedApprovedResourceRequests = resourceRequestRows.filter(request => request.status === 'approved');
   const nonPlatformPayments = (partnerDetail?.payments || []).filter(payment => payment.source !== 'partner_checkout' && payment.planType !== 'partner_enterprise');
   const selectedNonPlatformRevenue = nonPlatformPayments
     .filter(payment => payment.status === 'captured')
@@ -189,31 +282,14 @@ export default function PartnersPage() {
 
   useEffect(() => {
     if (!detailPartner) return;
-    setEditForm({
-      name: detailPartner.name || '',
-      adminName: detailPartner.ownerUserId?.name || '',
-      adminEmail: detailPartner.ownerUserId?.email || '',
-      phone: detailPartner.ownerUserId?.phone || detailPartner.mobile || '',
-      status: statusForEdit(detailPartner.status),
-      companyLimit: detailPartner.resourceRequest?.numberOfCompanies ?? '',
-      agentLimit: detailPartner.resourceRequest?.numberOfAgents ?? '',
-      commissionPercent: detailPartner.commissionPercent ?? detailPartner.resourceRequest?.proposedCommission ?? '',
-      platformPaymentAmount: detailPartner.plan?.quote?.amountInr ?? '',
-      pricingPlan: detailPartner.plan?.type || 'enterprise',
-      razorpayStatus: detailPartner.profile?.razorpayKeyId ? 'connected' : 'not_connected',
-      partnerLinkedAccountId: detailPartner.partner_linked_account_id || '',
-      kycStatus: detailPartner.profile?.kycStatus || 'not_submitted',
-      notes: detailPartner.notes || '',
-      agreementDetails: detailPartner.agreementDetails || '',
-      agreementFileName: detailPartner.agreementFileName || '',
-      agreementFileType: detailPartner.agreementFileType || '',
-      agreementFilePath: detailPartner.agreementFilePath || '',
-      agentPriceMonthly: detailPartner.agentPricing?.monthly ?? '',
-      agentPriceSixMonthly: detailPartner.agentPricing?.sixMonthly ?? '',
-      agentPriceYearly: detailPartner.agentPricing?.yearly ?? '',
-    });
-    setAgreementDirty(false);
-  }, [detailPartner?._id, detailPartner?.updatedAt, activeTab]);
+    if (editPartnerId.current !== detailPartner._id) {
+      dirtyFields.current.clear();
+      setEditingTabs({});
+      editPartnerId.current = detailPartner._id;
+    }
+    const nextForm = partnerEditValues(detailPartner);
+    setEditForm(previous => Object.fromEntries(Object.entries(nextForm).map(([key, value]) => [key, dirtyFields.current.has(key) ? previous[key] : value])));
+  }, [detailPartner?._id, detailPartner?.updatedAt]);
 
   const createPartner = async e => {
     e.preventDefault();
@@ -265,36 +341,24 @@ export default function PartnersPage() {
 
   const savePartnerSettings = async e => {
     e.preventDefault();
-    if (!selectedId) return;
+    if (!selectedId || !editingTabs.edit || saving) return;
     setSaving(true);
     setMessage('');
     try {
-      const payload = {
-        name: editForm.name,
-        adminName: editForm.adminName,
-        adminEmail: editForm.adminEmail,
-        phone: editForm.phone,
-        status: editForm.status,
-        commissionPercent: editForm.commissionPercent,
-        platformPaymentAmount: editForm.platformPaymentAmount,
-        pricingPlan: editForm.pricingPlan,
-        razorpayStatus: editForm.razorpayStatus,
-        partnerLinkedAccountId: editForm.partnerLinkedAccountId,
-        kycStatus: editForm.kycStatus,
-        agreementFileName: editForm.agreementFileName,
-        agreementFileType: editForm.agreementFileType,
-        agentPricing: {
-          monthly: editForm.agentPriceMonthly,
-          sixMonthly: editForm.agentPriceSixMonthly,
-          yearly: editForm.agentPriceYearly,
-        },
-      };
-      // Note: agreement PDF is uploaded separately via handleAgreementUpload
+      const payload = Object.fromEntries(settingsFields.filter(key => dirtyFields.current.has(key)).map(key => [key, editForm[key]]));
+      if (!Object.keys(payload).length) {
+        setEditingTabs(prev => ({ ...prev, edit: false }));
+        setMessage('No changes to save.');
+        return;
+      }
 
       const { data } = await api.patch(`/superadmin/partners/${selectedId}`, payload);
       setPartnerDetail(prev => prev ? { ...prev, partner: { ...prev.partner, ...data } } : prev);
       setPartners(prev => prev.map(partner => partner._id === selectedId ? { ...partner, ...data } : partner));
+      Object.keys(payload).forEach(key => dirtyFields.current.delete(key));
+      setEditingTabs(prev => ({ ...prev, edit: false }));
       setMessage('Partner settings saved.');
+      await loadPartnerOverview(selectedId, { silent: true });
     } catch (err) {
       setMessage(err.response?.data?.message || 'Partner settings save nahi ho payi');
     } finally {
@@ -302,61 +366,40 @@ export default function PartnersPage() {
     }
   };
 
-  const savePartnerLinkedAccount = async linkedAccountId => {
-    if (!selectedId) return;
+  const saveDocuments = async (payload, successMessage = 'Document settings saved.') => {
+    if (!selectedId || saving) return false;
+    const partnerId = selectedId;
     setSaving(true);
     setMessage('');
     try {
-      const { data } = await api.patch(`/superadmin/partners/${selectedId}`, {
-        partnerLinkedAccountId: linkedAccountId,
-      });
-      setPartnerDetail(prev => prev ? { ...prev, partner: data } : prev);
-      setEditForm(prev => ({ ...prev, partnerLinkedAccountId: data.partner_linked_account_id || '' }));
-      setMessage('Razorpay linked account saved.');
-      await load();
-      await loadPartnerOverview(selectedId, { silent: true });
+      const { data } = await api.patch(`/superadmin/partners/${partnerId}`, payload);
+      setPartners(prev => prev.map(partner => partner._id === partnerId ? { ...partner, ...data } : partner));
+      if (selectedIdRef.current === partnerId) {
+        setPartnerDetail(prev => prev ? { ...prev, partner: { ...prev.partner, ...data } } : prev);
+        setMessage(successMessage);
+        await loadPartnerOverview(partnerId, { silent: true });
+      }
+      return true;
     } catch (err) {
-      setMessage(err.response?.data?.message || 'Razorpay linked account save nahi ho paya');
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateKycStatus = async kycStatus => {
-    if (!selectedId) return;
-    setSaving(true);
-    setMessage('');
-    try {
-      const { data } = await api.patch(`/superadmin/partners/${selectedId}`, { kycStatus });
-      setPartnerDetail(prev => prev ? { ...prev, partner: data } : prev);
-      setPartners(prev => prev.map(partner => partner._id === selectedId ? { ...partner, ...data } : partner));
-      setEditForm(prev => ({ ...prev, kycStatus: data.profile?.kycStatus || kycStatus }));
-      setMessage(kycStatus === 'verified' ? 'KYC approved. Partner dashboard updated.' : 'KYC rejected. Partner dashboard updated.');
-      await load();
-      await loadPartnerOverview(selectedId, { silent: true });
-    } catch (err) {
-      setMessage(err.response?.data?.message || 'KYC status update nahi ho paya');
-      throw err;
+      if (selectedIdRef.current === partnerId) setMessage(err.response?.data?.message || 'Document settings save nahi ho payi');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
   const saveAgentPricing = async () => {
-    if (!selectedId) return;
+    if (!selectedId || !editingTabs.approvedRequests || saving) return;
     setSaving(true);
     setMessage('');
     try {
       const { data } = await api.patch(`/superadmin/partners/${selectedId}`, {
-        agentPricing: {
-          monthly: editForm.agentPriceMonthly,
-          sixMonthly: editForm.agentPriceSixMonthly,
-          yearly: editForm.agentPriceYearly,
-        },
+        agentPricing: agentPricingPayload(editForm),
       });
       setPartnerDetail(prev => prev ? { ...prev, partner: data } : prev);
       setPartners(prev => prev.map(partner => partner._id === selectedId ? { ...partner, ...data } : partner));
+      agentPricingTypes.forEach(({ type }) => ['monthly', 'yearly'].forEach(period => dirtyFields.current.delete(agentPriceField(type, period))));
+      setEditingTabs(prev => ({ ...prev, approvedRequests: false }));
       setMessage('Agent payment pricing saved for this partner.');
       await load();
       await loadPartnerOverview(selectedId, { silent: true });
@@ -368,7 +411,7 @@ export default function PartnersPage() {
   };
 
   const handleAgreementUpload = async file => {
-    if (!file) return;
+    if (!file || !editingTabs.edit || saving) return;
     if (file.type !== 'application/pdf') {
       setMessage('Agreement Details me sirf PDF upload kar sakte ho.');
       return;
@@ -396,8 +439,7 @@ export default function PartnersPage() {
         agreementFilePath: data.agreementFilePath || '',
       }));
       setPartnerDetail(prev => prev ? { ...prev, partner: { ...prev.partner, ...(data.partner || {}) } } : prev);
-      setAgreementDirty(false);
-      setMessage(`Agreement PDF uploaded: ${file.name}`);
+        setMessage(`Agreement PDF uploaded: ${file.name}`);
     } catch (err) {
       setMessage(err.response?.data?.message || 'Agreement upload fail ho gaya');
     } finally {
@@ -419,44 +461,33 @@ export default function PartnersPage() {
     }
   };
 
-  const approveResourceLimit = async () => {
-    if (!selectedId) return;
-    setSaving(true);
-    setMessage('');
-    try {
-      const { data } = await api.patch(`/superadmin/partners/${selectedId}/approve-resource-limit`);
-      setPartnerDetail(prev => prev ? { ...prev, partner: data } : prev);
-      setMessage('Resource limit approved.');
-      await load();
-      await loadPartnerOverview(selectedId, { silent: true });
-    } catch (err) {
-      setMessage(err.response?.data?.message || 'Resource approval failed');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const loginAsPartner = async () => {
-    if (!selectedId) return;
+    if (!selectedId || saving) return;
+    const newWindow = window.open('about:blank', '_blank');
+    if (!newWindow) {
+      setMessage('Allow pop-ups for this site, then click Login as Partner again.');
+      return;
+    }
+    newWindow.opener = null;
     setSaving(true);
     setMessage('');
     try {
       const { data } = await api.post(`/superadmin/partners/${selectedId}/impersonate`);
       const companyOrigin = import.meta.env.VITE_COMPANY_ORIGIN || 'http://localhost:3000';
       const url = new URL(companyOrigin);
-      url.searchParams.set('impersonationToken', data.token);
-      url.searchParams.set('impersonation', 'superadmin');
-      window.open(url.toString(), '_blank', 'noopener,noreferrer');
+      url.hash = new URLSearchParams({ impersonationToken: data.token }).toString();
+      if (!newWindow.closed) newWindow.location.replace(url.toString());
       setMessage('Partner support login opened in a new tab.');
     } catch (err) {
+      newWindow.close();
       setMessage(err.response?.data?.message || 'Login as Partner failed');
     } finally {
       setSaving(false);
     }
   };
 
-  const totalCompanies = summary.companyCount ?? selected?.resourceRequest?.numberOfCompanies ?? 0;
-  const totalAgents = summary.totalAgents ?? selected?.resourceRequest?.numberOfAgents ?? 0;
+  const totalCompanies = summary.companyCount ?? 0;
+  const totalAgents = summary.totalAgents ?? 0;
   const totalRevenue = Number(summary.totalRevenue ?? selectedNonPlatformRevenue) || 0;
   const totalCollected = Number(summary.totalCollected ?? totalRevenue) || 0;
   const totalDue = Number(summary.totalDue ?? (selected?.status === 'pending_payment' ? selected?.plan?.quote?.amountInr : 0) ?? 0) || 0;
@@ -464,7 +495,35 @@ export default function PartnersPage() {
   const capabilities = detailPartner?.capabilities || {};
   const planPaid = detailPartner?.plan?.paymentStatus === 'paid' && detailPartner?.plan?.isActive === true;
 
+  const startEditing = tab => {
+    if (saving || !partnerDetail) return;
+    setEditingTabs(prev => ({ ...prev, [tab]: true }));
+  };
+  const cancelEditing = tab => {
+    if (saving) return;
+    const saved = partnerEditValues(detailPartner);
+    tabFields[tab].forEach(key => dirtyFields.current.delete(key));
+    setEditForm(prev => ({ ...prev, ...Object.fromEntries(tabFields[tab].map(key => [key, saved[key]])) }));
+    setEditingTabs(prev => ({ ...prev, [tab]: false }));
+    setMessage('');
+  };
+
+  const closePartner = () => {
+    setEditingTabs({});
+    selectedIdRef.current = '';
+    detailSequence.current++;
+    dirtyFields.current.clear();
+    editPartnerId.current = '';
+    setDetailError('');
+    setSelectedId('');
+    setPartnerDetail(null);
+    setActiveTab('overview');
+    setMessage('');
+  };
+
   const openPartner = partnerId => {
+    setEditingTabs({});
+    dirtyFields.current.clear();
     if (!partners.some(partner => String(partner._id) === String(partnerId))) {
       setMessage('Selected partner no longer exists. Partner list refreshed.');
       setSelectedId('');
@@ -472,13 +531,18 @@ export default function PartnersPage() {
       load();
       return;
     }
+    selectedIdRef.current = partnerId;
+    setPartnerDetail(null);
     setSelectedId(partnerId);
+    setDetailLoading(true);
+    setDetailError('');
+    setMessage('');
     setActiveTab('overview');
   };
 
   if (!selectedId) {
     return (
-      <div>
+      <div className="partners-page">
         <div style={topBar}>
           <div>
             <h2 style={pageTitle}>Partner Management</h2>
@@ -493,8 +557,9 @@ export default function PartnersPage() {
         </div>
 
         {message && <div style={noticeStyle}>{message}</div>}
+        {dataError && <div style={noticeStyle}>{dataError} <button type="button" onClick={() => load()}>Retry</button></div>}
 
-        <div style={metricGrid}>
+        <div className="partner-metric-grid">
           <Metric label="Total Partners" value={stats.total} sub={`Active: ${stats.active} | Pending: ${stats.pending}`} color="#c084fc" icon="▦" />
           <Metric label="Active Partners" value={stats.active} sub="Approved or active" color="#34d399" icon="◆" />
           <Metric label="Pending Partners" value={stats.pending} sub="Awaiting approval" color="#f59e0b" icon="◉" />
@@ -530,87 +595,71 @@ export default function PartnersPage() {
   }
 
   return (
-    <div>
-      <div style={topBar}>
-        <div>
-          <button type="button" onClick={() => { setSelectedId(''); setPartnerDetail(null); setActiveTab('overview'); }} style={backButton}>← Back to Partners</button>
-          <h2 style={pageTitle}>{detailPartner?.name || 'Partner Management'}</h2>
-          <div style={metaLine}>
+    <div className="partners-page">
+      <header className="partner-detail-header">
+        <button type="button" onClick={closePartner} style={{ ...backButton, marginBottom:0, justifySelf:'start' }}>← Back to Partners</button>
+        <div className="partner-detail-header-row">
+          <div className="partner-detail-identity">
+            <h2>{detailPartner?.name || 'Partner Management'}</h2>
+            <span aria-hidden="true">•</span>
             <span>{detailPartner?.ownerUserId?.name || '-'}</span>
-            <span>•</span>
+            <span aria-hidden="true">•</span>
             <span>{detailPartner?.ownerUserId?.email || '-'}</span>
-            <span>•</span>
+            <span aria-hidden="true">•</span>
             <span>{detailPartner?.ownerUserId?.phone || detailPartner?.mobile || '-'}</span>
+            <span aria-hidden="true">•</span>
+            <span>Registered On: {formatDate(detailPartner?.createdAt)}</span>
+            {detailLoading && <span>· Loading API data...</span>}
           </div>
-          <div style={metaLine}>Registered On: {formatDate(detailPartner?.createdAt)} {detailLoading ? '· Loading API data...' : ''}</div>
-        </div>
 
-        <div style={{ display:'flex', gap:10, alignItems:'flex-start', flexWrap:'wrap', justifyContent:'flex-end' }}>
-          <input placeholder="Search partner..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, width:220 }} />
-          <button type="button" onClick={() => setActiveTab('edit')} style={outlineButton}>Edit Partner</button>
-          <button type="button" disabled={saving} onClick={loginAsPartner} style={outlineButton}>Login as Partner</button>
-          {selected && <button disabled={saving} onClick={() => partnerAction(selected._id, 'reject')} style={dangerOutline}>Suspend Partner</button>}
+          <div className="partner-detail-actions">
+            <input placeholder="Search partner..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, width:220, maxWidth:'100%' }} />
+            <button type="button" disabled={saving} onClick={loginAsPartner} style={outlineButton}>Login as Partner</button>
+            {selected && <button disabled={saving} onClick={() => partnerAction(selected._id, 'reject')} style={dangerOutline}>Suspend Partner</button>}
+          </div>
         </div>
-      </div>
+      </header>
+
+      <nav className="partner-detail-tabs" aria-label="Partner sections">
+        {partnerTabs.map(([tab, label, Icon]) => (
+          <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab)}>
+            <Icon size={15} aria-hidden="true" />{label}
+          </button>
+        ))}
+      </nav>
+      {(dataError || detailError) && <div style={noticeStyle} role="alert">
+        {detailError || dataError} <button type="button" disabled={refreshing} onClick={refreshAll}>Retry</button>
+      </div>}
 
       {message && <div style={noticeStyle}>{message}</div>}
 
-      <div style={metricGrid}>
-        <Metric label="Total Companies" value={totalCompanies} sub="From approved resources" color="#60a5fa" icon="▥" />
-        <Metric label="Total Agents" value={totalAgents} sub="Allocated agents" color="#818cf8" icon="▰" />
-        <Metric label="Total Revenue" value={`₹${totalRevenue.toLocaleString('en-IN')}`} sub="All Time" color="#34d399" icon="▣" />
-        <Metric label="Total Due" value={`₹${totalDue.toLocaleString('en-IN')}`} sub="Pending" color="#f87171" icon="▢" />
-        <Metric label="Platform Fee" value={`₹${platformFee.toLocaleString('en-IN')}`} sub={detailPartner?.plan?.paymentStatus === 'paid' ? 'Paid' : 'Pending'} color="#34d399" icon="◆" />
-      </div>
-
-      <div style={tabsWrap}>
-        {['overview', 'edit', 'companies', 'agents', 'requests', 'agentAutoPay', 'approvedRequests', 'subscriptions', 'documents', 'activity', 'support'].map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={tabButton(activeTab === tab)}>
-            {tab === 'requests' ? 'Total Agent' : tab === 'agentAutoPay' ? 'Auto Pay' : tab === 'approvedRequests' ? 'Agent Payment Control System' : title(tab)}
-          </button>
-        ))}
-      </div>
-
-      {loading ? <p style={{ color:'#a78bfa', fontSize:13 }}>Loading...</p> : (
+      {!partnerDetail ? <div className="partner-empty-state" role="status">{detailLoading ? 'Loading partner details…' : 'Partner details are unavailable. Please retry.'}</div> : (
         <>
           {activeTab === 'overview' && (
-            <div style={overviewGrid}>
-              <Panel title="Revenue Overview">
-                <div style={chartBox}>
-                  {chartBars(partnerDetail?.monthlyTrend).map((h, i) => <span key={i} style={{ height:`${h}%` }} />)}
-                </div>
-                <div style={monthsRow}>{chartLabels(partnerDetail?.monthlyTrend).map(label => <span key={label}>{label}</span>)}</div>
-              </Panel>
+            <>
+              <div className="partner-metric-grid">
+                <Metric label="Total Companies" value={totalCompanies} sub="Registered companies" color="#60a5fa" icon="▥" />
+                <Metric label="Total Agents" value={totalAgents} sub={`${summary.activeAgents || 0} online · ${summary.offlineAgents || 0} offline`} color="#818cf8" icon="▰" />
+                <Metric label="Total Revenue" value={`₹${totalRevenue.toLocaleString('en-IN')}`} sub="Company payments received" color="#34d399" icon="▣" />
+                <Metric label="Total Due" value={`₹${totalDue.toLocaleString('en-IN')}`} sub="Pending" color="#f87171" icon="▢" />
+                <Metric label="Platform Fee" value={`₹${platformFee.toLocaleString('en-IN')}`} sub={detailPartner?.plan?.paymentStatus === 'paid' ? 'Paid' : 'Pending'} color="#34d399" icon="◆" />
+              </div>
 
-              <Panel title="Resource Usage">
-                <Usage label="Companies" value={totalCompanies} total={Math.max(totalCompanies, 5)} />
-                <Usage label="Agents" value={totalAgents} total={Math.max(totalAgents, 50)} />
-              </Panel>
+              <PartnerOverviewSummaries detail={partnerDetail} tabs={partnerTabs} onOpenTab={setActiveTab} displayFileName={displayFileName} />
 
-	              <Panel title="Partner Details">
-	                <Detail label="Company Name" value={detailPartner?.name || '-'} />
-	                <Detail label="Admin Name" value={detailPartner?.ownerUserId?.name || '-'} />
-	                <Detail label="Email" value={detailPartner?.ownerUserId?.email || '-'} />
-	                <Detail label="Phone" value={detailPartner?.ownerUserId?.phone || detailPartner?.mobile || '-'} />
-	                <Detail label="Razorpay Account" value={detailPartner?.profile?.razorpayKeyId ? 'Connected' : 'Not connected'} good={!!detailPartner?.profile?.razorpayKeyId} />
-	                <Detail label="KYC Status" value={detailPartner?.profile?.kycStatus || 'not_submitted'} good={detailPartner?.profile?.kycStatus === 'verified'} />
-	                <button type="button" onClick={() => setActiveTab('documents')} style={{ ...outlineButton, marginTop:12 }}>Open Documents</button>
-	              </Panel>
-
-              <Panel title="Recent Activities">
-                {(partnerDetail?.activity?.length ? partnerDetail.activity : [{ type:'No Activity Yet', detail:'Partner events will appear here', date:null }]).slice(0, 4).map((item, index) => (
-                  <Activity key={index} text={item.type} sub={item.detail} date={formatDateTime(item.date)} />
-                ))}
-              </Panel>
-            </div>
+            </>
           )}
 
           {activeTab === 'edit' && (
-            <form onSubmit={savePartnerSettings} style={panelStyle}>
-              <h3 style={panelTitle}>Edit Partner</h3>
-              <div style={{ color:'#a78bfa', fontSize:12, marginBottom:14 }}>
-                Super Admin can update partner settings, resource limits, commission, KYC and agreement notes here.
+            <form id="partner-settings-form" onSubmit={savePartnerSettings} style={panelStyle}>
+              <div className="partner-edit-heading">
+                <h3 style={panelTitle}>Partner Settings</h3>
+                <PartnerEditActions editing={editingTabs.edit} saving={saving} onEdit={() => startEditing('edit')} onCancel={() => cancelEditing('edit')} formId="partner-settings-form" />
               </div>
+              <div style={{ color:'#a78bfa', fontSize:12, marginBottom:14 }}>
+                Click Edit to update partner settings. Save Changes applies your edits.
+              </div>
+              <fieldset className="partner-edit-fields" disabled={!editingTabs.edit || saving}>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
                 <Input label="Partner Company Name" value={editForm.name} onChange={value => setEditField('name', value)} required />
                 <Input label="Admin Name" value={editForm.adminName} onChange={value => setEditField('adminName', value)} required />
@@ -662,16 +711,15 @@ export default function PartnersPage() {
                 </div>
               </div>
               <div style={editActionsRow}>
-                <button disabled={saving} style={editPrimaryButton}>{saving ? 'Saving...' : 'Save Changes'}</button>
                 <button type="button" disabled={saving} onClick={() => partnerAction(selectedId, 'reject')} style={editDangerButton}>Suspend Partner</button>
                 <button type="button" disabled={saving} onClick={resetPartnerPassword} style={editOutlineButton}>Reset Password</button>
-                <button type="button" disabled={saving} onClick={approveResourceLimit} style={editOutlineButton}>Approve Resource Limit</button>
               </div>
+              </fieldset>
             </form>
           )}
 
           {activeTab === 'requests' && (
-            <TotalAgentPanel partner={detailPartner} activeAgents={totalAgents} inactiveAgents={summary.offlineAgents || 0} />
+            <TotalAgentPanel partner={detailPartner} activeAgents={summary.activeAgents || 0} inactiveAgents={summary.offlineAgents || 0} />
           )}
 
           {activeTab === 'agentAutoPay' && (
@@ -685,6 +733,9 @@ export default function PartnersPage() {
               setEditField={setEditField}
               saving={saving}
               onSave={saveAgentPricing}
+              editing={editingTabs.approvedRequests}
+              onEdit={() => startEditing('approvedRequests')}
+              onCancel={() => cancelEditing('approvedRequests')}
               capabilities={capabilities}
               planPaid={planPaid}
             />
@@ -693,7 +744,7 @@ export default function PartnersPage() {
           {activeTab === 'companies' && <CompaniesTable companies={partnerDetail?.companies || []} />}
           {activeTab === 'agents' && <AgentsTable agents={partnerDetail?.agents || []} />}
           {activeTab === 'subscriptions' && <SubscriptionsTable companies={partnerDetail?.companies || []} partner={detailPartner} payments={partnerDetail?.payments || []} />}
-          {activeTab === 'documents' && <DocumentsPanel partner={detailPartner} saving={saving} onSaveLinkedAccount={savePartnerLinkedAccount} onUpdateKycStatus={updateKycStatus} />}
+          {activeTab === 'documents' && <DocumentsPanel key={selectedId} partner={detailPartner} saving={saving} onSave={saveDocuments} />}
           {activeTab === 'activity' && <ActivityTable activity={partnerDetail?.activity || []} partner={detailPartner} />}
           {activeTab === 'support' && <SupportPanel partner={detailPartner} tickets={partnerDetail?.supportTickets || []} />}
 
@@ -748,6 +799,8 @@ export default function PartnersPage() {
   }
 
   function setEditField(key, value) {
+    if (!editingTabs[activeTab] || saving) return;
+    dirtyFields.current.add(key);
     setEditForm(prev => ({ ...prev, [key]: value }));
   }
 }
@@ -876,7 +929,7 @@ function AgentsTable({ agents }) {
           <Cell>{agent.companyId?.name || '-'}</Cell>
           <Cell>{agent.os || agent.osType || '-'}</Cell>
           <Cell>{agent.ip || '-'}</Cell>
-          <Cell><Badge>{agent.status}</Badge></Cell>
+          <Cell><Badge>{agent.isOnline ? 'online' : agent.status === 'pending' ? 'pending' : 'offline'}</Badge></Cell>
           <Cell>{formatDateTime(agent.lastSeen)}</Cell>
         </tr>
       )}
@@ -1054,61 +1107,60 @@ function AgentAutoPayPanel({ partner, payments = [] }) {
   );
 }
 
-function AgentPaymentControlPanel({ partner, editForm, setEditField, saving, onSave, capabilities = {}, planPaid }) {
-  const monthly = Number(editForm.agentPriceMonthly || 0);
-  const yearly = Number(editForm.agentPriceYearly || 0);
-  const rows = [
-    { icon:'▣', tone:'#238bff', label:'Monthly Plan', duration:'1 Month', price:monthly, description:'One Month Plan Price per Agent' },
-    { icon:'▣', tone:'#f59e0b', label:'Yearly Plan', duration:'1 Year', price:yearly, description:'One Year Plan Price per Agent' },
-  ];
+function PartnerEditActions({ editing, saving, onEdit, onCancel, formId, onSave }) {
+  return (
+    <div className="partner-edit-actions">
+      {editing ? <>
+        <button type="button" disabled={saving} onClick={onCancel}>Cancel</button>
+        <button type={formId ? 'submit' : 'button'} form={formId} disabled={saving} onClick={onSave} className="partner-edit-save">{saving ? 'Saving…' : 'Save Changes'}</button>
+      </> : <button type="button" disabled={saving} onClick={onEdit}><Pencil size={14} aria-hidden="true" /> Edit</button>}
+    </div>
+  );
+}
+
+function AgentPaymentControlPanel({ editForm, setEditField, saving, onSave, editing, onEdit, onCancel, capabilities = {}, planPaid }) {
   return (
     <section style={agentPaymentShell}>
-      <div style={agentPricingCard}>
-        <PaymentPlanInput
-          icon="▣"
-          tone="#238bff"
-          label="Monthly Plan / Agent"
-          value={editForm.agentPriceMonthly}
-          onChange={value => setEditField('agentPriceMonthly', value)}
-          help="Price per agent for 1 Month plan"
-        />
-        <PaymentPlanInput
-          icon="▣"
-          tone="#f59e0b"
-          label="Yearly Plan / Agent"
-          value={editForm.agentPriceYearly}
-          onChange={value => setEditField('agentPriceYearly', value)}
-          help="Price per agent for 1 Year plan"
-        />
-      </div>
-
-      <div style={agentPaymentActions}>
-        <button type="button" disabled={saving} onClick={onSave} style={agentPricingSaveButton}>{saving ? 'Saving...' : '▣ Save Agent Pricing'}</button>
-        <PaymentStatusChip tone="#22c55e">Payment Control: {planPaid || capabilities.subscriptionPurchase ? 'Allowed' : 'Pending'}</PaymentStatusChip>
-        <PaymentStatusChip tone="#238bff">System Control: {capabilities.createCompany ? 'Allowed' : 'Pending'}</PaymentStatusChip>
-      </div>
-
+      <form id="partner-agent-pricing-form" onSubmit={event => { event.preventDefault(); onSave(); }}>
+        <div className="partner-edit-heading">
+          <h3 style={panelTitle}>Agent Pricing</h3>
+          <PartnerEditActions editing={editing} saving={saving} onEdit={onEdit} onCancel={onCancel} formId="partner-agent-pricing-form" />
+        </div>
+        <div className="partner-agent-pricing" style={agentPricingCard}>
+          {agentPricingTypes.map(({ type, label, tone }) => (
+            <fieldset className="partner-device-pricing" key={type} disabled={!editing || saving}>
+              <legend style={{ color: tone }}>{label}</legend>
+              {['monthly', 'yearly'].map(period => (
+                <PaymentPlanInput
+                  key={period}
+                  icon="₹"
+                  tone={tone}
+                  label={`${label} ${title(period)} / Agent`}
+                  value={editForm[agentPriceField(type, period)]}
+                  onChange={value => setEditField(agentPriceField(type, period), value)}
+                  help={`Price per ${label.toLowerCase()} agent for ${period === 'monthly' ? '1 month' : '1 year'}`}
+                />
+              ))}
+            </fieldset>
+          ))}
+        </div>
+        <div style={{ ...agentPaymentActions, marginTop: 16 }}>
+          <PaymentStatusChip tone="#22c55e">Payment Control: {planPaid || capabilities.subscriptionPurchase ? 'Allowed' : 'Pending'}</PaymentStatusChip>
+          <PaymentStatusChip tone="#238bff">System Control: {capabilities.createCompany ? 'Allowed' : 'Pending'}</PaymentStatusChip>
+        </div>
+      </form>
       <div style={agentSummaryCard}>
-        <h3 style={agentSummaryTitle}>▣ Agent Pricing Summary</h3>
+        <h3 style={agentSummaryTitle}>Agent Pricing Summary</h3>
         <div style={agentSummaryTableWrap}>
           <table style={agentSummaryTable}>
-            <thead>
-              <tr>
-                {['Plan Type', 'Duration', 'Price per Agent', 'Description'].map(header => <th key={header} style={agentSummaryTh}>{header}</th>)}
-              </tr>
-            </thead>
+            <thead><tr>{['Agent Type', 'Monthly / Agent', 'Yearly / Agent'].map(header => <th key={header} style={agentSummaryTh}>{header}</th>)}</tr></thead>
             <tbody>
-              {rows.map(row => (
-                <tr key={row.label}>
-                  <td style={agentSummaryTd}>
-                    <span style={{ ...agentPlanIcon, color:row.tone, borderColor:`${row.tone}88`, background:`${row.tone}12` }}>{row.icon}</span>
-                    <b>{row.label}</b>
-                  </td>
-                  <td style={agentSummaryTd}>{row.duration}</td>
-                  <td style={agentSummaryTd}>
-                    <b style={{ color:row.tone }}>{row.price.toFixed(2)}</b> <span style={{ color:'#c4b5fd' }}>/ Agent</span>
-                  </td>
-                  <td style={agentSummaryTd}>{row.description}</td>
+              {agentPricingTypes.map(({ type, label, tone }) => (
+                <tr key={type}>
+                  <td style={{ ...agentSummaryTd, color: tone }}><b>{label}</b></td>
+                  {['monthly', 'yearly'].map(period => (
+                    <td key={period} style={agentSummaryTd}>₹{Number(editForm[agentPriceField(type, period)] || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -1127,6 +1179,8 @@ function PaymentPlanInput({ icon, tone, label, value, onChange, help }) {
         type="number"
         min="0"
         step="0.01"
+        required
+        aria-label={label}
         value={value}
         onChange={event => onChange(event.target.value)}
         style={agentPlanInput}
@@ -1140,22 +1194,14 @@ function PaymentStatusChip({ children, tone }) {
   return <span style={{ ...agentPaymentChip, color:tone, borderColor:`${tone}22`, background:`${tone}10` }}>{children}</span>;
 }
 
-function DocumentsPanel({ partner, saving, onSaveLinkedAccount, onUpdateKycStatus }) {
-  const [editingLinkedAccount, setEditingLinkedAccount] = useState(false);
-  const [linkedAccountId, setLinkedAccountId] = useState(partner?.partner_linked_account_id || '');
-  const [linkedAccountError, setLinkedAccountError] = useState('');
+function DocumentsPanel({ partner, saving, onSave }) {
   const [openDoc, setOpenDoc] = useState(null);
-
-  useEffect(() => {
-    setLinkedAccountId(partner?.partner_linked_account_id || '');
-    setEditingLinkedAccount(false);
-    setLinkedAccountError('');
-    setOpenDoc(null);
-  }, [partner?._id, partner?.partner_linked_account_id]);
+  const [kycAction, setKycAction] = useState('');
 
   if (!partner) return <EmptyPanel text="Partner details loading. Select a partner again if this stays empty." />;
 
   const profile = partner.profile || {};
+  const kycStatus = profile.kycStatus || 'not_submitted';
   const docs = [
     { name: 'Profile Image', id: profile.avatarFileName ? displayFileName(profile.avatarFileName) : '-', type: 'image', previewUrl: profile.avatarFilePath ? `${SOCKET_URL}/uploads/${profile.avatarFilePath}` : profile.avatarDataUrl || '', status: profile.avatarFileName ? 'Uploaded' : 'Not uploaded', tone: profile.avatarFileName ? 'good' : 'warn' },
     { name: 'GST Certificate', id: profile.kycDocuments?.gstCertificateName ? displayFileName(profile.kycDocuments.gstCertificateName) : profile.gstNumber || '-', type: profile.kycDocuments?.gstCertificateType || '', previewUrl: profile.kycDocuments?.gstCertificateFilePath ? `${SOCKET_URL}/uploads/${profile.kycDocuments.gstCertificateFilePath}` : profile.kycDocuments?.gstCertificateDataUrl || '', status: profile.gstVerified ? 'Verified' : profile.kycDocuments?.gstCertificateName ? 'Uploaded' : 'Not uploaded', tone: profile.gstVerified || profile.kycDocuments?.gstCertificateName ? 'good' : 'warn' },
@@ -1165,19 +1211,14 @@ function DocumentsPanel({ partner, saving, onSaveLinkedAccount, onUpdateKycStatu
     { name: 'Bank Account', id: profile.accountNumber || profile.bankAccount || '-', status: profile.accountNumber || profile.bankAccount ? 'Submitted' : 'Not submitted', tone: profile.accountNumber || profile.bankAccount ? 'good' : 'warn' },
     { name: 'Razorpay Linked Account', id: partner.partner_linked_account_id || '-', status: partner.partner_linked_account_id ? 'Connected' : 'Not connected', tone: partner.partner_linked_account_id ? 'good' : 'warn' },
   ];
-  const kycStatus = profile.kycStatus || 'not_submitted';
-  const updateKycStatus = status => {
-    onUpdateKycStatus?.(status).catch(() => {});
-  };
-  const saveLinkedAccount = async () => {
-    const cleanId = String(linkedAccountId || '').trim();
-    if (cleanId && !/^acc_[A-Za-z0-9]+$/.test(cleanId)) {
-      setLinkedAccountError('Enter valid Razorpay account ID, for example acc_xxxxxxxxxxxxxx.');
-      return;
+  const updateKycStatus = async status => {
+    if (saving || kycAction || status === kycStatus) return;
+    setKycAction(status);
+    try {
+      await onSave({ kycStatus: status }, status === 'verified' ? 'KYC approved.' : 'KYC rejected.');
+    } finally {
+      setKycAction('');
     }
-    setLinkedAccountError('');
-    await onSaveLinkedAccount?.(cleanId);
-    setEditingLinkedAccount(false);
   };
 
   return (
@@ -1188,19 +1229,19 @@ function DocumentsPanel({ partner, saving, onSaveLinkedAccount, onUpdateKycStatu
           <Badge>KYC: {kycStatus}</Badge>
           <button
             type="button"
-            disabled={saving || kycStatus === 'verified'}
+            disabled={saving || Boolean(kycAction) || kycStatus === 'verified'}
             onClick={() => updateKycStatus('verified')}
-            style={{ ...outlineButton, height:32, color:'#86efac', border:'1px solid #047857', opacity:saving || kycStatus === 'verified' ? .6 : 1 }}
+            style={{ ...outlineButton, height:32, color:'#86efac', border:'1px solid #047857', opacity:saving || kycAction || kycStatus === 'verified' ? .6 : 1 }}
           >
-            Approve KYC
+            {kycAction === 'verified' ? 'Approving...' : 'Approve KYC'}
           </button>
           <button
             type="button"
-            disabled={saving || kycStatus === 'rejected'}
+            disabled={saving || Boolean(kycAction) || kycStatus === 'rejected'}
             onClick={() => updateKycStatus('rejected')}
-            style={{ ...outlineButton, height:32, color:'#fca5a5', border:'1px solid #991b1b', opacity:saving || kycStatus === 'rejected' ? .6 : 1 }}
+            style={{ ...outlineButton, height:32, color:'#fca5a5', border:'1px solid #991b1b', opacity:saving || kycAction || kycStatus === 'rejected' ? .6 : 1 }}
           >
-            Reject KYC
+            {kycAction === 'rejected' ? 'Rejecting...' : 'Reject KYC'}
           </button>
         </div>
       </div>
@@ -1212,11 +1253,11 @@ function DocumentsPanel({ partner, saving, onSaveLinkedAccount, onUpdateKycStatu
 	          return (
 	          <div
 	            key={doc.name}
-	            role={canOpen && !editingLinkedAccount ? 'button' : undefined}
-            tabIndex={canOpen && !editingLinkedAccount ? 0 : undefined}
-            onClick={() => canOpen && !editingLinkedAccount && setOpenDoc(doc)}
+            role={canOpen ? 'button' : undefined}
+            tabIndex={canOpen ? 0 : undefined}
+            onClick={() => canOpen && setOpenDoc(doc)}
             onKeyDown={e => {
-              if (!canOpen || editingLinkedAccount) return;
+              if (!canOpen) return;
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 setOpenDoc(doc);
@@ -1229,7 +1270,7 @@ function DocumentsPanel({ partner, saving, onSaveLinkedAccount, onUpdateKycStatu
               background:'#0f172a',
               minHeight:94,
               textAlign:'left',
-              cursor:canOpen && !editingLinkedAccount ? 'pointer' : 'default',
+              cursor:canOpen ? 'pointer' : 'default',
               opacity:canOpen ? 1 : .86,
             }}
           >
@@ -1238,32 +1279,19 @@ function DocumentsPanel({ partner, saving, onSaveLinkedAccount, onUpdateKycStatu
               <span style={{ color:doc.tone === 'good' ? '#34d399' : '#f59e0b', fontSize:11, fontWeight:900 }}>{doc.status}</span>
             </div>
             <div style={{ color:'#a78bfa', fontSize:12, fontWeight:800, marginTop:12 }}>Reference</div>
-            {isRazorpayDoc && editingLinkedAccount ? (
+            {isRazorpayDoc ? (
               <div style={{ display:'grid', gap:8, marginTop:7 }}>
-                <input
-                  value={linkedAccountId}
-                  onChange={e => setLinkedAccountId(e.target.value)}
-                  placeholder="acc_xxxxxxxxxxxxxx"
-                  style={{ ...inputStyle, width:'100%' }}
-                />
+                <div style={{ color:'#e9d5ff', fontSize:13, fontWeight:850, wordBreak:'break-word' }}>{doc.id}</div>
                 <div style={{ color:'#a78bfa', fontSize:11, fontWeight:750, lineHeight:1.4 }}>
                   Razorpay Route linked account ID. Blank rakhne par payout manual/pending rahega.
                 </div>
-                {linkedAccountError && <div style={{ color:'#fca5a5', fontSize:11, fontWeight:850 }}>{linkedAccountError}</div>}
-                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                  <button type="button" disabled={saving} onClick={e => { e.stopPropagation(); saveLinkedAccount(); }} style={primaryButton}>{saving ? 'Saving...' : 'Save ID'}</button>
-                  <button type="button" disabled={saving} onClick={e => { e.stopPropagation(); setEditingLinkedAccount(false); setLinkedAccountId(partner.partner_linked_account_id || ''); setLinkedAccountError(''); }} style={outlineButton}>Cancel</button>
-                </div>
+
               </div>
 	            ) : (
 	              <>
 	                <div style={{ color:'#e9d5ff', fontSize:13, fontWeight:850, marginTop:5, wordBreak:'break-word' }}>{doc.id}</div>
 		                {!canOpen && !isRazorpayDoc && <div style={{ color:'#64748b', fontSize:11, fontWeight:850, marginTop:10 }}>No uploaded file</div>}
-		                {isRazorpayDoc && (
-	                  <button type="button" disabled={saving} onClick={e => { e.stopPropagation(); setEditingLinkedAccount(true); }} style={{ ...outlineButton, marginTop:12 }}>
-                    {partner.partner_linked_account_id ? 'Update ID' : 'Add ID'}
-                  </button>
-                )}
+
               </>
             )}
           </div>
@@ -1379,26 +1407,16 @@ function SupportPanel({ partner, tickets = [] }) {
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [replyMessage, setReplyMessage] = useState('');
   const [replyBusy, setReplyBusy] = useState(false);
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [statusDraft, setStatusDraft] = useState('');
+  const [statusBusy, setStatusBusy] = useState(false);
+
+  useEffect(() => { setEditingStatus(false); }, [selectedTicket?._id]);
 
   useEffect(() => {
     setSupportRows(tickets);
     setSelectedTicket(prev => prev ? (tickets.find(t => t._id === prev._id) || prev) : null);
   }, [tickets]);
-
-  useEffect(() => {
-    const socket = io(SOCKET_URL, socketOptions);
-    socket.emit('join:superadmin');
-    
-    const handleUpdate = () => {
-      // Refresh logic handled via real-time parent state updates, or local synchronization
-    };
-    
-    socket.on('support:ticket_new', handleUpdate);
-    socket.on('support:message_new', handleUpdate);
-    socket.on('support:ticket_updated', handleUpdate);
-    
-    return connectSocket(socket);
-  }, []);
 
   const sendReply = async (e) => {
     e.preventDefault();
@@ -1419,15 +1437,19 @@ function SupportPanel({ partner, tickets = [] }) {
   };
 
   const updateStatus = async (newStatus) => {
-    if (!selectedTicket) return;
+    if (!selectedTicket || !editingStatus || statusBusy) return;
+    setStatusBusy(true);
     try {
       const { data } = await api.patch(`/superadmin/support-tickets/${selectedTicket._id}`, {
         status: newStatus
       });
       setSelectedTicket(data);
       setSupportRows(prev => prev.map(t => t._id === data._id ? data : t));
+      setEditingStatus(false);
     } catch (err) {
       alert(err.response?.data?.message || 'Status update failed');
+    } finally {
+      setStatusBusy(false);
     }
   };
 
@@ -1436,29 +1458,22 @@ function SupportPanel({ partner, tickets = [] }) {
 
   return (
     <section style={panelStyle}>
-      <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start', flexWrap:'wrap', marginBottom:16 }}>
-        <div>
-          <h3 style={{ ...panelTitle, margin:0 }}>Support</h3>
-          <div style={{ color:'#a78bfa', fontSize:12, fontWeight:800, marginTop:5 }}>{partner?.name || 'Partner'} support tickets</div>
+      <div className="partner-support-summary" role="region" aria-label="Support summary" tabIndex={0}>
+        <div className="partner-support-heading">
+          <div><h3 style={{ ...panelTitle, margin:0 }}>Support</h3><Badge>{supportRows.length} Tickets</Badge></div>
+          <p>{partner?.name || 'Partner'} support tickets</p>
         </div>
-        <Badge>{supportRows.length} Tickets</Badge>
-      </div>
-
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12, marginBottom:16 }}>
-        <div style={supportInfoCard}>
-          <span>Open Tickets</span>
-          <strong>{openCount}</strong>
-          <p>{openCount ? 'Needs review' : 'No open tickets'}</p>
-        </div>
-        <div style={supportInfoCard}>
-          <span>Priority</span>
-          <strong>{highestPriority}</strong>
+        <div className="partner-support-stat">
+          <div><span>Priority</span><strong>{highestPriority}</strong></div>
           <p>{highestPriority === '-' ? 'No active issue priority' : 'Highest visible priority'}</p>
         </div>
-        <div style={supportInfoCard}>
-          <span>Partner Status</span>
-          <strong>{title(partner?.status || 'approved')}</strong>
+        <div className="partner-support-stat">
+          <div><span>Partner Status</span><strong>{title(partner?.status || 'approved')}</strong></div>
           <p>{partner?.ownerUserId?.email || '-'}</p>
+        </div>
+        <div className="partner-support-stat">
+          <div><span>Open Tickets</span><strong>{openCount}</strong></div>
+          <p>{openCount ? 'Needs review' : 'No open tickets'}</p>
         </div>
       </div>
 
@@ -1514,13 +1529,16 @@ function SupportPanel({ partner, tickets = [] }) {
         {selectedTicket ? (
           <div style={{ background: '#0f172a', border: '1px solid #312e81', borderRadius: 10, padding: 20 }}>
             <div style={{ borderBottom: '1px solid #312e81', paddingBottom: 12, marginBottom: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 6 }}>
                 <h3 style={{ margin: 0, fontSize: 15, color: '#e0f2fe' }}>Ticket: {selectedTicket.ticketId}</h3>
+                <PartnerEditActions editing={editingStatus} saving={statusBusy} onEdit={() => { setStatusDraft(selectedTicket.status); setEditingStatus(true); }} onCancel={() => setEditingStatus(false)} onSave={() => updateStatus(statusDraft)} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 12, color: '#94a3b8' }}>Status:</span>
                   <select
-                    value={selectedTicket.status}
-                    onChange={(e) => updateStatus(e.target.value)}
+                    aria-label="Ticket status"
+                    disabled={!editingStatus || statusBusy}
+                    value={editingStatus ? statusDraft : selectedTicket.status}
+                    onChange={(e) => setStatusDraft(e.target.value)}
                     style={{
                       background: '#1e1b4b', color: '#e0f2fe', border: '1px solid #312e81',
                       borderRadius: 6, padding: '4px 8px', fontSize: 12, fontWeight: 700, cursor: 'pointer'
@@ -1658,46 +1676,12 @@ function Panel({ title, children }) {
   );
 }
 
-function Usage({ label, value, total }) {
-  const pct = Math.min(100, Math.round((Number(value || 0) / Math.max(Number(total || 1), 1)) * 100));
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:'120px 70px 1fr 42px', gap:12, alignItems:'center', margin:'16px 0', color:'#e9d5ff', fontSize:12 }}>
-      <b>{label}</b>
-      <span>{value} / {total}</span>
-      <div style={{ height:7, borderRadius:99, background:'#312e81', overflow:'hidden' }}>
-        <div style={{ width:`${pct}%`, height:'100%', borderRadius:99, background:'#60a5fa' }} />
-      </div>
-      <span style={{ color:'#a78bfa' }}>{pct}%</span>
-    </div>
-  );
-}
-
-function Detail({ label, value, good }) {
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:'130px 1fr', gap:12, margin:'10px 0', color:'#e9d5ff', fontSize:12 }}>
-      <span style={{ color:'#a78bfa' }}>{label}</span>
-      <b style={{ color:good ? '#34d399' : '#e9d5ff' }}>{value}</b>
-    </div>
-  );
-}
-
 function attachmentUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
   if (/^https?:\/\//i.test(raw) || raw.startsWith('data:image/')) return raw;
   if (raw.includes('/')) return `${SOCKET_URL}/uploads/${raw.replace(/^\/+/, '').replace(/^uploads\//, '')}`;
   return '';
-}
-
-function Activity({ text, sub, date }) {
-  return (
-    <div style={{ borderLeft:'1px solid #312e81', padding:'0 0 14px 14px', position:'relative' }}>
-      <span style={{ position:'absolute', left:-5, top:3, width:9, height:9, borderRadius:'50%', background:'#34d399' }} />
-      <div style={{ color:'#e9d5ff', fontSize:12, fontWeight:900 }}>{text}</div>
-      <div style={{ color:'#a78bfa', fontSize:11 }}>{sub}</div>
-      <div style={{ color:'#7c3aed', fontSize:10, marginTop:3 }}>{date}</div>
-    </div>
-  );
 }
 
 function DarkTable({ headers, rows, renderRow, empty }) {
@@ -1712,9 +1696,9 @@ function DarkTable({ headers, rows, renderRow, empty }) {
   }, [rows?.length]);
 
   return (
-    <div style={{ border:'1px solid #312e81', borderRadius:10, overflow:'hidden' }}>
+    <div className="partner-table" style={{ border:'1px solid #293451', borderRadius:10, overflow:'hidden' }}>
       <div style={{ overflowX:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', background:'#1e1b4b' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', background:'#141c31' }}>
           <thead><tr>{headers.map(header => <th key={header} style={thStyle}>{header}</th>)}</tr></thead>
           <tbody>
             {(rows || []).length === 0 ? (
@@ -1737,7 +1721,7 @@ function Input({ label, value, onChange, type = 'text', required, placeholder = 
   return (
     <label style={{ color:'#c4b5fd', fontSize:12, fontWeight:800 }}>
       {label}
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} required={required} placeholder={placeholder} style={{ ...inputStyle, width:'100%', marginTop:5 }} />
+      <input aria-label={label} type={type} value={value} onChange={e => onChange(e.target.value)} required={required} placeholder={placeholder} style={{ ...inputStyle, width:'100%', marginTop:5 }} />
       {help && <span style={{ display:'block', color:'#a78bfa', fontSize:11, fontWeight:700, lineHeight:1.45, marginTop:5 }}>{help}</span>}
     </label>
   );
@@ -1747,7 +1731,7 @@ function Select({ label, value, onChange, options }) {
   return (
     <label style={{ color:'#c4b5fd', fontSize:12, fontWeight:800 }}>
       {label}
-      <select value={value} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, width:'100%', marginTop:5 }}>
+      <select aria-label={label} value={value} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, width:'100%', marginTop:5 }}>
         {options.map(([optionValue, labelText]) => <option key={optionValue} value={optionValue}>{labelText}</option>)}
       </select>
     </label>
@@ -1805,20 +1789,6 @@ function avatarColor(index) {
   return ['#c4b5fd', '#6ee7b7', '#fecaca', '#bfdbfe', '#fde68a'][index % 5];
 }
 
-function chartBars(trend = []) {
-  if (!trend.length) return [12, 44, 48, 88, 42, 96];
-  const max = Math.max(...trend.map(row => Number(row.total || 0)), 1);
-  return trend.map(row => Math.max(8, Math.round((Number(row.total || 0) / max) * 100)));
-}
-
-function chartLabels(trend = []) {
-  if (!trend.length) return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-  return trend.map(row => {
-    const [, month] = String(row._id || '').split('-');
-    return month || row._id;
-  });
-}
-
 function title(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -1834,14 +1804,10 @@ const backButton = { border:'none', background:'transparent', color:'#a78bfa', f
 const pageTitle = { fontSize:24, color:'#e9d5ff', margin:'0 0 5px', fontWeight:900 };
 const metaLine = { display:'flex', gap:8, flexWrap:'wrap', color:'#a78bfa', fontSize:12, marginTop:3 };
 const metricGrid = { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(185px, 1fr))', gap:14, marginBottom:18 };
-const metricCard = { background:'#1e1b4b', border:'1px solid #312e81', borderRadius:10, padding:'15px 16px', display:'flex', justifyContent:'space-between', gap:12, alignItems:'center', boxShadow:'0 10px 24px rgba(15, 23, 42, .22)' };
-const tabsWrap = { display:'flex', gap:14, flexWrap:'wrap', borderBottom:'1px solid #312e81', marginBottom:16 };
-const tabButton = active => ({ border:'none', borderBottom:`3px solid ${active ? '#7c3aed' : 'transparent'}`, background:'transparent', color:active ? '#e9d5ff' : '#a78bfa', padding:'10px 0', cursor:'pointer', fontSize:12, fontWeight:900 });
+const metricCard = { background:'#141c31', border:'1px solid #312e81', borderRadius:10, padding:'15px 16px', display:'flex', justifyContent:'space-between', gap:12, alignItems:'center', boxShadow:'0 10px 24px rgba(15, 23, 42, .22)' };
 const overviewGrid = { display:'grid', gridTemplateColumns:'1.25fr .9fr .85fr .85fr', gap:14 };
-const panelStyle = { background:'#1e1b4b', border:'1px solid #312e81', borderRadius:10, padding:16, boxShadow:'0 10px 24px rgba(15, 23, 42, .22)' };
+const panelStyle = { background:'#141c31', border:'1px solid #312e81', borderRadius:10, padding:16, boxShadow:'0 10px 24px rgba(15, 23, 42, .22)' };
 const panelTitle = { color:'#e9d5ff', fontSize:14, margin:'0 0 12px', fontWeight:900 };
-const chartBox = { height:170, display:'flex', alignItems:'end', gap:14, padding:'16px 10px 0', borderBottom:'1px solid #312e81', background:'linear-gradient(180deg, rgba(124,58,237,.08), rgba(15,23,42,.08))' };
-const monthsRow = { display:'flex', justifyContent:'space-around', color:'#8b5cf6', fontSize:11, marginTop:8 };
 const inputStyle = { padding:'9px 11px', borderRadius:6, background:'#0f172a', border:'1px solid #312e81', color:'#e2e8f0', fontSize:13, boxSizing:'border-box' };
 const primaryButton = { marginTop:12, padding:'9px 14px', borderRadius:6, border:'none', background:'#7c3aed', color:'#fff', cursor:'pointer', fontWeight:800 };
 const agentPaymentShell = { display:'grid', gap:18 };
@@ -1851,7 +1817,6 @@ const agentPlanInputLabel = { display:'flex', alignItems:'center', gap:8, fontSi
 const agentPlanInput = { height:40, border:'1px solid #1e3a5f', borderRadius:6, background:'#050c1d', color:'#e2e8f0', padding:'0 12px', fontSize:16, fontWeight:800, boxSizing:'border-box', width:'100%' };
 const agentPlanHelp = { color:'#c4b5fd', fontSize:12, fontWeight:750, lineHeight:1.4 };
 const agentPaymentActions = { display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' };
-const agentPricingSaveButton = { height:42, border:'none', borderRadius:6, background:'linear-gradient(90deg,#7c3aed,#9333ea)', color:'#fff', padding:'0 18px', fontSize:12, fontWeight:950, cursor:'pointer', boxShadow:'0 12px 24px rgba(124,58,237,.25)' };
 const agentPaymentChip = { minHeight:34, display:'inline-flex', alignItems:'center', border:'1px solid', borderRadius:999, padding:'0 14px', fontSize:12, fontWeight:900 };
 const agentSummaryCard = { background:'linear-gradient(180deg, rgba(30,27,75,.92), rgba(15,23,42,.92))', border:'1px solid #4c1d95', borderRadius:10, padding:14, boxShadow:'0 16px 35px rgba(2,6,23,.24)' };
 const agentSummaryTitle = { margin:'0 0 12px', color:'#e9d5ff', fontSize:14, fontWeight:950 };
@@ -1861,14 +1826,13 @@ const agentSummaryTh = { textAlign:'left', padding:'12px 14px', color:'#c4b5fd',
 const agentSummaryTd = { padding:'14px', color:'#e2e8f0', borderBottom:'1px solid #312e81', fontSize:13, verticalAlign:'middle' };
 const agentPlanIcon = { width:24, height:24, border:'1px solid', borderRadius:5, display:'inline-grid', placeItems:'center', marginRight:10, fontSize:13, fontWeight:950, verticalAlign:'middle' };
 const noticeStyle = { background:'#2e1065', border:'1px solid #7c3aed', color:'#e9d5ff', padding:10, borderRadius:8, marginBottom:14, fontSize:13 };
-const outlineButton = { height:36, border:'1px solid #312e81', borderRadius:7, background:'#1e1b4b', color:'#e9d5ff', padding:'0 14px', fontWeight:900, cursor:'pointer' };
+const outlineButton = { height:36, border:'1px solid #312e81', borderRadius:7, background:'#141c31', color:'#e9d5ff', padding:'0 14px', fontWeight:900, cursor:'pointer' };
 const dangerOutline = { ...outlineButton, border:'1px solid #ef4444', color:'#fca5a5' };
 const editActionsRow = { display:'flex', gap:12, flexWrap:'wrap', alignItems:'center', marginTop:18 };
-const editPrimaryButton = { ...primaryButton, marginTop:0, height:44, minWidth:160, padding:'0 20px', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:950 };
 const editOutlineButton = { ...outlineButton, height:44, minWidth:175, padding:'0 18px', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:16 };
 const editDangerButton = { ...editOutlineButton, border:'1px solid #ef4444', color:'#fca5a5' };
 const modalBackdrop = { position:'fixed', inset:0, background:'rgba(2, 6, 23, .72)', display:'grid', placeItems:'center', padding:18, zIndex:50 };
-const modalPanel = { width:'min(760px, 100%)', maxHeight:'92vh', overflow:'auto', background:'#1e1b4b', border:'1px solid #4c1d95', borderRadius:10, padding:18, boxShadow:'0 24px 60px rgba(2, 6, 23, .45)' };
+const modalPanel = { width:'min(760px, 100%)', maxHeight:'92vh', overflow:'auto', background:'#141c31', border:'1px solid #4c1d95', borderRadius:10, padding:18, boxShadow:'0 24px 60px rgba(2, 6, 23, .45)' };
 const previewBox = { border:'1px solid #312e81', borderRadius:8, background:'#0f172a', padding:16, minHeight:110 };
 const documentFrame = { marginTop:14, border:'1px solid #312e81', borderRadius:8, background:'#0f172a', minHeight:360, overflow:'hidden', display:'grid', placeItems:'center' };
 const imagePreview = { display:'block', maxWidth:'100%', maxHeight:'70vh', objectFit:'contain' };
@@ -1878,7 +1842,7 @@ const thStyle = { textAlign:'left', padding:'10px 12px', color:'#c4b5fd', fontSi
 const tdStyle = { padding:'10px 12px', color:'#e2e8f0', fontSize:12, borderBottom:'1px solid #312e81' };
 const tablePager = { display:'flex', justifyContent:'flex-end', gap:10, padding:'14px 18px', background:'#0f172a', borderTop:'1px solid #312e81' };
 const tablePagerButton = disabled => ({ minWidth:74, height:34, borderRadius:8, border:'1px solid #1e3a8a', background:'#0b1220', color:disabled ? '#475569' : '#93c5fd', fontSize:13, fontWeight:850, cursor:disabled ? 'not-allowed' : 'pointer' });
-const directoryCard = { background:'#1e1b4b', border:'1px solid #312e81', borderRadius:10, overflow:'hidden', boxShadow:'0 10px 24px rgba(15, 23, 42, .22)' };
+const directoryCard = { background:'#141c31', border:'1px solid #312e81', borderRadius:10, overflow:'hidden', boxShadow:'0 10px 24px rgba(15, 23, 42, .22)' };
 const directoryHeader = { display:'grid', gridTemplateColumns:'1.7fr 1.4fr 1fr 1fr .9fr .9fr 1.15fr', gap:12, padding:'16px 20px', background:'#2e1065', borderBottom:'1px solid #312e81', color:'#c4b5fd', fontSize:13, fontWeight:900 };
 const directoryRow = { display:'grid', gridTemplateColumns:'1.7fr 1.4fr 1fr 1fr .9fr .9fr 1.15fr', gap:12, alignItems:'center', padding:'16px 20px', borderBottom:'1px solid #312e81' };
 const partnerIdentity = { border:'none', background:'transparent', display:'flex', gap:14, alignItems:'center', textAlign:'left', cursor:'pointer', padding:0 };
@@ -1887,7 +1851,7 @@ const directoryText = { color:'#e2e8f0', fontSize:13, fontWeight:700, overflow:'
 const iconButton = { width:40, height:36, borderRadius:7, border:'1px solid #312e81', background:'#0f172a', color:'#93c5fd', cursor:'pointer', fontWeight:900 };
 const linkButton = { border:'none', background:'transparent', color:'#e9d5ff', padding:0, fontSize:12, fontWeight:900, cursor:'pointer', textAlign:'left', textDecoration:'underline' };
 const supportImagePreviewWrap = { marginTop:12, border:'1px solid #2563eb', borderRadius:10, background:'#020617', padding:12 };
-const supportImageClose = { marginBottom:10, border:'1px solid #2563eb', background:'#1e1b4b', color:'#bfdbfe', borderRadius:8, padding:'7px 12px', fontSize:12, fontWeight:900, cursor:'pointer' };
+const supportImageClose = { marginBottom:10, border:'1px solid #2563eb', background:'#141c31', color:'#bfdbfe', borderRadius:8, padding:'7px 12px', fontSize:12, fontWeight:900, cursor:'pointer' };
 const supportImagePreview = { display:'block', maxWidth:'100%', maxHeight:'65vh', objectFit:'contain', borderRadius:8, background:'#fff' };
 const miniGood = { padding:'7px 9px', borderRadius:7, border:'none', background:'#047857', color:'#fff', fontSize:11, fontWeight:900, cursor:'pointer' };
 const miniDanger = { padding:'7px 9px', borderRadius:7, border:'none', background:'#991b1b', color:'#fff', fontSize:11, fontWeight:900, cursor:'pointer' };
@@ -1909,7 +1873,7 @@ const actionMenuButton = {
   width:'100%',
   border:'none',
   borderRadius:7,
-  background:'#1e1b4b',
+  background:'#141c31',
   color:'#e9d5ff',
   padding:'8px 10px',
   textAlign:'left',

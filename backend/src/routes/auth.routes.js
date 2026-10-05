@@ -1,9 +1,11 @@
+const { emitPartnerUpdate } = require('../utils/partnerRealtime');
 const router = require('express').Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User.model');
 const Company = require('../models/Company.model');
 const LoginActivity = require('../models/LoginActivity.model');
+const SuperadminLoginAudit = require('../models/SuperadminLoginAudit.model');
 const Tenant = require('../models/Tenant.model');
 const { generateOTP, sendOTP } = require('../utils/emailService');
 const {
@@ -80,6 +82,7 @@ function browserLocationFromRequest(req) {
 // Helper: record login activity (fire-and-forget)
 function trackLogin(req, userId, companyId, email, action, success, failReason) {
   if (req?.user?.impersonatedBy) return Promise.resolve(null);
+  if (action === 'login_success') req.loginSessionId = crypto.randomUUID();
   const userAgent = req.get('user-agent') || '';
   const client = parseUserAgent(userAgent);
   return LoginActivity.create({
@@ -88,6 +91,7 @@ function trackLogin(req, userId, companyId, email, action, success, failReason) 
     email,
     action,
     success,
+    sessionId: req.user?.sessionId || req.loginSessionId,
     failReason: failReason || undefined,
     ipAddress: getClientIp(req),
     userAgent,
@@ -158,7 +162,22 @@ router.get('/me', authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+    // Support sessions must keep their actor and original expiry on refresh.
+    // Otherwise /me silently upgrades an impersonation token to a normal login.
+    if (req.user.impersonatedBy) {
+      if (!user.isActive || (user.accountStatus && user.accountStatus !== 'active')) {
+        return res.status(401).json({ message: 'This user account is no longer active' });
+      }
+      const actor = await User.findById(req.user.impersonatedBy);
+      if (!actor || actor.role !== 'superadmin' || !actor.isActive
+        || (actor.accountStatus && actor.accountStatus !== 'active')
+        || [actor, user].some(account => account.passwordChangedAt
+          && new Date(account.passwordChangedAt).getTime() > Number(req.user.iat) * 1000)) {
+        return res.status(401).json({ message: 'Superadmin login session has expired' });
+      }
+    }
     const payload = await authPayload(user, {
+      sessionId: req.user.sessionId,
       mfaVerified: req.user.mfaVerified === true,
       mfaVerifiedAt: req.user.mfaVerifiedAt || null,
       amr: Array.isArray(req.user.amr) ? req.user.amr : [],
@@ -166,11 +185,12 @@ router.get('/me', authenticate, async (req, res) => {
     await trackSessionResume(req, user);
     res.json({
       ...payload,
+      ...(req.user.impersonatedBy ? { token: req.headers.authorization.slice(7) } : {}),
       impersonation: req.user.impersonatedBy ? {
         active: true,
         by: req.user.impersonatedBy,
         mode: req.user.impersonationMode || 'support_debug',
-        banner: 'You are logged in as Partner Admin via Super Admin',
+        banner: `You are logged in as ${user.name || user.email} (${user.role.replaceAll('_', ' ')}) via Super Admin`,
       } : null,
     });
   } catch (err) {
@@ -304,6 +324,7 @@ router.post(['/signup', '/signup/:referralSlug'], async (req, res) => {
       }
     }
 
+    emitPartnerUpdate(req.app?.get?.('io'), company.partnerId, 'company_created', company._id);
     await ensureDefaultSoarPlaybooks({
       companyId: company._id,
       tenantId: company.tenantId,
@@ -548,10 +569,10 @@ router.post('/login', async (req, res) => {
         });
       }
 
-      trackLogin(req, updatedUser._id, updatedUser.companyId, updatedUser.email, 'login_success', true);
+      await trackLogin(req, updatedUser._id, updatedUser.companyId, updatedUser.email, 'login_success', true);
       return res.json({
         message: 'Login successful',
-        ...(await authPayload(updatedUser)),
+        ...(await authPayload(updatedUser, { sessionId: req.loginSessionId })),
       });
     }
 
@@ -694,11 +715,11 @@ router.post('/verify-login-otp', async (req, res) => {
       });
     }
 
-    trackLogin(req, updatedUser._id, updatedUser.companyId, updatedUser.email, 'login_success', true);
+    await trackLogin(req, updatedUser._id, updatedUser.companyId, updatedUser.email, 'login_success', true);
 
     res.json({
       message: 'Login successful',
-      ...(await authPayload(updatedUser, { mfaVerified: true, mfaVerifiedAt: Date.now(), amr: ['pwd', 'email_otp'] })),
+      ...(await authPayload(updatedUser, { sessionId: req.loginSessionId, mfaVerified: true, mfaVerifiedAt: Date.now(), amr: ['pwd', 'email_otp'] })),
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -747,13 +768,13 @@ router.post('/verify-2fa-login', async (req, res) => {
     await User.findByIdAndUpdate(user._id, { lastLogin: new Date() });
 
     trackLogin(req, user._id, user.companyId, user.email, 'otp_verified', true);
-    trackLogin(req, user._id, user.companyId, user.email, 'login_success', true);
+    await trackLogin(req, user._id, user.companyId, user.email, 'login_success', true);
 
     console.log(`[LOGIN] ✅ 2FA verified for ${user.email} — Login complete`);
 
     res.json({
       message: '2FA verified. Login successful.',
-      ...(await authPayload(user, { mfaVerified: true, mfaVerifiedAt: Date.now(), amr: ['pwd', 'email_otp', 'totp'] })),
+      ...(await authPayload(user, { sessionId: req.loginSessionId, mfaVerified: true, mfaVerifiedAt: Date.now(), amr: ['pwd', 'email_otp', 'totp'] })),
     });
   } catch (err) {
     console.error('[verify-2fa-login]', err.message);
@@ -778,6 +799,12 @@ router.post('/session-event', authenticate, async (req, res) => {
 
 router.post('/logout', authenticate, async (req, res) => {
   try {
+    if (req.user.impersonatedBy && req.user.sessionId) {
+      await SuperadminLoginAudit.updateOne({
+        sessionId: req.user.sessionId, actorId: req.user.impersonatedBy,
+        targetUserId: req.user.id, logoutAt: null,
+      }, { $set: { logoutAt: new Date() } });
+    }
     const automatic = String(req.body?.reason || '').toLowerCase() === 'inactivity';
     await trackLogin(
       req,

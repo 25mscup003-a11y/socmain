@@ -621,10 +621,14 @@ export default function CompanyDetail({ companyIdOverride, initialCompanyData, h
   const handleLoginAsCompanyAdmin = async (e) => {
     e?.stopPropagation?.();
     const newWindow = window.open('about:blank', '_blank');
+    if (newWindow) newWindow.opener = null;
     try {
       setImpersonating(true);
       const { data } = await api.post(`/superadmin/companies/${companyId}/impersonate`);
-      const targetUrl = data.redirectUrl || `http://localhost:3000/?impersonationToken=${data.token}`;
+      const url = new URL(data.redirectUrl || import.meta.env.VITE_COMPANY_ORIGIN || 'http://localhost:3000');
+      url.searchParams.delete('impersonationToken');
+      url.hash = new URLSearchParams({ impersonationToken: data.token }).toString();
+      const targetUrl = url.toString();
       if (newWindow) {
         newWindow.location.href = targetUrl;
       } else {

@@ -1,3 +1,4 @@
+import { authStorage } from './authStorage';
 import { io as socketIO } from 'socket.io-client';
 
 const DEFAULT_API_URL = typeof window !== 'undefined' && window.location.origin
@@ -47,7 +48,7 @@ export function io(url, opts = {}) {
       ...socketOptions,
       ...opts,
       auth: (callback) => {
-        const token = localStorage.getItem('co_token') || localStorage.getItem('sa_token') || localStorage.getItem('token') || '';
+        const token = authStorage.getItem('co_token') || authStorage.getItem('sa_token') || authStorage.getItem('token') || '';
         if (typeof opts.auth === 'function') {
           opts.auth((userAuth) => callback({ token, ...(userAuth || {}) }));
         } else {
@@ -121,7 +122,7 @@ export function connectSocket(socket) {
   }
 
   const timer = window.setTimeout(() => {
-    const token = localStorage.getItem('co_token') || localStorage.getItem('sa_token') || localStorage.getItem('token');
+    const token = authStorage.getItem('co_token') || authStorage.getItem('sa_token') || authStorage.getItem('token');
     if (token && !socket.connected) {
       socket.connect();
     }

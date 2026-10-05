@@ -143,7 +143,6 @@ export default function PartnerAdminOverview({ stats, refreshVersion }) {
       <Panel title="Partner Admin Profile" action={<Status value={partner.status} />}>
         <div className="admin-dashboard__account">
           <div><strong>{partner.name}</strong><p>{partner.ownerUserId?.name || 'Admin name unavailable'}</p></div>
-          <Link className="admin-dashboard__link" to={`/superadmin/partner-dashboard?partnerId=${selectedId}`}>Full Dashboard <ArrowUpRight size={13} /></Link>
         </div>
         <Details rows={[
           ['Admin email', partner.ownerUserId?.email || '—'],

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearchParams, useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/axios';
 import { SOCKET_URL, connectSocket, socketOptions, io } from '../api/config';
@@ -19,6 +19,8 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
   const navigate = useNavigate();
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
+  const loadRef = useRef(null);
+  const loadSequence = useRef(0);
   const [companies, setCompanies] = useState([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [summaryError, setSummaryError] = useState('');
@@ -77,8 +79,8 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
   );
 
   const load = async (cachedPlanData = null, forceRefresh = true) => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
-    setMessage('');
     try {
       // If planData was pre-fetched by the gate, skip /payment/partner-plan call
       const planFetch = cachedPlanData
@@ -90,6 +92,7 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
         planFetch,
         api.get('/partner/companies', { timeout: 8000, skipCache: forceRefresh }),
       ]);
+      if (sequence !== loadSequence.current) return;
       const dashboardData = dashboardResult.status === 'fulfilled' ? dashboardResult.value.data : null;
       const planPartner = planResult.status === 'fulfilled' ? planResult.value.data?.partner : null;
       setSummaryError(dashboardResult.status === 'rejected'
@@ -105,30 +108,56 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
       if (dashboardResult.status === 'rejected' && !planPartner) throw dashboardResult.reason;
       setStats(prev => ({
         ...(dashboardData || prev || {}),
-        partner: { ...(dashboardData?.partner || prev?.partner || {}), ...(planPartner || {}) },
+        partner: { ...(planPartner || {}), ...(dashboardData?.partner || prev?.partner || {}) },
       }));
     } catch (err) {
-      setMessage('');
+      if (sequence !== loadSequence.current) return;
       setSummaryError('Could not refresh the partner summary. Any previous data is still shown. Use Sync to retry.');
       setStats(prev => prev || { partner: { name: user?.name || 'Partner Admin' } });
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   };
+  loadRef.current = load;
 
-  useEffect(() => { load(initialPlanData); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(initialPlanData); return () => { loadSequence.current++; }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (user?.role !== 'partner_admin' || !user?.partnerId) return undefined;
     const socket = io(SOCKET_URL, socketOptions);
-    socket.on('connect', () => {
-      socket.emit('join:partner', user.partnerId);
-    });
+    let timer;
+    let running = false;
+    let queued = false;
+    let disposed = false;
+    const run = async () => {
+      if (disposed) return;
+      if (running) { queued = true; return; }
+      running = true;
+      await loadRef.current(null, true);
+      running = false;
+      if (queued && !disposed) { queued = false; schedule(); }
+    };
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
+    const onConnect = () => { socket.emit('join:partner', user.partnerId); schedule(); };
+    const onUpdate = event => { if (String(event?.partnerId) === String(user.partnerId)) schedule(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') schedule(); };
     socket.emit('join:partner', user.partnerId);
-    socket.on('partner:update', (event) => {
-      if (String(event.partnerId) === String(user.partnerId)) load(null, true);
-    });
-    return connectSocket(socket);
+    socket.on('connect', onConnect);
+    socket.on('partner:update', onUpdate);
+    const disconnect = connectSocket(socket);
+    const interval = setInterval(onVisible, 30000);
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      clearInterval(interval);
+      socket.off('connect', onConnect);
+      socket.off('partner:update', onUpdate);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      disconnect();
+    };
   }, [user?.role, user?.partnerId]);
 
   const submitRequest = async e => {
@@ -153,8 +182,8 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
   const partner = stats?.partner || {};
   const resource = stats?.resourceRequest || {};
   const plan = partner.plan || {};
-  const companyLimit = resource.numberOfCompanies || Math.max(stats?.companies || 0, 20);
-  const agentLimit = resource.numberOfAgents || Math.max(stats?.totalAgents || 0, 500);
+  const companyLimit = resource.status === 'approved' ? Number(resource.numberOfCompanies || 0) : 0;
+  const agentLimit = resource.status === 'approved' ? Number(resource.numberOfAgents || 0) : 0;
   const totalCompanies = stats?.companies || 0;
   const totalAgents = stats?.totalAgents || 0;
   const paidRevenue = Number(stats?.paidRevenue || stats?.monthlyRevenue || 0);
@@ -219,6 +248,7 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
       ) : (
         <>
           {message && <div style={liveNotice}>{message}</div>}
+          {embedded && (summaryError || companiesError) && <div style={liveNotice} role="status">{summaryError || companiesError} <button type="button" onClick={() => load(null, true)}>Retry</button></div>}
           {view === 'dashboard' && (embedded
             ? <div style={embeddedDashboardShell}><DashboardView embedded partner={partner} companies={companies} summary={summary} setMessage={setMessage} /></div>
             : <PartnerCompaniesSummary partner={partner} companies={companies} companiesLoaded={companiesLoaded} loading={loading} error={summaryError} companiesError={companiesError} onRefresh={() => load(null, true)} />)}
@@ -1281,7 +1311,7 @@ function DashboardView({ embedded, partner, companies, summary, setMessage }) {
       <>
         <header style={dashboardHeader}>
           <h1 style={dashboardTitle}>Welcome, Partner Admin</h1>
-          <p style={dashboardSubtitle}>Partner Company: {partner.name || 'SecureTech Solutions Pvt. Ltd.'}</p>
+          <p style={dashboardSubtitle}>Partner Company: {partner.name || 'Partner account'}</p>
         </header>
 
         <div style={dashboardStats}>
@@ -1310,7 +1340,7 @@ function DashboardView({ embedded, partner, companies, summary, setMessage }) {
               <div style={dashboardLegend}>
                 <Legend color="#16a34a" text={`Active (${summary.activeAgents})`} />
                 <Legend color="#ef4444" text={`Inactive (${inactiveAgents})`} />
-                <Legend color="#94a3b8" text="Offline (0)" />
+
               </div>
             </div>
           </section>
@@ -1319,7 +1349,7 @@ function DashboardView({ embedded, partner, companies, summary, setMessage }) {
             <h2 style={dashboardCardTitle}>Resource Usage</h2>
             <CompactUsage label="Companies" value={summary.totalCompanies} total={summary.companyLimit} />
             <CompactUsage label="Agents" value={summary.totalAgents} total={summary.agentLimit} />
-            <CompactUsage label="Storage Usage" value={10} total={100} suffix=" GB" />
+
           </section>
 
           <section style={{ ...dashboardCard, ...noteCard }}>
@@ -1604,19 +1634,19 @@ function PaymentControlView({ partner, summary, companies = [], onRefresh, setMe
   }, []);
   const agentPricing = partner.agentPricing || {};
   const fallbackNewUser = {
-    pricePerSystemMonthly: Number(agentPricing.monthly || 0),
-    pricePerSystemYearly: Number(agentPricing.yearly || 0),
-    pricePerPhoneMonthly: Number(agentPricing.monthly || 0),
-    pricePerPhoneYearly: Number(agentPricing.yearly || 0),
-    pricePerServerMonthly: Number(agentPricing.monthly || 0),
-    pricePerServerYearly: Number(agentPricing.yearly || 0),
+    pricePerSystemMonthly: Number(agentPricing.system?.monthly ?? agentPricing.monthly ?? 0),
+    pricePerSystemYearly: Number(agentPricing.system?.yearly ?? agentPricing.yearly ?? 0),
+    pricePerPhoneMonthly: Number(agentPricing.android?.monthly ?? agentPricing.monthly ?? 0),
+    pricePerPhoneYearly: Number(agentPricing.android?.yearly ?? agentPricing.yearly ?? 0),
+    pricePerServerMonthly: Number(agentPricing.server?.monthly ?? agentPricing.monthly ?? 0),
+    pricePerServerYearly: Number(agentPricing.server?.yearly ?? agentPricing.yearly ?? 0),
   };
   useEffect(() => {
     setEditablePricing({
       newUser: { ...(livePricing?.newUser || fallbackNewUser) },
       renewal: { ...(livePricing?.renewal || fallbackNewUser) },
     });
-  }, [livePricing, agentPricing.monthly, agentPricing.yearly]);
+  }, [livePricing, agentPricing.updatedAt]);
   const selectedPricingKey = selectedType === 'renewal' ? 'renewal' : 'newUser';
   const liveRows = [
     { title:'New User', icon:'👤', tone:'#60a5fa', set: livePricing?.newUser || fallbackNewUser },
@@ -2093,7 +2123,6 @@ function SubscriptionView({ embedded, partner, summary, requestRows, onRefresh }
           <Card title="Usage Summary">
             <UsageRow label="Companies" value={summary.totalCompanies} total={summary.companyLimit} tone="#2563eb" />
             <UsageRow label="Agents" value={summary.totalAgents} total={summary.agentLimit} tone="#16a34a" />
-            <UsageRow label="Storage" value={120} total={200} suffix=" GB" tone="#7c3aed" />
             <UsageRow label="Logs Retention" value={60} total={90} suffix=" Days" tone="#f97316" />
           </Card>
         </div>

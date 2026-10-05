@@ -1,3 +1,4 @@
+import { authStorage } from '../api/authStorage';
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -59,8 +60,8 @@ export default function SignupPage() {
         phone: form.phone.trim(),
       });
 
-      localStorage.setItem('sa_token', data.token);
-      localStorage.setItem('sa_user', JSON.stringify(data.user));
+      authStorage.setItem('sa_token', data.token);
+      authStorage.setItem('sa_user', JSON.stringify(data.user));
       api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
 
       navigate('/');

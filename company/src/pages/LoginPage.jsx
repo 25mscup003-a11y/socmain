@@ -1,3 +1,4 @@
+import { authStorage } from '../api/authStorage';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
@@ -45,13 +46,14 @@ export default function LoginPage() {
       setScreen('reset');
       return;
     }
-    localStorage.setItem('co_token', data.token);
-    localStorage.setItem('co_user', JSON.stringify(data.user));
+    authStorage.setItem('co_token', data.token);
+    authStorage.setItem('co_user', JSON.stringify(data.user));
+    authStorage.removeItem('co_impersonation');
     if (data.company) {
-      localStorage.setItem('co_company', JSON.stringify(data.company));
+      authStorage.setItem('co_company', JSON.stringify(data.company));
     }
     if (data.tenant) {
-      localStorage.setItem('co_tenant', JSON.stringify(data.tenant));
+      authStorage.setItem('co_tenant', JSON.stringify(data.tenant));
     }
     api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
 

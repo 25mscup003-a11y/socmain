@@ -6,7 +6,7 @@ const Partner = require('../models/Partner.model');
 const User = require('../models/User.model');
 const Referral = require('../models/Referral.model');
 const System = require('../models/System.model');
-const Agent = require('../models/Agent.model');
+const { getPartnerCompanies, summarizePartnerCompanies, partnerScope, companyPaymentScope } = require('../services/partnerDashboard.service');
 const Pricing = require('../models/Pricing.model');
 const PaymentHistory = require('../models/PaymentHistory.model');
 const Department = require('../models/Department.model');
@@ -265,11 +265,15 @@ function normalizeResourceRequestHistory(partner) {
   return [...history, current];
 }
 
-function withTimeout(promise, fallback, ms = 10000) {
-  return Promise.race([
-    promise,
-    new Promise(resolve => setTimeout(() => resolve(fallback), ms)),
-  ]).catch(() => fallback);
+async function withTimeout(promise, fallback, ms = 10000) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => resolve(fallback), ms); })]);
+  } catch {
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function requireActivePartnerPlan(req, res, next) {
@@ -277,9 +281,10 @@ async function requireActivePartnerPlan(req, res, next) {
   const Partner = require('../models/Partner.model');
   const partner = await withTimeout(
     Partner.findById(req.user.partnerId).select('status plan').lean(),
-    { status: 'active', plan: { paymentStatus: 'paid', isActive: true } },
+    undefined,
     3000
   );
+  if (partner === undefined) return res.status(503).json({ message: 'Partner account could not be verified. Please retry.' });
   if (!partner) return res.status(404).json({ message: 'Partner not found' });
   if (!['approved', 'pending_quote', 'pending_payment', 'active'].includes(partner.status)) {
     return res.status(403).json({
@@ -303,9 +308,10 @@ async function requireApprovedPartner(req, res, next) {
   const Partner = require('../models/Partner.model');
   const partner = await withTimeout(
     Partner.findById(req.user.partnerId).select('status plan').lean(),
-    { status: 'active', plan: { paymentStatus: 'paid', isActive: true } },
+    undefined,
     3000
   );
+  if (partner === undefined) return res.status(503).json({ message: 'Partner account could not be verified. Please retry.' });
   if (!partner) return res.status(404).json({ message: 'Partner not found' });
   if (!['approved', 'pending_quote', 'pending_payment', 'active'].includes(partner.status)) {
     return res.status(403).json({
@@ -325,179 +331,52 @@ const ownPartnerFilter = (req) => {
 
 router.get('/dashboard', requireApprovedPartner, async (req, res) => {
   try {
-    const filter = ownPartnerFilter(req);
-    const settledValue = (result, fallback) => (
-      result.status === 'fulfilled' ? result.value : fallback
-    );
-    const partner = req.user.partnerId
-      ? await withTimeout(Partner.findById(req.user.partnerId)
-        .select('-profile.avatarDataUrl -profile.kycDocuments.gstCertificateDataUrl -profile.kycDocuments.panCardDataUrl -profile.kycDocuments.businessRegistrationDataUrl')
-        .populate('ownerUserId', 'name email phone role forcePasswordReset')
-        .lean(), null, 10000)
-      : null;
-    const results = await Promise.allSettled([
-      withTimeout(Company.countDocuments(filter), 0),
-      withTimeout(Company.countDocuments({ ...filter, status: 'active' }), 0),
-      withTimeout(Company.countDocuments({ ...filter, status: { $ne: 'active' } }), 0),
-      withTimeout(User.countDocuments(filter), 0),
-      withTimeout(Referral.countDocuments(req.user.role === 'superadmin' ? {} : { tenantId: req.user.tenantId, partnerId: req.user.partnerId }), 0),
-      withTimeout(System.countDocuments(filter), 0),
-      withTimeout(System.countDocuments({ ...filter, status: 'active' }), 0),
-      withTimeout(System.countDocuments({ ...filter, status: { $in: ['inactive', 'disconnected', 'pending'] } }), 0),
-      withTimeout(PaymentHistory.aggregate([
-        { $match: { ...filter, status: 'captured' } },
-        { $group: { _id: null, total: { $sum: '$amountInr' } } },
-      ]), []),
-      withTimeout(Company.aggregate([
-        { $match: { ...filter, 'plan.paymentStatus': 'paid' } },
-        { $group: { _id: null, total: { $sum: '$plan.amountPaid' } } },
-      ]), []),
-      withTimeout(PaymentHistory.aggregate([
-        { $match: { ...filter, status: 'created' } },
-        { $group: { _id: null, total: { $sum: '$amountInr' } } },
-      ]), []),
-      withTimeout(PaymentHistory.aggregate([
-        { $match: { ...filter, status: 'captured' } },
-        { $group: {
-          _id: null,
-          totalCollection: { $sum: '$amountInr' },
-          platformCommission: { $sum: '$platformCommissionInr' },
-          partnerPayout: { $sum: '$partnerPayoutInr' },
-        } },
-      ]), []),
-      withTimeout(PaymentHistory.findOne({ ...filter, status: 'captured', companyType: 'PARTNER_MANAGED' })
-        .sort({ paidAt: -1, createdAt: -1 })
-        .select('payoutStatus settlementDate transferId transferStatus transferError partnerLinkedAccountId')
-        .lean(), null),
-      withTimeout(Company.countDocuments({ ...filter, 'plan.isActive': true }), 0),
-      withTimeout(Company.countDocuments({
-        ...filter,
-        'plan.isActive': true,
-        'plan.expiresAt': { $lte: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000) },
-      }), 0),
-      withTimeout(PaymentHistory.find({
-        partnerId: req.user.partnerId,
-        $or: [{ source: 'partner_checkout' }, { planType: 'partner_enterprise' }],
-      })
-        .sort({ paidAt: -1, createdAt: -1 })
-        .limit(20)
-        .lean(), []),
+    const filter = partnerScope(req.user.partnerId);
+    const partner = await Partner.findById(req.user.partnerId)
+      .select('-profile.avatarDataUrl -profile.kycDocuments.gstCertificateDataUrl -profile.kycDocuments.panCardDataUrl -profile.kycDocuments.businessRegistrationDataUrl')
+      .populate('ownerUserId', 'name email phone role forcePasswordReset').lean();
+    if (!partner) return res.status(404).json({ message: 'Partner not found' });
+    const [companies, users, referrals, platformPayments] = await Promise.all([
+      getPartnerCompanies(req.user.partnerId),
+      User.countDocuments(filter),
+      Referral.countDocuments(filter),
+      PaymentHistory.find({ ...filter, $or: [{ source: 'partner_checkout' }, { planType: 'partner_enterprise' }] })
+        .sort({ paidAt: -1, createdAt: -1 }).limit(20).lean(),
     ]);
-    const [
-      companies,
-      activeCompanies,
-      inactiveCompanies,
-      users,
-      referrals,
-      totalAgents,
-      activeAgents,
-      offlineAgents,
-      paidRevenueAgg,
-      paidCompanyPlanAgg,
-      pendingRevenueAgg,
-      settlementAgg,
-      latestSettlement,
-      activePlans,
-      expiringPlans,
-      platformPayments,
-    ] = [
-      settledValue(results[0], 0),
-      settledValue(results[1], 0),
-      settledValue(results[2], 0),
-      settledValue(results[3], 0),
-      settledValue(results[4], 0),
-      settledValue(results[5], 0),
-      settledValue(results[6], 0),
-      settledValue(results[7], 0),
-      settledValue(results[8], []),
-      settledValue(results[9], []),
-      settledValue(results[10], []),
-      settledValue(results[11], []),
-      settledValue(results[12], null),
-      settledValue(results[13], 0),
-      settledValue(results[14], 0),
-      settledValue(results[15], []),
-    ];
-
-    if (partner) recalcAgentLicenses(partner);
-    const monthlyRevenue = paidRevenueAgg[0]?.total || paidCompanyPlanAgg[0]?.total || 0;
-    const settlement = settlementAgg[0] || {};
-    const platformCommission = settlement.platformCommission || Math.round((monthlyRevenue * 20) / 100);
-    const partnerPayout = settlement.partnerPayout || Math.max(monthlyRevenue - platformCommission, 0);
+    const summary = summarizePartnerCompanies(companies);
+    const latestSettlement = await PaymentHistory.findOne({
+      ...companyPaymentScope(req.user.partnerId, companies.map(company => company._id)),
+      status: 'captured', companyType: 'PARTNER_MANAGED',
+    }).sort({ paidAt: -1, createdAt: -1 })
+      .select('payoutStatus settlementDate transferId transferStatus transferError partnerLinkedAccountId').lean();
+    recalcAgentLicenses(partner);
     const cleanPartner = sanitizePartnerUploadedFiles(partner);
     res.json({
-      partner: cleanPartner,
-      capabilities: partner?.capabilities || {},
-      resourceRequest: partner?.resourceRequest || {},
+      ...summary,
+      partner: cleanPartner, capabilities: partner.capabilities || {},
+      resourceRequest: partner.resourceRequest || {},
       resourceRequestHistory: normalizeResourceRequestHistory(cleanPartner),
-      companies,
-      activeCompanies,
-      inactiveCompanies,
-      users,
-      referrals,
-      totalAgents,
-      activeAgents,
-      offlineAgents,
-      monthlyRevenue,
-      pendingRevenue: pendingRevenueAgg[0]?.total || 0,
-      paidRevenue: monthlyRevenue,
+      companies: summary.companyCount, users, referrals,
+      monthlyRevenue: summary.paidRevenue,
       settlement: {
-        totalCollection: settlement.totalCollection || monthlyRevenue,
-        platformCommission,
-        partnerPayout,
-        payoutStatus: latestSettlement?.payoutStatus || 'pending',
+        totalCollection: summary.paidRevenue,
+        platformCommission: summary.platformCommission,
+        partnerPayout: summary.partnerProfit,
+        payoutStatus: latestSettlement?.payoutStatus || 'not_applicable',
         settlementDate: latestSettlement?.settlementDate || null,
         transferId: latestSettlement?.transferId || '',
         transferStatus: latestSettlement?.transferStatus || '',
         transferError: latestSettlement?.transferError || '',
-        partnerLinkedAccountId: latestSettlement?.partnerLinkedAccountId || partner?.partner_linked_account_id || '',
+        partnerLinkedAccountId: latestSettlement?.partnerLinkedAccountId || partner.partner_linked_account_id || '',
       },
-      activePlans,
-      expiringPlans,
       platformPayments,
-      agentLicenses: partner?.agentLicensePurchases || [],
-      agentLicenseSummary: partner?.agentLicenseSummary || {},
-      agentPricing: partner?.agentPricing || {},
+      agentLicenses: partner.agentLicensePurchases || [],
+      agentLicenseSummary: partner.agentLicenseSummary || {},
+      agentPricing: partner.agentPricing || {},
+      updatedAt: new Date().toISOString(),
     });
   } catch (err) {
-    res.json({
-      partner: {
-        _id: req.user.partnerId,
-        name: req.user.name || 'Partner Admin',
-        status: 'active',
-        plan: { paymentStatus: 'paid', isActive: true },
-      },
-      capabilities: {},
-      resourceRequest: {},
-      resourceRequestHistory: [],
-      companies: 0,
-      activeCompanies: 0,
-      inactiveCompanies: 0,
-      users: 0,
-      referrals: 0,
-      totalAgents: 0,
-      activeAgents: 0,
-      offlineAgents: 0,
-      monthlyRevenue: 0,
-      pendingRevenue: 0,
-      paidRevenue: 0,
-      settlement: {
-        totalCollection: 0,
-        platformCommission: 0,
-        partnerPayout: 0,
-        payoutStatus: 'pending',
-        settlementDate: null,
-        transferId: '',
-        transferStatus: '',
-        transferError: '',
-        partnerLinkedAccountId: '',
-      },
-      activePlans: 0,
-      expiringPlans: 0,
-      platformPayments: [],
-      partial: true,
-      warning: err.message,
-    });
+    res.status(503).json({ message: 'Partner dashboard could not be refreshed. Please retry.' });
   }
 });
 
@@ -610,113 +489,9 @@ router.get('/revenue/history', requireActivePartnerPlan, async (req, res) => {
 
 router.get('/companies', requireActivePartnerPlan, async (req, res) => {
   try {
-    const filter = ownPartnerFilter(req);
-    const companies = await Company.find(filter).sort({ createdAt: -1 }).lean();
-    const companyIds = companies.map(company => company._id);
-    const [systemStats, agentStats, paymentStats, latestPayments] = await Promise.all([
-      System.aggregate([
-        { $match: { companyId: { $in: companyIds } } },
-        {
-          $group: {
-            _id: '$companyId',
-            totalAgents: { $sum: 1 },
-            systems: { $sum: { $cond: [{ $eq: ['$agentType', 'system'] }, 1, 0] } },
-            servers: { $sum: { $cond: [{ $eq: ['$agentType', 'server'] }, 1, 0] } },
-            phones: { $sum: { $cond: [{ $eq: ['$agentType', 'phone'] }, 1, 0] } },
-            active: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
-            inactive: { $sum: { $cond: [{ $in: ['$status', ['inactive', 'disconnected', 'pending']] }, 1, 0] } },
-            osTypes: { $addToSet: { $ifNull: ['$osType', '$os'] } },
-          },
-        },
-      ]),
-      Agent.aggregate([
-        { $match: { companyId: { $in: companyIds } } },
-        {
-          $group: {
-            _id: '$companyId',
-            totalAgents: { $sum: 1 },
-            active: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
-            inactive: { $sum: { $cond: [{ $in: ['$status', ['inactive', 'disconnected']] }, 1, 0] } },
-          },
-        },
-      ]),
-      PaymentHistory.aggregate([
-        { $match: { companyId: { $in: companyIds }, partnerId: req.user.partnerId } },
-        {
-          $group: {
-            _id: '$companyId',
-            totalCollection: { $sum: { $cond: [{ $eq: ['$status', 'captured'] }, '$amountInr', 0] } },
-            pendingCollection: { $sum: { $cond: [{ $eq: ['$status', 'created'] }, '$amountInr', 0] } },
-            paymentCount: { $sum: { $cond: [{ $eq: ['$status', 'captured'] }, 1, 0] } },
-            lastPaidAt: { $max: '$paidAt' },
-          },
-        },
-      ]),
-      PaymentHistory.find({ companyId: { $in: companyIds }, partnerId: req.user.partnerId })
-        .sort({ paidAt: -1, createdAt: -1 })
-        .limit(Math.max(companyIds.length * 3, 20))
-        .select('companyId paymentId orderId amountInr status paidAt createdAt source planType autoPay billingCycle periodEnd')
-        .lean(),
-    ]);
-    const statsByCompany = new Map(systemStats.map(row => [String(row._id), row]));
-    const agentStatsByCompany = new Map(agentStats.map(row => [String(row._id), row]));
-    const paymentsByCompany = new Map(paymentStats.map(row => [String(row._id), row]));
-    const latestPaymentByCompany = new Map();
-    latestPayments.forEach(payment => {
-      const key = String(payment.companyId);
-      if (!latestPaymentByCompany.has(key)) latestPaymentByCompany.set(key, payment);
-    });
-    res.json(companies.map(company => {
-      const stats = statsByCompany.get(String(company._id)) || {};
-      const agentStats = agentStatsByCompany.get(String(company._id)) || {};
-      const payments = paymentsByCompany.get(String(company._id)) || {};
-      const latestPayment = latestPaymentByCompany.get(String(company._id)) || null;
-      const osTypes = (stats.osTypes || []).filter(Boolean);
-      const systemTotal = Number(stats.totalAgents || 0);
-      const agentTotal = Number(agentStats.totalAgents || 0);
-      const planTotal = Number(company.plan?.systemCount || 0) +
-        Number(company.plan?.serverCount || 0) +
-        Number(company.plan?.phoneCount || 0);
-      const totalAgents = Math.max(systemTotal, agentTotal, planTotal, Number(company.agentLicenseAllocation || 0));
-      const activeAgents = Math.max(Number(stats.active || 0), Number(agentStats.active || 0));
-      const inactiveAgents = Math.max(Number(stats.inactive || 0), Number(agentStats.inactive || 0), totalAgents - activeAgents);
-      const isExistingUser = Boolean(company.plan?.paymentStatus === 'paid' || payments.paymentCount > 0 || company.razorpay?.paymentId);
-      const planAmount = company.plan?.paymentStatus === 'paid' ? Number(company.plan?.amountPaid || 0) : 0;
-      const revenue = Number(payments.paymentCount > 0
-        ? payments.totalCollection
-        : latestPayment?.status === 'captured' ? latestPayment.amountInr : planAmount);
-      return {
-        ...company,
-        partnerId: company.partnerId,
-        totalAgents,
-        systemCount: stats.systems || 0,
-        serverCount: stats.servers || 0,
-        phoneCount: stats.phones || 0,
-        activeAgents,
-        inactiveAgents,
-        osTypes,
-        revenue,
-        pendingRevenue: Number(payments.pendingCollection || 0),
-        paymentCount: Number(payments.paymentCount || (planAmount > 0 ? 1 : 0)),
-        lastPaidAt: payments.lastPaidAt || latestPayment?.paidAt || company.razorpay?.paidAt || null,
-        latestPayment: latestPayment || (planAmount > 0 ? {
-          amountInr: planAmount,
-          status: 'captured',
-          paidAt: company.razorpay?.paidAt || company.plan?.startDate || company.updatedAt,
-          paymentId: company.razorpay?.paymentId || '',
-          orderId: company.razorpay?.orderId || '',
-          billingCycle: company.plan?.billingCycle || 'monthly',
-          periodEnd: company.plan?.expiresAt || null,
-        } : null),
-        userPaymentType: isExistingUser ? 'existing' : 'new',
-        paymentStatus: company.plan?.paymentStatus || latestPayment?.status || 'unpaid',
-        subscriptionStatus: company.plan?.isActive ? 'active' : company.plan?.paymentStatus === 'paid' ? 'expired' : 'pending',
-        autoKeyEnabled: Boolean(company.plan?.autoPay),
-        state: stats.active > 0 ? 'Active' : stats.totalAgents > 0 ? 'Inactive' : titleStatus(company.status),
-      };
-    }));
+    res.json(await getPartnerCompanies(req.user.partnerId));
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(503).json({ message: 'Partner companies could not be refreshed. Please retry.' });
   }
 });
 
@@ -1299,6 +1074,8 @@ router.get('/activity', requireActivePartnerPlan, async (req, res) => {
       withTimeout(System.find(filter).select('name hostname createdAt updatedAt status').sort({ updatedAt: -1 }).limit(20).lean(), []),
       withTimeout(
         LoginActivity.find({
+          action: { $nin: ['superadmin_impersonation_started', 'superadmin_company_impersonation_started',
+            'superadmin_impersonation_blocked', 'superadmin_company_impersonation_blocked'] },
           $or: [
             { userId: { $in: userIds } },
             { email: req.user.email }
@@ -1525,6 +1302,20 @@ router.patch('/profile', requireActivePartnerPlan, async (req, res) => {
       if (value !== undefined) update[key] = transform(value);
     };
 
+    setIfPresent('profile.designation', req.body.designation);
+    setIfPresent('profile.alternatePhone', req.body.alternatePhone);
+    setIfPresent('profile.language', req.body.language);
+    setIfPresent('profile.timezone', req.body.timezone);
+    if (update['profile.alternatePhone'] && !/^[6-9]\d{9}$/.test(update['profile.alternatePhone'])) {
+      return res.status(400).json({ message: 'Enter a valid alternate mobile number.' });
+    }
+    if (req.body.language !== undefined && !['English', 'Hindi'].includes(update['profile.language'])) {
+      return res.status(400).json({ message: 'Select a supported language.' });
+    }
+    if (req.body.timezone !== undefined && !['(GMT +05:30) Asia/Kolkata', '(GMT +00:00) UTC'].includes(update['profile.timezone'])) {
+      return res.status(400).json({ message: 'Select a supported time zone.' });
+    }
+
     setIfPresent('partner_linked_account_id', req.body.partner_linked_account_id);
     setIfPresent('profile.razorpayKeyId', req.body.razorpayKeyId);
     setIfPresent('profile.razorpaySecret', req.body.razorpaySecret);
@@ -1572,6 +1363,8 @@ router.patch('/profile', requireActivePartnerPlan, async (req, res) => {
       if (req.body.email !== undefined) userUpdate.email = String(req.body.email || '').trim().toLowerCase();
       if (req.body.phone !== undefined) userUpdate.phone = String(req.body.phone || '').trim();
       if (Object.keys(userUpdate).length) await User.findByIdAndUpdate(req.user.id, userUpdate);
+      // Owner-only edits must succeed and invalidate live partner snapshots too.
+      update.updatedAt = new Date();
     }
 
     if (!Object.keys(update).length) return res.status(400).json({ message: 'No profile fields provided' });

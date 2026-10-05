@@ -1,3 +1,4 @@
+import { authStorage } from './authStorage';
 import axios from 'axios';
 import { API_BASE_URL } from './config';
 import {
@@ -39,7 +40,7 @@ function cacheableGet(url = '', config = {}) {
 api.get = cacheableGet;
 
 api.interceptors.request.use(async (config) => {
-  const token = localStorage.getItem('co_token') || localStorage.getItem('sa_token') || localStorage.getItem('token');
+  const token = authStorage.getItem('co_token') || authStorage.getItem('sa_token') || authStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   // Module pages opened from System Monitoring carry the selected endpoint in
   // the URL. Forward that scope to every GET request unless the page already
@@ -76,7 +77,7 @@ function isTransportAuthenticationFailure(error) {
 
 function clearCompanySession() {
   ['co_token', 'co_user', 'co_company', 'co_tenant', 'co_impersonation']
-    .forEach(key => localStorage.removeItem(key));
+    .forEach(key => authStorage.removeItem(key));
   try { sessionStorage.removeItem('partner_plan'); } catch {}
   delete api.defaults.headers.common.Authorization;
 }
@@ -98,10 +99,10 @@ function confirmSession(token) {
       timeout: 10000,
     }).then(({ data }) => {
       if (data?.token) {
-        localStorage.setItem('co_token', data.token);
+        authStorage.setItem('co_token', data.token);
         api.defaults.headers.common.Authorization = `Bearer ${data.token}`;
       }
-      if (data?.user) localStorage.setItem('co_user', JSON.stringify(data.user));
+      if (data?.user) authStorage.setItem('co_user', JSON.stringify(data.user));
       return true;
     }).catch(error => {
       // Only an explicit auth rejection proves that the session has ended.
@@ -135,7 +136,7 @@ api.interceptors.response.use(
       });
     }
 
-    const token = localStorage.getItem('co_token') || localStorage.getItem('sa_token') || localStorage.getItem('token');
+    const token = authStorage.getItem('co_token') || authStorage.getItem('sa_token') || authStorage.getItem('token');
     if (err.response?.status === 401 && token && !isPublicAuthRequest(err.config?.url)) {
       if (String(err.config?.url || '').includes('/auth/me')) {
         redirectToLogin();

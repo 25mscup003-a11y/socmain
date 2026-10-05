@@ -1,3 +1,5 @@
+const { emitCompanyPartnerUpdate } = require('../utils/partnerRealtime');
+const { AGENT_TYPES, BILLING_PERIODS, agentPriceForPlan, licenseOrderDetails } = require('../utils/partnerAgentPricing');
 /**
  * payment.routes.js — Dynamic Subscription & Payment System
  * 
@@ -59,13 +61,6 @@ const recalcAgentLicenses = (partner) => {
   partner.capabilities = partner.capabilities || {};
   partner.capabilities.downloadAgent = activeLicenses > 0;
   return partner.agentLicenseSummary;
-};
-
-const agentPriceForPlan = (partner, planType) => {
-  const pricing = partner.agentPricing || {};
-  if (planType === 'six_monthly') return Number(pricing.sixMonthly || pricing.monthly || 0);
-  if (planType === 'yearly') return Number(pricing.yearly || pricing.monthly || 0);
-  return Number(pricing.monthly || 0);
 };
 
 async function getPartnerLicenseStock(companyId) {
@@ -688,15 +683,17 @@ router.post('/partner-autopay', authenticate, requirePartnerAdmin, async (req, r
 
 router.post('/partner-agent-license/create-order', authenticate, requirePartnerAdmin, async (req, res) => {
   const agentQuantity = Math.max(Number(req.body.agentQuantity || 0), 0);
-  const planType = AGENT_PLAN_MONTHS[req.body.planType] ? req.body.planType : 'monthly';
+  const planType = req.body.planType || 'monthly';
+  const agentType = req.body.agentType || 'system';
+  if (!AGENT_TYPES.includes(agentType) || !BILLING_PERIODS.includes(planType)) return res.status(400).json({ message: 'Choose System, Server or Android and a monthly or yearly plan' });
   const checkoutFees = req.body.checkoutFees !== false;
   const requestedAutoPay = req.body.autoPay === true || req.body.autoPay === 'true';
-  if (agentQuantity <= 0) return res.status(400).json({ message: 'Agent quantity is required' });
+  if (!Number.isSafeInteger(agentQuantity) || agentQuantity <= 0) return res.status(400).json({ message: 'Agent quantity is required' });
 
   const partner = await Partner.findById(req.user.partnerId);
   if (!partner) return res.status(404).json({ message: 'Partner not found' });
   const autoPay = requestedAutoPay || Boolean(partner.agentLicenseAutoPay?.enabled);
-  const pricePerAgent = agentPriceForPlan(partner, planType);
+  const pricePerAgent = agentPriceForPlan(partner, planType, agentType);
   if (pricePerAgent <= 0) return res.status(409).json({ message: 'Superadmin agent pricing is required before purchase' });
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -716,12 +713,14 @@ router.post('/partner-agent-license/create-order', authenticate, requirePartnerA
         tenantId: String(partner.tenantId),
         agentQuantity: String(agentQuantity),
         planType,
+        agentType,
+        checkoutFees: checkoutFees ? 'true' : 'false',
         pricePerAgent: String(pricePerAgent),
         autoPay: autoPay ? 'true' : 'false',
         autoPayFeeInr: String(totals.autoPayFeeInr),
       },
     });
-    res.json({ order, amountInr: totals.totalInr, baseInr: totals.baseInr, gstInr: totals.gstInr, feeInr: totals.feeInr, autoPayFeeInr: totals.autoPayFeeInr, agentQuantity, planType, pricePerAgent, autoPay });
+    res.json({ order, amountInr: totals.totalInr, baseInr: totals.baseInr, gstInr: totals.gstInr, feeInr: totals.feeInr, autoPayFeeInr: totals.autoPayFeeInr, agentQuantity, agentType, planType, pricePerAgent, autoPay });
   } catch (err) {
     res.status(500).json({ message: 'Agent license order creation failed', detail: err.message });
   }
@@ -806,14 +805,9 @@ router.post('/partner-agent-license/autopay/confirm', authenticate, requirePartn
 
 router.post('/partner-agent-license/confirm', authenticate, requirePartnerAdmin, async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-  const agentQuantity = Math.max(Number(req.body.agentQuantity || 0), 0);
-  const planType = AGENT_PLAN_MONTHS[req.body.planType] ? req.body.planType : 'monthly';
-  const checkoutFees = req.body.checkoutFees !== false;
-  const requestedAutoPay = req.body.autoPay === true || req.body.autoPay === 'true';
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return res.status(400).json({ message: 'Missing Razorpay payment response fields' });
   }
-  if (agentQuantity <= 0) return res.status(400).json({ message: 'Agent quantity is required' });
   const expected = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(`${razorpay_order_id}|${razorpay_payment_id}`)
     .digest('hex');
@@ -822,11 +816,21 @@ router.post('/partner-agent-license/confirm', authenticate, requirePartnerAdmin,
   try {
     const partner = await Partner.findById(req.user.partnerId);
     if (!partner) return res.status(404).json({ message: 'Partner not found' });
-    const autoPay = requestedAutoPay || Boolean(partner.agentLicenseAutoPay?.enabled);
-    const pricePerAgent = agentPriceForPlan(partner, planType);
-    if (pricePerAgent <= 0) return res.status(409).json({ message: 'Superadmin agent pricing is required before purchase' });
-    const shouldChargeAutoPayFee = requestedAutoPay && !partner.agentLicenseAutoPay?.enabled;
-    const totals = addAgentAutoPayFee(withCheckoutFees(pricePerAgent * agentQuantity, checkoutFees), shouldChargeAutoPayFee);
+    const existing = (partner.agentLicensePurchases || []).find(item => item.paymentId === razorpay_payment_id);
+    if (existing) {
+      if (existing.orderId !== razorpay_order_id) return res.status(400).json({ message: 'Payment order mismatch' });
+      return res.json({ success: true, partner, invoiceId: existing.invoiceId });
+    }
+    const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+    const [order, payment] = await Promise.all([
+      razorpay.orders.fetch(razorpay_order_id), razorpay.payments.fetch(razorpay_payment_id),
+    ]);
+    // Use the type, quantity and rate quoted by the server when the order was created.
+    const { agentType, agentQuantity, planType, pricePerAgent, autoPay, checkoutFees, ...totals } = licenseOrderDetails(order, partner._id);
+    if (payment.order_id !== razorpay_order_id || payment.currency !== 'INR'
+      || payment.amount !== totals.totalPaise || payment.status !== 'captured') {
+      return res.status(409).json({ message: 'Payment is not yet captured for this agent license order. Please retry after capture.' });
+    }
     const buyDate = new Date();
     const expiryDate = new Date(buyDate);
     expiryDate.setMonth(expiryDate.getMonth() + AGENT_PLAN_MONTHS[planType]);
@@ -849,6 +853,7 @@ router.post('/partner-agent-license/confirm', authenticate, requirePartnerAdmin,
       paymentId: razorpay_payment_id,
       signature: razorpay_signature,
       agentQuantity,
+      agentType,
       consumedQuantity: 0,
       planType,
       pricePerAgent,
@@ -876,7 +881,9 @@ router.post('/partner-agent-license/confirm', authenticate, requirePartnerAdmin,
       paymentId: razorpay_payment_id,
       signature: razorpay_signature,
       planType: 'partner_agent_license',
-      systemCount: agentQuantity,
+      systemCount: agentType === 'system' ? agentQuantity : 0,
+      serverCount: agentType === 'server' ? agentQuantity : 0,
+      phoneCount: agentType === 'android' ? agentQuantity : 0,
       billingCycle: planType,
       amountPaise: totals.totalPaise,
       amountInr: totals.totalInr,
@@ -886,7 +893,7 @@ router.post('/partner-agent-license/confirm', authenticate, requirePartnerAdmin,
       periodStart: buyDate,
       periodEnd: expiryDate,
       source: 'partner_agent_license',
-      notes: { invoiceId, agentQuantity, planType, pricePerAgent, checkoutFees, autoPay, autoPayFeeInr: totals.autoPayFeeInr },
+      notes: { invoiceId, agentQuantity, agentType, planType, pricePerAgent, checkoutFees, autoPay, autoPayFeeInr: totals.autoPayFeeInr },
     });
 
     emitPartnerRealtime(req, partner._id, 'agent_license_paid', { partner });
@@ -1145,6 +1152,7 @@ router.post('/confirm', authenticate, requireCompanyAdmin, async (req, res) => {
     }).catch(e => console.error('[payment/history]', e.message));
 
     console.log('[payment] ✅ Plan activated | priceType:', priceType, '| systems:', finalSystemCount, '| servers:', finalServerCount, '| company:', req.user.companyId);
+    void emitCompanyPartnerUpdate(req.app?.get?.('io'), company?._id, 'company_payment');
     res.json({ success: true, company });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message });
@@ -1201,6 +1209,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         'razorpay.paidAt': new Date(),
         status: 'active',
       });
+      void emitCompanyPartnerUpdate(req.app?.get?.('io'), companyId, 'company_payment');
     }
   }
   res.json({ received: true });
@@ -1267,6 +1276,7 @@ router.post('/autopay', authenticate, requireCompanyAdmin, async (req, res) => {
       { autoPay: false, autoPayMethod: '' }
     );
     console.log('[autopay] ✅ AutoPay DISABLED for company:', targetCompanyId);
+    void emitCompanyPartnerUpdate(req.app?.get?.('io'), company?._id, 'company_payment');
     res.json({ success: true, autoPay: false, company });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -1353,6 +1363,7 @@ router.post('/autopay-confirm', authenticate, requireCompanyAdmin, async (req, r
     }).catch(e => console.error('[autopay-confirm/history]', e.message));
 
     console.log('[autopay] ✅ AutoPay enabled for company:', targetCompanyId, '| ₹1 fee charged');
+    void emitCompanyPartnerUpdate(req.app?.get?.('io'), company?._id, 'company_payment');
     res.json({ success: true, autoPay: true, company });
   } catch (err) {
     res.status(500).json({ message: err.message });

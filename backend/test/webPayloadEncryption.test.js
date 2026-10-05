@@ -147,3 +147,81 @@ test('web middleware accepts an encrypted metadata-only POST with no wire body',
   assert.equal(req.headers.authorization, 'Bearer update-token');
   assert.deepEqual(req.body, {});
 });
+
+function uploadTransportFixture({ corruptMetadata = false } = {}) {
+  const { Readable } = require('node:stream');
+  const key = crypto.randomBytes(32);
+  const wrappedKey = crypto.publicEncrypt({
+    key: getTransportKeys().publicKeyPem,
+    oaepHash: 'sha256',
+    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+  }, key).toString('base64');
+  const metadata = encryptWebPayload(Buffer.from(JSON.stringify({
+    authorization: 'Bearer kyc-upload-test', params: {},
+  })), key, META_AAD);
+  if (corruptMetadata) metadata.tag = Buffer.alloc(16).toString('base64');
+  const boundary = 'kyc-transport-test-boundary';
+  const file = Buffer.from('%PDF-1.4\nKYC transport regression fixture\n%%EOF');
+  const wire = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="docType"\r\n\r\ngstCertificate\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="gst.pdf"\r\nContent-Type: application/pdf\r\n\r\n`),
+    file,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  const req = Readable.from([wire]);
+  Object.assign(req, {
+    method: 'POST', query: {}, body: {},
+    headers: {
+      'x-ajnat-web-encryption': 'aes-256-gcm-rsa-oaep-v1',
+      'x-ajnat-wrapped-key': wrappedKey,
+      'x-ajnat-encrypted-meta': Buffer.from(JSON.stringify(metadata)).toString('base64'),
+      'content-type': `multipart/form-data; boundary=${boundary}`,
+      'content-length': String(wire.length),
+    },
+  });
+  const responseHeaders = new Map();
+  const res = {
+    statusCode: 200,
+    setHeader(name, value) { responseHeaders.set(name.toLowerCase(), value); },
+    getHeader(name) { return responseHeaders.get(name.toLowerCase()); },
+    status(code) { this.statusCode = code; return this; },
+    send(value) { this.body = value; return this; },
+    json(value) { this.setHeader('Content-Type', 'application/json'); return this.send(JSON.stringify(value)); },
+  };
+  return { req, res, key, file };
+}
+
+test('KYC multipart upload authenticates metadata and leaves file bytes for multer', async () => {
+  const { req, res, key, file } = uploadTransportFixture();
+  let continued = false;
+  await webPayloadEncryption(req, res, () => { continued = true; });
+  assert.equal(continued, true, 'multipart upload must reach the upload handler');
+  assert.equal(req.headers.authorization, 'Bearer kyc-upload-test');
+  const multer = require('multer');
+  const upload = multer({ storage: multer.memoryStorage() }).single('file');
+  await new Promise((resolve, reject) => upload(req, res, err => err ? reject(err) : resolve()));
+  assert.equal(req.body.docType, 'gstCertificate');
+  assert.equal(req.file.originalname, 'gst.pdf');
+  assert.deepEqual(req.file.buffer, file);
+  res.json({ success: true, originalName: req.file.originalname });
+  assert.deepEqual(JSON.parse(decryptWebPayload(JSON.parse(res.body.toString()), key, RESPONSE_AAD)), {
+    success: true, originalName: 'gst.pdf',
+  });
+});
+
+test('multipart uploads still reject tampered encrypted authentication metadata', async () => {
+  const { req, res } = uploadTransportFixture({ corruptMetadata: true });
+  let continued = false;
+  await webPayloadEncryption(req, res, () => { continued = true; });
+  assert.equal(continued, false);
+  assert.equal(res.statusCode, 400);
+});
+
+test('a nonempty JSON request still requires an authenticated encrypted body', async () => {
+  const { req, res } = uploadTransportFixture();
+  req.headers['content-type'] = 'application/json';
+  req.body = { docType: 'gstCertificate' };
+  let continued = false;
+  await webPayloadEncryption(req, res, () => { continued = true; });
+  assert.equal(continued, false);
+  assert.equal(res.statusCode, 400);
+});

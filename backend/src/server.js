@@ -459,16 +459,16 @@ app.use((req, res, next) => {
     if (isDangerousPayment || isPasswordChange || isDelete) {
       const LoginActivity = require('./models/LoginActivity.model');
       LoginActivity.create({
-        userId: payload.id,
-        companyId: payload.companyId || null,
-        email: payload.email || 'impersonated-partner',
+        userId: payload.impersonatedBy,
+        companyId: null,
+        email: payload.impersonatedByEmail || `superadmin:${payload.impersonatedBy}`,
         action: 'superadmin_impersonation_blocked',
         success: false,
-        failReason: `${req.method} ${req.originalUrl}`,
+        failReason: `user:${payload.id};${req.method} ${req.originalUrl}`,
         ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
         userAgent: req.get('user-agent') || '',
       }).catch(err => console.error('[impersonation-block-audit]', err.message));
-      return res.status(403).json({ message: 'This action is disabled during Super Admin partner login.' });
+      return res.status(403).json({ message: 'This action is disabled during Super Admin user login.' });
     }
   } catch {
     return next();

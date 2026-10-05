@@ -40,6 +40,8 @@ export default function AgentLicenseCheckoutPage() {
 
   const qty = Math.max(Number(checkout.agentQuantity || 0), 0);
   const planType = checkout.planType || 'monthly';
+  const agentType = checkout.agentType || 'system';
+  const agentLabel = { system: 'System', server: 'Server', android: 'Android' }[agentType] || 'System';
   const pricePerAgent = Number(checkout.pricePerAgent || 0);
   const base = qty * pricePerAgent;
   const gst = base * 0.18;
@@ -54,6 +56,7 @@ export default function AgentLicenseCheckoutPage() {
     try {
       const { data } = await api.post('/payment/partner-agent-license/create-order', {
         agentQuantity: qty,
+        agentType,
         planType,
         checkoutFees: true,
         autoPay: !!checkout.autoPay,
@@ -61,7 +64,7 @@ export default function AgentLicenseCheckoutPage() {
 
       await openRazorpay({
         order: data.order,
-        planLabel: `Buy ${qty} Agent License${qty === 1 ? '' : 's'}`,
+        planLabel: `Buy ${qty} ${agentLabel} Agent License${qty === 1 ? '' : 's'}`,
         email: user?.email,
         phone: user?.phone,
         onSuccess: async response => {
@@ -69,6 +72,7 @@ export default function AgentLicenseCheckoutPage() {
             await api.post('/payment/partner-agent-license/confirm', {
               ...response,
               agentQuantity: qty,
+              agentType,
               planType,
               checkoutFees: true,
               autoPay: !!checkout.autoPay,
@@ -104,6 +108,7 @@ export default function AgentLicenseCheckoutPage() {
           <p style={pageSubtitle}>Review agent license details and accept policies before secure Razorpay payment.</p>
 
           <div style={metricGrid}>
+            <Metric label="Agent Type" value={agentLabel} tone="#34d399" />
             <Metric label="Agent Quantity" value={qty} tone="#60a5fa" />
             <Metric label="Plan Type" value={planLabels[planType] || planType} tone="#a78bfa" />
             <Metric label="Price / Agent" value={fmtInr(pricePerAgent)} tone="#22c55e" />

@@ -1,3 +1,4 @@
+import { authStorage } from '../api/authStorage';
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useParams, useSearchParams } from 'react-router-dom';
 import Swal from 'sweetalert2';
@@ -210,10 +211,10 @@ export default function RegisterPage() {
       const { data } = await api.post('/auth/verify-otp', {
         email: form.email.trim().toLowerCase(), otp: otp.trim(), telemetry_id,
       });
-      localStorage.setItem('co_token',   data.token);
-      localStorage.setItem('co_user',    JSON.stringify(data.user));
-      localStorage.setItem('co_company', JSON.stringify(data.company));
-      if (data.tenant) localStorage.setItem('co_tenant', JSON.stringify(data.tenant));
+      authStorage.setItem('co_token',   data.token);
+      authStorage.setItem('co_user',    JSON.stringify(data.user));
+      authStorage.setItem('co_company', JSON.stringify(data.company));
+      if (data.tenant) authStorage.setItem('co_tenant', JSON.stringify(data.tenant));
       api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
       setRegData(data);
 

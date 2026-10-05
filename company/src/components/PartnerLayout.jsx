@@ -40,7 +40,7 @@ function NavigationLink({ item, location }) {
   );
 }
 
-export default function PartnerLayout({ sections, user, notificationCount, logout, impersonation, isImpersonating }) {
+export default function PartnerLayout({ sections, user, notificationCount, logout }) {
   const location = useLocation();
   const navigation = useRef(null);
   const primaryItems = sections.flatMap(section => section.items);
@@ -66,12 +66,6 @@ export default function PartnerLayout({ sections, user, notificationCount, logou
 
   return (
     <div className="partner-layout">
-      {isImpersonating && (
-        <div className="partner-layout-impersonation">
-          <span>{impersonation?.banner || 'You are logged in as Partner Admin via Super Admin'}</span>
-          <button type="button" onClick={() => { logout(); window.location.href = 'http://localhost:3001/partners'; }}>Back to Super Admin</button>
-        </div>
-      )}
       <header className="partner-layout-header">
         <Link to="/partner/dashboard" className="partner-layout-brand" aria-label="SCDC Platform partner home">
           <span className="partner-layout-brand-mark"><Icon name="shield" /></span>
@@ -96,7 +90,7 @@ export default function PartnerLayout({ sections, user, notificationCount, logou
             <span className="partner-layout-profile-avatar"><Icon name="user" /><span className="partner-layout-status-dot" /></span>
             <span className="partner-layout-identity"><strong>{user?.name || 'Account'}</strong><small>PARTNER ADMIN</small></span>
           </Link>
-          <button type="button" className="partner-layout-logout" onClick={() => { logout(); window.location.href = '/'; }} aria-label="Logout" title="Logout"><Icon name="exit" /><span>Exit</span></button>
+          <button type="button" className="partner-layout-logout" onClick={async () => { await logout(); window.location.href = '/'; }} aria-label="Logout" title="Logout"><Icon name="exit" /><span>Exit</span></button>
         </div>
       </header>
 

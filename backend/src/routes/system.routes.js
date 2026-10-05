@@ -1,3 +1,4 @@
+const { emitCompanyPartnerUpdate } = require('../utils/partnerRealtime');
 const router = require('express').Router();
 const mongoose = require('mongoose');
 const System = require('../models/System.model');
@@ -175,6 +176,9 @@ router.post('/heartbeat', async (req, res) => {
     if (!existing.fimStartAt) sysUpdate.fimStartAt = existing.installDate || sysUpdate.installDate || existing.createdAt || now;
 
     const system = await System.findByIdAndUpdate(existing._id, sysUpdate, { new: true });
+    if (existing.status !== system.status || !existing.agentVersion) {
+      void emitCompanyPartnerUpdate(req.app?.get?.('io'), system.companyId, 'agent_status');
+    }
     const commandClaim = await System.findByIdAndUpdate(
       existing._id,
       // Security actions and OTA updates are acknowledged on the primary
@@ -361,6 +365,7 @@ router.post('/', requireCompanyAdmin, async (req, res) => {
       preferredPackageType: packageProfile.type,
     });
     await Department.findByIdAndUpdate(departmentId, { $inc: { systemCount: 1 } });
+    void emitCompanyPartnerUpdate(req.app?.get?.('io'), system.companyId, 'agent_created');
     res.status(201).json(system);
   } catch (err) { res.status(400).json({ message: err.message }); }
 });
@@ -481,6 +486,7 @@ router.post('/:id/offline', async (req, res) => {
     );
     if (!system) return res.status(404).json({ message: 'System not found' });
     console.log(`[System] ${system.hostname} marked OFFLINE by uninstall script`);
+    void emitCompanyPartnerUpdate(req.app?.get?.('io'), system.companyId, 'agent_status');
     res.json({ message: 'System marked offline', system });
   } catch (err) {
     console.error('[System /offline]', err.message);

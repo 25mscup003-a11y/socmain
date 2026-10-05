@@ -5,6 +5,9 @@ import api from '../api/axios';
 import { SOCKET_URL, connectSocket, pollingSocketOptions, socketOptions, io } from '../api/config';
 import Swal from 'sweetalert2';
 import PartnerDashboardPage from './PartnerDashboardPage';
+import usePartnerDashboard from '../hooks/usePartnerDashboard';
+import PartnerProfileDashboard from '../components/PartnerProfileDashboard';
+import './PartnerProfile.css';
 import { openRazorpay } from '../utils/razorpay';
 
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -398,8 +401,8 @@ export default function SettingsPage() {
     return requestedTab || 'dashboard';
   });
   const [freshProfileUser, setFreshProfileUser] = useState(null);
-  const [partnerStats, setPartnerStats] = useState(null);
-  const [partnerPlanInfo, setPartnerPlanInfo] = useState(null);
+  const partnerLive = usePartnerDashboard(user?.role === 'partner_admin' ? user?.partnerId : null);
+  const { stats: partnerStats, setStats: setPartnerStats } = partnerLive;
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -496,8 +499,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (user?.role === 'partner_admin') {
-      api.get('/partner/dashboard').then(r => setPartnerStats(r.data)).catch(() => { });
-      api.get('/payment/partner-plan').then(r => setPartnerPlanInfo(r.data)).catch(() => { });
       if (!tfaStatus) api.get('/2fa/status').then(r => setTfaStatus(r.data)).catch(() => { });
     } else if (socProfile) {
       if (!tfaStatus) api.get('/2fa/status').then(r => setTfaStatus(r.data)).catch(() => { });
@@ -589,7 +590,7 @@ export default function SettingsPage() {
       }
       if (activeTab === 'notifications') {
         if (user?.role === 'partner_admin') {
-          api.get('/partner/notifications')
+          api.get('/partner/notifications', { skipCache: true })
             .then(r => {
               setNotifications(r.data?.items || []);
               setUnreadNotifications(0);
@@ -675,21 +676,6 @@ export default function SettingsPage() {
       disconnect();
     };
   }, [socProfile, user?._id, activeTab]);
-
-  useEffect(() => {
-    if (user?.role !== 'partner_admin' || !user?.partnerId) return undefined;
-    const socket = io(SOCKET_URL, socketOptions);
-    socket.emit('join:partner', user.partnerId);
-    socket.on('partner:update', (event) => {
-      if (String(event.partnerId) !== String(user.partnerId)) return;
-      // Refresh sidebar stats
-      api.get('/partner/dashboard').then(r => setPartnerStats(r.data)).catch(() => { });
-      api.get('/payment/partner-plan').then(r => setPartnerPlanInfo(r.data)).catch(() => { });
-      // Force embedded PartnerDashboardPage to remount and reload
-      setDashboardRefreshKey(prev => prev + 1);
-    });
-    return connectSocket(socket);
-  }, [user?.role, user?.partnerId]);
 
   useEffect(() => {
     if (user?.role === 'partner_admin' || !company?._id) return undefined;
@@ -907,15 +893,13 @@ export default function SettingsPage() {
   };
 
   if (user?.role === 'partner_admin') {
-    const partnerFromPlan = partnerPlanInfo?.partner;
-    const mergedPartnerStats = partnerStats
-      ? { ...partnerStats, partner: { ...(partnerStats.partner || {}), ...(partnerFromPlan || {}) } }
-      : (partnerFromPlan ? { partner: partnerFromPlan } : null);
+    const mergedPartnerStats = partnerStats;
     return (
       <PartnerProfileMode
         user={user}
         partner={mergedPartnerStats?.partner}
         stats={mergedPartnerStats}
+        live={partnerLive}
         dashboardRefreshKey={dashboardRefreshKey}
         pwForm={pwForm}
         setPwForm={setPwForm}
@@ -2633,11 +2617,43 @@ export default function SettingsPage() {
   );
 }
 
-function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwForm, setPwForm, pwMsg, pwErr, pwBusy, changePassword, isImpersonating, onPartnerSaved, tfaStatus, tfaLoading, tfaQR, tfaSecret, tfaCode, setTfaCode, tfaErr, tfaMsg, disableCode, setDisableCode, handle2FASetup, handle2FAVerify, handle2FADisable, cancel2FASetup }) {
+const partnerProfileFields = {
+  Profile: ['fullName', 'designation', 'email', 'phone', 'alternatePhone', 'language', 'timezone'],
+  'Company Information': ['companyName', 'gstNumber', 'panNumber'],
+  'Bank & Payout Details': ['accountHolderName', 'bankName', 'accountNumber', 'confirmAccountNumber', 'ifscCode', 'branchName'],
+};
+
+function partnerProfileValues(partner = {}, user = {}) {
+  const profile = partner.profile || {};
+  return {
+    fullName: partner.ownerUserId?.name ?? user.name ?? '',
+    designation: profile.designation ?? 'Partner Admin',
+    email: partner.ownerUserId?.email ?? user.email ?? '',
+    phone: partner.ownerUserId?.phone ?? partner.mobile ?? user.phone ?? '',
+    alternatePhone: profile.alternatePhone ?? '',
+    language: profile.language || 'English',
+    timezone: profile.timezone || '(GMT +05:30) Asia/Kolkata',
+    companyName: partner.name ?? '',
+    gstNumber: profile.gstNumber || '',
+    panNumber: profile.panNumber || '',
+    bankAccount: profile.bankAccount || '',
+    accountHolderName: profile.accountHolderName || '',
+    bankName: profile.bankName || '',
+    accountNumber: profile.accountNumber || profile.bankAccount || '',
+    confirmAccountNumber: profile.accountNumber || profile.bankAccount || '',
+    ifscCode: profile.ifscCode || '',
+    branchName: profile.branchName || '',
+    partnerLinkedAccountId: partner.partner_linked_account_id || '',
+  };
+}
+
+function PartnerProfileMode({ user, partner, stats, live, dashboardRefreshKey = 0, pwForm, setPwForm, pwMsg, pwErr, pwBusy, changePassword, isImpersonating, onPartnerSaved, tfaStatus, tfaLoading, tfaQR, tfaSecret, tfaCode, setTfaCode, tfaErr, tfaMsg, disableCode, setDisableCode, handle2FASetup, handle2FAVerify, handle2FADisable, cancel2FASetup }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState(() => sectionFromSearch(location.search));
-  const [editing, setEditing] = useState('');
+  const [editingFields, setEditingFields] = useState({});
+  const editValues = useRef({});
+  const [savingSection, setSavingSection] = useState('');
   const [localMessage, setLocalMessage] = useState('');
   const [validationErrors, setValidationErrors] = useState({});
   const [uploadedDocs, setUploadedDocs] = useState({});
@@ -2652,55 +2668,43 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
   const partnerStorageId = String(partnerData?._id || user?.partnerId || user?.email || 'partner');
   const docsStorageKey = `partner_kyc_docs_${partnerStorageId}`;
   const avatarStorageKey = `partner_avatar_${partnerStorageId}`;
-  const [localProfile, setLocalProfile] = useState({
-    fullName: partnerData?.ownerUserId?.name || user?.name || 'Partner Admin',
-    designation: 'Partner Admin',
-    email: partnerData?.ownerUserId?.email || user?.email || '',
-    phone: partnerData?.ownerUserId?.phone || user?.phone || partnerData?.mobile || '',
-    alternatePhone: '',
-    language: 'English',
-    timezone: '(GMT +05:30) Asia/Kolkata',
-    companyName: partnerData?.name || 'Partner Company',
-    gstNumber: partnerData?.profile?.gstNumber || '',
-    panNumber: partnerData?.profile?.panNumber || '',
-    bankAccount: partnerData?.profile?.bankAccount || '',
-    accountHolderName: partnerData?.profile?.accountHolderName || '',
-    bankName: partnerData?.profile?.bankName || '',
-    accountNumber: partnerData?.profile?.accountNumber || partnerData?.profile?.bankAccount || '',
-    confirmAccountNumber: partnerData?.profile?.accountNumber || partnerData?.profile?.bankAccount || '',
-    ifscCode: partnerData?.profile?.ifscCode || '',
-    branchName: partnerData?.profile?.branchName || '',
-    partnerLinkedAccountId: partnerData?.partner_linked_account_id || '',
+  const [localProfile, setLocalProfile] = useState(() => ({
+    ...partnerProfileValues(partnerData, user),
     notifications: true,
-  });
+  }));
 
   useEffect(() => {
-    if (!partnerData?._id || editing) return;
+    if (!partnerData?._id) return;
+    const savedProfile = partnerProfileValues(partnerData, user);
     setLocalProfile(prev => ({
       ...prev,
-      fullName: partnerData?.ownerUserId?.name || user?.name || prev.fullName,
-      email: partnerData?.ownerUserId?.email || user?.email || prev.email,
-      phone: partnerData?.ownerUserId?.phone || user?.phone || partnerData?.mobile || prev.phone,
-      companyName: partnerData?.name || prev.companyName,
-      gstNumber: partnerData?.profile?.gstNumber || '',
-      panNumber: partnerData?.profile?.panNumber || '',
-      bankAccount: partnerData?.profile?.bankAccount || '',
-      accountHolderName: partnerData?.profile?.accountHolderName || '',
-      bankName: partnerData?.profile?.bankName || '',
-      accountNumber: partnerData?.profile?.accountNumber || partnerData?.profile?.bankAccount || '',
-      confirmAccountNumber: partnerData?.profile?.accountNumber || partnerData?.profile?.bankAccount || '',
-      ifscCode: partnerData?.profile?.ifscCode || '',
-      branchName: partnerData?.profile?.branchName || '',
-      partnerLinkedAccountId: partnerData?.partner_linked_account_id || '',
+      ...Object.fromEntries(Object.entries(savedProfile).filter(([field]) => !editingFields[field])),
     }));
-  }, [partnerData?._id, partnerData?.updatedAt, user?.name, user?.email, user?.phone, editing]);
+  }, [partnerData, user?.name, user?.email, user?.phone, editingFields]);
+
+  const editSection = section => {
+    const fields = partnerProfileFields[section];
+    fields.forEach(field => { editValues.current[field] = localProfile[field]; });
+    setEditingFields(prev => ({ ...prev, ...Object.fromEntries(fields.map(field => [field, true])) }));
+    setValidationErrors({});
+  };
+
+  const cancelSection = section => {
+    const fields = partnerProfileFields[section];
+    const saved = partnerProfileValues(partnerData, user);
+    setLocalProfile(prev => ({ ...prev, ...Object.fromEntries(fields.map(field => [field, saved[field]])) }));
+    setEditingFields(prev => ({ ...prev, ...Object.fromEntries(fields.map(field => [field, false])) }));
+    setValidationErrors({});
+  };
+
+  const fieldEditor = { editingFields, onEdit: editSection, onCancel: cancelSection, onSave: section => saveLocal(section), savingSection, busy: Boolean(savingSection) || !partnerData?._id };
 
   const companyCount = stats?.companies || 0;
   const activeCompanies = stats?.activeCompanies || 0;
   const agentCount = stats?.totalAgents || 0;
   const activeAgents = stats?.activeAgents || 0;
-  const monthlyRevenue = stats?.monthlyRevenue || stats?.paidRevenue || partnerData?.plan?.amountPaid || 0;
-  const pendingInvoices = stats?.pendingRevenue || partnerData?.plan?.quote?.amountInr || 0;
+  const monthlyRevenue = stats?.paidRevenue ?? null;
+  const pendingInvoices = stats?.pendingRevenue ?? null;
   const planName = partnerData?.plan?.type || 'Business Plan';
   const sections = [
     ['dashboard', '⌂', 'Dashboard'],
@@ -2756,7 +2760,7 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
   }, [docsStorageKey, avatarStorageKey, pendingKycFiles, partnerData?.profile?.avatarFileName, partnerData?.profile?.avatarFilePath, partnerData?.profile?.avatarDataUrl, partnerData?.profile?.kycDocuments]);
 
   const loadPartnerNotifications = () => {
-    api.get('/partner/notifications')
+    api.get('/partner/notifications', { skipCache: true })
       .then(({ data }) => setPartnerNotifications({ items: data.items || [], unread: data.unread || 0 }))
       .catch(() => { });
   };
@@ -2766,15 +2770,21 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
     loadPartnerNotifications();
     const socket = io(SOCKET_URL);
     socket.emit('join:partner', user.partnerId);
-    socket.on('partner:notification', ({ notification }) => {
+    const onNotification = ({ notification }) => {
       if (!notification) return loadPartnerNotifications();
       setPartnerNotifications(prev => ({
         items: [notification, ...(prev.items || [])],
         unread: (prev.unread || 0) + 1,
       }));
-    });
+    };
+    socket.on('partner:notification', onNotification);
     socket.on('partner:update', loadPartnerNotifications);
-    return connectSocket(socket);
+    const disconnect = connectSocket(socket);
+    return () => {
+      socket.off('partner:notification', onNotification);
+      socket.off('partner:update', loadPartnerNotifications);
+      disconnect();
+    };
   }, [user?.partnerId]);
 
   const markNotificationsRead = async () => {
@@ -2850,37 +2860,19 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
   };
 
   const saveLocal = async section => {
+    if (savingSection) return;
+    const sectionFields = partnerProfileFields[section] || [];
+    if (sectionFields.length && !sectionFields.some(field => editingFields[field])) return;
+    const changedFields = sectionFields.filter(field => editingFields[field] && localProfile[field] !== editValues.current[field]);
     try {
-      if (['Profile', 'Bank & Payout Details', 'Company Information', 'KYC Documents'].includes(section) && !validateSection(section)) return;
+      if ((changedFields.length || section === 'KYC Documents') && !validateSection(section)) return;
+      setSavingSection(section);
       if (['Profile', 'Bank & Payout Details', 'Company Information', 'KYC Documents'].includes(section)) {
         const serverDocs = partnerData?.profile?.kycDocuments || {};
-        const payload = {
-          fullName: localProfile.fullName,
-          email: localProfile.email,
-          phone: localProfile.phone,
-          name: localProfile.companyName,
-        };
-        if (section === 'Bank & Payout Details') {
-          Object.assign(payload, {
-            bankAccount: localProfile.accountNumber || localProfile.bankAccount,
-            accountHolderName: localProfile.accountHolderName,
-            bankName: localProfile.bankName,
-            accountNumber: localProfile.accountNumber,
-            ifscCode: localProfile.ifscCode,
-            branchName: localProfile.branchName,
-            partner_linked_account_id: localProfile.partnerLinkedAccountId,
-          });
-        }
-        if (section === 'Company Information') {
-          Object.assign(payload, {
-            gstNumber: localProfile.gstNumber,
-            panNumber: localProfile.panNumber,
-          });
-        }
-        if (section === 'Profile' && uploadedDocs.profileImage) {
-          payload.avatarFileName = uploadedDocs.profileImage;
-          payload.avatarDataUrl = profileImagePreview;
-        }
+        const payload = Object.fromEntries(changedFields
+          .filter(field => field !== 'confirmAccountNumber')
+          .map(field => [field === 'companyName' ? 'name' : field, localProfile[field]]));
+        if (changedFields.includes('accountNumber')) payload.bankAccount = localProfile.accountNumber;
         if (section === 'KYC Documents') {
           let latestPartner = null;
           const nextDocs = { ...uploadedDocs };
@@ -2922,10 +2914,12 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
             businessRegistrationFilePath: nextDocs['Business Registration']?.filePath || serverDocs.businessRegistrationFilePath || '',
           };
         }
-        const { data } = await api.patch('/partner/profile', payload);
-        onPartnerSaved?.(data);
+        if (Object.keys(payload).length) {
+          const { data } = await api.patch('/partner/profile', payload);
+          onPartnerSaved?.(data);
+        }
       }
-      setEditing('');
+      setEditingFields(prev => ({ ...prev, ...Object.fromEntries(sectionFields.map(field => [field, false])) }));
       if (section === 'KYC Documents') {
         const serverDocs = partnerData?.profile?.kycDocuments || {};
         const hasDoc = doc => Boolean(
@@ -2938,11 +2932,13 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
         setValidationErrors(prev => ({ ...prev, documents: missing.length ? `Pending documents: ${missing.join(', ')}.` : undefined }));
         showLocalMessage(missing.length ? `KYC details saved. Pending: ${missing.join(', ')}.` : 'KYC details saved. All documents uploaded.');
       } else {
-        showLocalMessage(`${section} updated.`);
+        showLocalMessage(sectionFields.length && !changedFields.length ? 'No changes to save.' : `${section} updated.`);
       }
     } catch (err) {
       setUploadingDoc('');
       showLocalMessage(err.response?.data?.message || `${section} update failed.`);
+    } finally {
+      setSavingSection('');
     }
   };
 
@@ -3020,8 +3016,8 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
   };
 
   return (
-    <div style={partnerProfilePage}>
-      <aside style={partnerProfileSidebar}>
+    <div className="partner-profile-page">
+      <aside className="partner-profile-sidebar">
         {visibleSections.map(([id, icon, label]) => (
           <button key={id} type="button" onClick={() => selectSection(id)} style={activeSection === id ? profileNavActive : profileNav}>
             <span>{icon}</span>{label}
@@ -3031,11 +3027,18 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
 
       <main style={activeSection === 'dashboard' ? profileDashboardMain : profileContentMain}>
         {localMessage && <div style={profileOk}>{localMessage}</div>}
+        {live?.error && <div className="partner-profile-load-error" role="alert">
+          <span>{live.error}</span>
+          <button type="button" onClick={live.refresh} disabled={live.refreshing}>Retry</button>
+        </div>}
         {activeSection === 'profile' && (
           <>
             <section style={profileHero}>
-              <h2 style={profileSectionTitle}>Profile Information</h2>
-              <div style={profileHeroBody}>
+              <div className="partner-profile-edit-header">
+                <h2 style={profileSectionTitle}>Profile Information</h2>
+                <ProfileEditActions section="Profile" editor={fieldEditor} />
+              </div>
+              <div style={profileHeroBody} className="partner-profile-hero-body">
                 <div style={profileAvatarWrap}>
                   <div style={profileAvatar}>
                     {profileImagePreview ? (
@@ -3055,7 +3058,6 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
                   <ProfileLine label="Email" value={localProfile.email} />
                   <ProfileLine label="Phone" value={localProfile.phone || '-'} />
                 </div>
-                <button type="button" onClick={() => setEditing('profile')} style={editProfileButton}>✎ Edit Profile</button>
               </div>
             </section>
 
@@ -3063,22 +3065,9 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
               <section style={profileCard}>
                 <div style={profileCardHeader}>
                   <h2 style={profileSectionTitle}>Personal Details</h2>
-                  <button type="button" onClick={() => setEditing(editing === 'personal' ? '' : 'personal')} style={smallEditButton}>✎ Edit</button>
                 </div>
-                {editing === 'personal' || editing === 'profile' ? (
-                  <EditableGrid profile={localProfile} setProfile={setLocalProfile} fields={['fullName', 'designation', 'email', 'phone', 'alternatePhone']} errors={validationErrors} />
-                ) : (
-                  <>
-                    <ProfileLine label="Full Name" value={localProfile.fullName} />
-                    <ProfileLine label="Designation" value={localProfile.designation} />
-                    <ProfileLine label="Email Address" value={localProfile.email} />
-                    <ProfileLine label="Phone Number" value={localProfile.phone} />
-                    <ProfileLine label="Alternate Phone (Optional)" value={localProfile.alternatePhone || '-'} />
-                  </>
-                )}
-                <label style={profileSelectLabel}>Language Preference<select value={localProfile.language} onChange={e => setLocalProfile(prev => ({ ...prev, language: e.target.value }))} style={profileSelect}><option>English</option><option>Hindi</option></select></label>
-                <label style={profileSelectLabel}>Time Zone<select value={localProfile.timezone} onChange={e => setLocalProfile(prev => ({ ...prev, timezone: e.target.value }))} style={profileSelect}><option>(GMT +05:30) Asia/Kolkata</option><option>(GMT +00:00) UTC</option></select></label>
-                {editing && <button type="button" onClick={() => saveLocal('Profile')} style={{ ...profilePrimaryButton, marginTop: 12 }}>Save Details</button>}
+                <p style={profileSectionHint}>Use Edit at the top of this page to update your details.</p>
+                <EditableGrid profile={localProfile} setProfile={setLocalProfile} fields={partnerProfileFields.Profile} errors={validationErrors} {...fieldEditor} />
               </section>
 
             </div>
@@ -3088,9 +3077,11 @@ function PartnerProfileMode({ user, partner, stats, dashboardRefreshKey = 0, pwF
         {activeSection !== 'profile' && (
           <ProfileSectionPanel
             section={activeSection}
+            live={live}
             profile={localProfile}
             setProfile={setLocalProfile}
             saveLocal={saveLocal}
+            fieldEditor={fieldEditor}
             isImpersonating={isImpersonating}
             errors={validationErrors}
             uploadedDocs={uploadedDocs}
@@ -3225,13 +3216,31 @@ function TwoFactorCard({ tfaStatus, tfaLoading, tfaQR, tfaSecret, tfaCode, setTf
   );
 }
 
-function EditableGrid({ profile, setProfile, fields, errors = {} }) {
+function ProfileEditActions({ section, editor }) {
+  const editing = partnerProfileFields[section].some(field => editor.editingFields[field]);
+  return (
+    <div className="partner-profile-edit-actions">
+      {editing ? (
+        <>
+          <button type="button" disabled={editor.busy} onClick={() => editor.onCancel(section)}>Cancel</button>
+          <button type="button" className="save" disabled={editor.busy} onClick={() => editor.onSave(section)}>{editor.savingSection === section ? 'Saving…' : 'Save Changes'}</button>
+        </>
+      ) : (
+        <button type="button" disabled={editor.busy} onClick={() => editor.onEdit(section)}>✎ Edit</button>
+      )}
+    </div>
+  );
+}
+
+function EditableGrid({ profile, setProfile, fields, errors = {}, editingFields = {}, busy = false }) {
   const labels = {
     fullName: 'Full Name',
     designation: 'Designation',
     email: 'Email Address',
     phone: 'Phone Number',
     alternatePhone: 'Alternate Phone',
+    language: 'Language Preference',
+    timezone: 'Time Zone',
     companyName: 'Company Name',
     gstNumber: 'GST Number',
     panNumber: 'PAN Number',
@@ -3248,23 +3257,68 @@ function EditableGrid({ profile, setProfile, fields, errors = {} }) {
     partnerLinkedAccountId: 'Super Admin will add the Razorpay Route linked account ID, for example acc_xxxxxxxxxxxxxx. It is required only for automatic partner payout transfers.',
   };
   const disabledFields = new Set(['partnerLinkedAccountId']);
+  const options = {
+    language: ['English', 'Hindi'],
+    timezone: ['(GMT +05:30) Asia/Kolkata', '(GMT +00:00) UTC'],
+  };
 
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div className="partner-profile-fields">
       {fields.map(field => (
-        <label key={field} style={profilePasswordLabel}>
-          {labels[field] || field}
-          <input
-            value={profile[field] || ''}
-            onChange={e => setProfile(prev => ({ ...prev, [field]: e.target.value }))}
-            placeholder={field === 'partnerLinkedAccountId' ? 'acc_xxxxxxxxxxxxxx' : labels[field] || field}
-            disabled={disabledFields.has(field)}
-            style={disabledFields.has(field) ? profileInputDisabled : errors[field] ? profileInputError : profileInput}
-          />
-          {helperText[field] && <span style={fieldHelp}>{helperText[field]}</span>}
-          {errors[field] && <span style={fieldError}>{errors[field]}</span>}
-        </label>
+        <PartnerProfileField
+          key={field}
+          field={field}
+          label={labels[field] || field}
+          value={profile[field] || ''}
+          onChange={value => setProfile(prev => ({ ...prev, [field]: value }))}
+          editing={Boolean(editingFields[field])}
+          focusOnEdit={field === fields[0]}
+          managed={disabledFields.has(field)}
+          busy={busy}
+          options={options[field]}
+          helper={helperText[field]}
+          error={errors[field]}
+        />
       ))}
+    </div>
+  );
+}
+
+function PartnerProfileField({ field, label, value, onChange, editing, focusOnEdit, managed, busy, options, helper, error }) {
+  const inputRef = useRef(null);
+  const id = `partner-field-${field}`;
+  useEffect(() => {
+    if (editing && focusOnEdit) inputRef.current?.focus();
+  }, [editing, focusOnEdit]);
+  const controlProps = {
+    id,
+    ref: inputRef,
+    value,
+    onChange: event => onChange(event.target.value),
+    'aria-invalid': Boolean(error),
+    'aria-describedby': [helper && `${id}-help`, error && `${id}-error`].filter(Boolean).join(' ') || undefined,
+  };
+  return (
+    <div className={`partner-profile-field${editing ? ' is-editing' : ''}`}>
+      <label htmlFor={id}>{label}</label>
+      <div className="partner-profile-field-control">
+        {options ? (
+          <select {...controlProps} disabled={!editing || busy}>
+            {options.map(option => <option key={option}>{option}</option>)}
+          </select>
+        ) : (
+          <input
+            {...controlProps}
+            type={field === 'email' ? 'email' : ['phone', 'alternatePhone'].includes(field) ? 'tel' : 'text'}
+            inputMode={['accountNumber', 'confirmAccountNumber'].includes(field) ? 'numeric' : undefined}
+            readOnly={!editing}
+            disabled={managed || busy}
+            placeholder={managed ? 'Managed by Super Admin' : label}
+          />
+        )}
+      </div>
+      {helper && <span id={`${id}-help`} style={fieldHelp}>{helper}</span>}
+      {error && <span id={`${id}-error`} role="alert" style={fieldError}>{error}</span>}
     </div>
   );
 }
@@ -3745,15 +3799,15 @@ function BuyAgentLicensePanel({ user, stats, onPartnerSaved }) {
   const purchases = stats?.agentLicenses || partner.agentLicensePurchases || [];
   const [agentQuantity, setAgentQuantity] = useState('10');
   const [planType, setPlanType] = useState('monthly');
+  const [agentType, setAgentType] = useState('system');
   const [autoPay, setAutoPay] = useState(false);
   const [autoPayBusy, setAutoPayBusy] = useState(false);
   const [purchasePage, setPurchasePage] = useState(0);
   const autoPayAlreadyEnabled = Boolean(partner.agentLicenseAutoPay?.enabled);
   const autoPayFee = autoPay && !autoPayAlreadyEnabled ? 5 : 0;
   const priceMap = {
-    monthly: Number(pricing.monthly || 0),
-    six_monthly: Number(pricing.sixMonthly || pricing.monthly || 0),
-    yearly: Number(pricing.yearly || pricing.monthly || 0),
+    monthly: Number(pricing[agentType]?.monthly ?? pricing.monthly ?? 0),
+    yearly: Number(pricing[agentType]?.yearly ?? pricing.yearly ?? 0),
   };
   const qty = Math.max(Number(agentQuantity || 0), 0);
   const pricePerAgent = priceMap[planType] || 0;
@@ -3776,9 +3830,9 @@ function BuyAgentLicensePanel({ user, stats, onPartnerSaved }) {
   }, [purchases.length]);
 
   const openCheckout = () => {
-    if (qty <= 0) return Swal.fire({ icon: 'warning', title: 'Agent quantity required', text: 'Enter any custom quantity greater than 0.' });
+    if (!Number.isSafeInteger(qty) || qty <= 0) return Swal.fire({ icon: 'warning', title: 'Agent quantity required', text: 'Enter any custom quantity greater than 0.' });
     if (pricePerAgent <= 0) return Swal.fire({ icon: 'warning', title: 'Pricing Pending', text: 'Super Admin must configure agent pricing first.' });
-    const payload = { agentQuantity: qty, planType, pricePerAgent, baseAmount, autoPayFeeInr: autoPayFee, amount, autoPay, email: user?.email, phone: user?.phone };
+    const payload = { agentQuantity: qty, agentType, planType, pricePerAgent, baseAmount, autoPayFeeInr: autoPayFee, amount, autoPay, email: user?.email, phone: user?.phone };
     try { sessionStorage.setItem('agent_license_checkout', JSON.stringify(payload)); } catch { }
     navigate('/agent-license-checkout', { state: { agentLicenseCheckout: payload } });
   };
@@ -3857,7 +3911,14 @@ function BuyAgentLicensePanel({ user, stats, onPartnerSaved }) {
             {autoPayBusy ? 'Opening Razorpay...' : autoPay ? 'Auto Pay: Enabled' : 'Enable Auto Pay'}
           </button>
         </div>
-        <div style={agentPurchaseGrid}>
+        <div style={{ ...agentPurchaseGrid, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+          <label style={agentField}>Agent Type <span>*</span>
+            <select aria-label="Agent Type" value={agentType} onChange={e => setAgentType(e.target.value)} style={agentInput}>
+              <option value="system">System</option>
+              <option value="server">Server</option>
+              <option value="android">Android</option>
+            </select>
+          </label>
           <label style={agentField}>Agent Quantity <span>*</span>
             <input type="number" min="1" value={agentQuantity} onChange={e => setAgentQuantity(e.target.value)} style={agentInput} />
           </label>
@@ -3886,12 +3947,13 @@ function BuyAgentLicensePanel({ user, stats, onPartnerSaved }) {
         </div>
         <div style={agentTableWrap}>
           <table style={{ ...agentTable, minWidth: '100%' }}>
-            <thead><tr>{['Invoice ID', 'Payment ID', 'Qty', 'Plan', 'Amount', 'Buy Date', 'Expiry Date', 'Status', 'Payment Status', 'Auto Pay'].map(h => <th key={h} style={agentTableHead}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Invoice ID', 'Payment ID', 'Agent Type', 'Qty', 'Plan', 'Amount', 'Buy Date', 'Expiry Date', 'Status', 'Payment Status', 'Auto Pay'].map(h => <th key={h} style={agentTableHead}>{h}</th>)}</tr></thead>
             <tbody>
               {purchases.length ? visiblePurchases.map(item => (
                 <tr key={item._id || item.invoiceId || item.paymentId}>
                   <td style={agentTableCell}>{item.invoiceId || '-'}</td>
                   <td style={agentTableCell}>{item.paymentId || '-'}</td>
+                  <td style={agentTableCell}>{titleCase(item.agentType || 'system')}</td>
                   <td style={agentTableCell}>{item.agentQuantity || 0}</td>
                   <td style={agentTableCell}>{titleCase(String(item.planType || 'monthly').replace('_', ' '))}</td>
                   <td style={agentTableCell}>{fmtInr(item.amountInr || 0)}</td>
@@ -3907,7 +3969,7 @@ function BuyAgentLicensePanel({ user, stats, onPartnerSaved }) {
                   </td>
                 </tr>
               )) : (
-                <tr><td colSpan="10" style={{ ...agentTableCell, textAlign: 'center', color: '#94a3b8' }}>No agent license purchases yet.</td></tr>
+                <tr><td colSpan="11" style={{ ...agentTableCell, textAlign: 'center', color: '#94a3b8' }}>No agent license purchases yet.</td></tr>
               )}
             </tbody>
           </table>
@@ -3935,17 +3997,17 @@ function AgentMetric({ tone, icon, label, value }) {
   );
 }
 
-function CompanyLicenseAllocationPanel() {
+function CompanyLicenseAllocationPanel({ updatedAt }) {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    api.get('/partner/companies')
+    api.get('/partner/companies', { skipCache: true })
       .then(({ data }) => setCompanies(data || []))
       .catch(() => setCompanies([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [updatedAt]);
 
   return (
     <div style={agentAllocationCard}>
@@ -3998,7 +4060,7 @@ function AgentSectionPanel({ stats }) {
         <AgentTabMetric tone="#f59e0b" icon="▰" label="Consumed Licenses" value={summary.consumedLicenses || 0} sub="Licenses already used" />
         <AgentTabMetric tone="#8b5cf6" icon="◷" label="Remaining Licenses" value={summary.remainingLicenses || 0} sub="Licenses remaining" />
       </div>
-      <CompanyLicenseAllocationPanel />
+      <CompanyLicenseAllocationPanel updatedAt={stats?.updatedAt} />
     </section>
   );
 }
@@ -4061,7 +4123,7 @@ function SupportFile({ label, value, onChange, accept }) {
   );
 }
 
-function ProfileSectionPanel({ section, profile, setProfile, saveLocal, errors = {}, uploadedDocs = {}, uploadInputs, openUpload, handleUpload, uploadingDoc = '', user, onPartnerSaved, onNavigateSection, navigate, tfaStatus, passwordCard, twoFactorCard, notifications, markNotificationsRead, stats, dashboardRefreshKey = 0 }) {
+function ProfileSectionPanel({ section, live, profile, setProfile, saveLocal, fieldEditor, errors = {}, uploadedDocs = {}, uploadInputs, openUpload, handleUpload, uploadingDoc = '', user, onPartnerSaved, onNavigateSection, navigate, tfaStatus, passwordCard, twoFactorCard, notifications, markNotificationsRead, stats, dashboardRefreshKey = 0 }) {
   const [notifFilter, setNotifFilter] = useState('all');
   const partner = stats?.partner || {};
   const resource = stats?.resourceRequest || partner?.resourceRequest || {};
@@ -4072,21 +4134,8 @@ function ProfileSectionPanel({ section, profile, setProfile, saveLocal, errors =
   const payoutReady = Boolean(partner?.partner_linked_account_id || partner?.profile?.accountNumber || partner?.profile?.bankAccount);
   const config = {
     dashboard: {
-      title: 'Welcome, Partner Admin',
-      custom: (
-        <>
-          <DashboardWelcomeBanner partner={partner} profile={profile} user={user} stats={stats} />
-          <DashboardSectionInfo stats={stats} partner={partner} profile={profile} tfaStatus={tfaStatus} navigate={onNavigateSection} />
-        </>
-      ),
-      lines: [
-        ['Total Companies', stats?.companyCount || 0],
-        ['Active Companies', stats?.activeCompanies || 0],
-        ['Total Agents', stats?.agentCount || 0],
-        ['Monthly Revenue', fmtInr(stats?.monthlyRevenue || 0)],
-      ],
-      action: 'Open Dashboard',
-      href: '/',
+      title: 'Partner Dashboard',
+      custom: <PartnerProfileDashboard stats={stats} loading={live?.refreshing && !live?.stats} available={Boolean(live?.stats)} onNavigate={onNavigateSection} onCompanies={() => navigate('/partner-companies')} />,
     },
     agents: {
       title: 'Agent',
@@ -4157,7 +4206,7 @@ function ProfileSectionPanel({ section, profile, setProfile, saveLocal, errors =
       lines: [
         ['Partner Admin', profile.fullName],
         ['Admin Email', profile.email],
-        ['Role', profile.designation],
+        ['Role', titleCase((user?.role || 'partner_admin').replace(/_/g, ' '))],
         ['Managed Users', stats?.users || 0],
         ['Access Level', partner.status === 'suspended' ? 'Suspended' : 'Full Partner Access'],
       ],
@@ -4383,15 +4432,16 @@ function ProfileSectionPanel({ section, profile, setProfile, saveLocal, errors =
 
   return (
     <section style={profileCard}>
-      <div style={profileCardHeader}>
+      <div style={profileCardHeader} className="partner-profile-edit-header">
         <h2 style={profileSectionTitle}>{config.title}</h2>
+        {hasFields && <ProfileEditActions section={config.title} editor={fieldEditor} />}
         {config.action && <button type="button" onClick={handleAction} style={smallEditButton}>{config.action}</button>}
       </div>
       {config.api && <ApiNotice endpoint={config.api} />}
       {hasFields ? (
         <>
-          <EditableGrid profile={profile} setProfile={setProfile} fields={config.fields} errors={errors} />
-          <button type="button" onClick={() => saveLocal(config.title)} style={{ ...profilePrimaryButton, marginTop: 14 }}>Save Changes</button>
+          <p style={profileSectionHint}>Use Edit to update the details on this page.</p>
+          <EditableGrid profile={profile} setProfile={setProfile} fields={config.fields} errors={errors} {...fieldEditor} />
         </>
       ) : (
         <div style={{ display: 'grid', gap: 4 }}>
@@ -4505,81 +4555,6 @@ function SummaryTile({ icon, tone, label, value, sub }) {
   );
 }
 
-function DashboardWelcomeBanner({ partner, profile, user, stats }) {
-  const adminName = profile?.fullName || user?.name || user?.email || 'Partner Admin';
-  const companyName = profile?.companyName || partner?.name || stats?.partner?.name || 'your company';
-  return (
-    <section style={dashboardWelcomeBanner}>
-      <div>
-        <small style={dashboardWelcomeEyebrow}>Partner Dashboard</small>
-        <h1 style={dashboardWelcomeTitle}>Welcome, {adminName}</h1>
-        <p style={dashboardWelcomeText}>You are managing {companyName}. Use this dashboard to review licenses, payments, KYC, users, activity, and support updates.</p>
-      </div>
-      <div style={dashboardWelcomeBadge}>{companyName}</div>
-    </section>
-  );
-}
-
-function DashboardSectionInfo({ stats, partner, profile, tfaStatus, navigate }) {
-  const capabilities = stats?.capabilities || partner?.capabilities || {};
-  const kycStatus = partner?.profile?.kycStatus || 'not_submitted';
-  const bankReady = Boolean(partner?.partner_linked_account_id || partner?.profile?.accountNumber || partner?.profile?.bankAccount);
-  const agentSummary = stats?.agentLicenseSummary || partner?.agentLicenseSummary || {};
-  const inactiveAgents = Math.max((stats?.agentCount || 0) - (stats?.activeAgents || 0), 0);
-  const planActive = Boolean(partner?.plan?.isActive || stats?.planExpires);
-  const agentLicenseEnabled = Number(agentSummary.totalPurchased || 0) > 0;
-  const kycEnabled = ['approved', 'verified'].includes(String(kycStatus || '').toLowerCase());
-  const notificationsEnabled = Boolean(profile?.notifications);
-  const twoFaEnabled = Boolean(tfaStatus?.enabled);
-  const usersEnabled = Boolean(capabilities.createCompany || stats?.users);
-  const cards = [
-    { id: 'requests', icon: '▥', tone: '#60a5fa', title: 'Buy Agent License', status: agentLicenseEnabled ? 'Enabled' : 'Disabled', value: `${agentSummary.remainingLicenses || 0} remaining`, sub: `${agentSummary.totalPurchased || 0} total purchased` },
-    { id: 'subscription', icon: '▤', tone: '#16a34a', title: 'Subscription & Payments', status: planActive ? 'Enabled' : 'Disabled', value: stats?.planName || 'Business Plan', sub: planActive ? `Valid till ${fmtDate(stats?.planExpires || partner?.plan?.expiresAt)}` : 'No active subscription' },
-    { id: 'profile', icon: '♙', tone: '#38bdf8', title: 'My Profile', status: profile?.email ? 'Enabled' : 'Disabled', value: profile?.fullName || partner?.name || 'Partner Admin', sub: profile?.email || partner?.adminEmail || '-' },
-    { id: 'company', icon: '▥', tone: '#f59e0b', title: 'Company Information', status: profile?.companyName ? 'Enabled' : 'Disabled', value: profile?.companyName || partner?.name || '-', sub: `${stats?.companyCount || 0} companies` },
-    { id: 'kyc', icon: '▧', tone: '#a78bfa', title: 'KYC Documents', status: kycEnabled ? 'Enabled' : 'Disabled', value: titleCase(kycStatus), sub: kycEnabled ? 'Verified' : 'Action required' },
-    { id: 'bank', icon: '⌂', tone: '#22c55e', title: 'Bank & Payout Details', status: bankReady ? 'Enabled' : 'Disabled', value: bankReady ? 'Submitted' : 'Pending', sub: bankReady ? 'Payout ready' : 'Add bank details' },
-    { id: 'users', icon: '♧', tone: '#06b6d4', title: 'Users & Permissions', status: usersEnabled ? 'Enabled' : 'Disabled', value: capabilities.createCompany ? 'Allowed' : 'Limited', sub: 'Manage team access' },
-    { id: 'notifications', icon: '◇', tone: '#f97316', title: 'Notifications', status: notificationsEnabled ? 'Enabled' : 'Disabled', value: notificationsEnabled ? 'Enabled' : 'Disabled', sub: 'Alerts and updates' },
-    { id: 'security', icon: '⬡', tone: '#ef4444', title: 'Security', status: twoFaEnabled ? 'Enabled' : 'Disabled', value: twoFaEnabled ? '2FA Enabled' : '2FA Disabled', sub: 'Password & 2FA' },
-    { id: 'activity', icon: '◷', tone: '#84cc16', title: 'Activity Log', status: 'Enabled', value: partner?.updatedAt ? new Date(partner.updatedAt).toLocaleString('en-IN') : '-', sub: 'Recent account activity' },
-    { id: 'support', icon: '?', tone: '#cbd5e1', title: 'Support', status: 'Enabled', value: 'Create tickets', sub: 'Help and issue tracking' },
-  ];
-
-  return (
-    <section style={dashboardInfoPanel}>
-      <h2 style={profileSectionTitle}>Dashboard Information</h2>
-      <div style={dashboardInfoGrid}>
-        {cards.map(card => {
-          const enabled = card.status === 'Enabled';
-          return (
-            <div
-              key={card.title}
-              role="button"
-              tabIndex={0}
-              onClick={() => navigate?.(card.id)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  navigate?.(card.id);
-                }
-              }}
-              style={{ ...dashboardInfoCard, cursor: 'pointer' }}>
-              <div style={{ minWidth: 0 }}>
-                <small style={dashboardInfoLabel}>{card.title}</small>
-                <span style={enabled ? dashboardStatusEnabled : dashboardStatusDisabled}>{card.status}</span>
-                <strong style={dashboardInfoValue}>{card.value}</strong>
-                <p style={dashboardInfoSub}>{card.sub}</p>
-              </div>
-              <span style={{ ...dashboardInfoIcon, background: `${card.tone}18`, color: card.tone }}>{card.icon}</span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function initials(value = '') {
   return String(value).trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || 'A';
 }
@@ -4592,9 +4567,9 @@ function maskAccount(value = '') {
 }
 
 const partnerProfilePage = { minHeight: '100%', margin: -32, padding: 24, display: 'grid', gridTemplateColumns: '240px minmax(0, 1fr)', gap: 18, background: 'linear-gradient(135deg, #0a0e27 0%, #0f1535 100%)', color: '#e2e8f0' };
+const partnerProfileSidebar = { background: '#0c1a2e', border: '1px solid #1e3a5f', borderRadius: 8, padding: 12, display: 'grid', gap: 6, alignContent: 'start', boxShadow: '0 10px 24px rgba(0,0,0,.24)' };
 const profileContentMain = { display: 'grid', gap: 18, minWidth: 0 };
 const profileDashboardMain = { display: 'block', minWidth: 0, position: 'relative', zIndex: 3, overflow: 'visible' };
-const partnerProfileSidebar = { background: '#0c1a2e', border: '1px solid #1e3a5f', borderRadius: 8, padding: 12, display: 'grid', gap: 6, alignContent: 'start', boxShadow: '0 10px 24px rgba(0,0,0,.24)' };
 const profileNav = { height: 42, border: 'none', borderRadius: 7, background: 'transparent', color: '#c6d4e5', display: 'flex', alignItems: 'center', gap: 12, padding: '0 12px', fontSize: 13, fontWeight: 850, cursor: 'pointer', textAlign: 'left' };
 const profileNavActive = { ...profileNav, background: 'linear-gradient(90deg,#4259ff,#6847ea)', color: '#fff' };
 const profileHero = { background: '#0c1a2e', border: '1px solid #1e3a5f', borderRadius: 8, padding: 20, boxShadow: '0 10px 24px rgba(0,0,0,.24)' };
@@ -4624,22 +4599,17 @@ const twoFactorOkTitle = { margin: '0 0 8px', color: '#34d399', fontSize: 18, fo
 const twoFactorDangerButton = { minHeight: 48, border: '1px solid rgba(239,68,68,.45)', borderRadius: 9, background: 'rgba(239,68,68,.12)', color: '#fca5a5', padding: '0 18px', fontSize: 14, fontWeight: 950, cursor: 'pointer' };
 const profileNameRow = { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, fontSize: 17 };
 const activeBadge = { background: '#dcfce7', color: '#16a34a', borderRadius: 5, padding: '5px 8px', fontSize: 11, fontWeight: 950 };
-const editProfileButton = { alignSelf: 'flex-start', height: 36, border: '1px solid #1e3a5f', borderRadius: 5, background: '#07111f', color: '#93c5fd', padding: '0 12px', fontSize: 12, fontWeight: 900, cursor: 'pointer' };
 const profileTwoCol = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 };
 const profileOneCol = { display: 'grid', gridTemplateColumns: '1fr', gap: 18 };
 const profileCard = { background: '#0c1a2e', border: '1px solid #1e3a5f', borderRadius: 8, padding: 20, boxShadow: '0 10px 24px rgba(0,0,0,.24)' };
 const profileCardHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 };
 const smallEditButton = { height: 32, border: '1px solid #1e3a5f', borderRadius: 5, background: '#07111f', color: '#93c5fd', padding: '0 10px', fontSize: 12, fontWeight: 900 };
-const profileLine = { display: 'grid', gridTemplateColumns: '190px 1fr', gap: 16, minHeight: 30, alignItems: 'center', color: '#94a3b8', fontSize: 13 };
+const profileLine = { display: 'grid', gridTemplateColumns: 'var(--profile-line-columns, 190px 1fr)', gap: 16, minHeight: 30, alignItems: 'center', color: '#94a3b8', fontSize: 13 };
 const profileTableHead = { textAlign: 'left', padding: '10px 12px', color: '#93c5fd', background: '#07111f', borderBottom: '1px solid #1e3a5f', fontSize: 11, fontWeight: 950 };
 const profileTableCell = { padding: '10px 12px', color: '#e2e8f0', borderBottom: '1px solid #1e3a5f', fontSize: 12, verticalAlign: 'top' };
 const pdfFileNameChip = { display: 'block', maxWidth: '100%', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#cbd5e1' };
-const profileSelectLabel = { display: 'grid', gridTemplateColumns: '190px 1fr', gap: 16, alignItems: 'center', color: '#94a3b8', fontSize: 13, marginTop: 10 };
-const profileSelect = { height: 38, border: '1px solid #1e3a5f', borderRadius: 6, background: '#07111f', color: '#e2e8f0', padding: '0 10px' };
 const profilePasswordLabel = { display: 'grid', gap: 7, color: '#93c5fd', fontSize: 12, fontWeight: 850 };
 const profileInput = { height: 40, border: '1px solid #1e3a5f', borderRadius: 6, background: '#07111f', color: '#e2e8f0', padding: '0 12px' };
-const profileInputError = { ...profileInput, border: '1px solid #ef4444', boxShadow: '0 0 0 1px rgba(239,68,68,.18)' };
-const profileInputDisabled = { ...profileInput, color: '#94a3b8', background: '#0f172a', cursor: 'not-allowed', opacity: .78 };
 const fieldHelp = { color: '#94a3b8', fontSize: 11, fontWeight: 700, lineHeight: 1.45 };
 const fieldError = { color: '#fca5a5', fontSize: 11, fontWeight: 800 };
 const apiNotice = { display: 'flex', alignItems: 'center', gap: 10, border: '1px solid #14532d', borderRadius: 6, background: '#052e2b', color: '#86efac', padding: '8px 10px', fontSize: 12, fontWeight: 900, margin: '0 0 12px' };
@@ -4663,20 +4633,6 @@ const profileSummary = { background: '#0c1a2e', border: '1px solid #1e3a5f', bor
 const profileSummaryGrid = { display: 'grid', gridTemplateColumns: 'repeat(5, minmax(140px, 1fr))', gap: 16 };
 const summaryTile = { border: '1px solid #1e3a5f', borderRadius: 8, padding: 16, display: 'flex', alignItems: 'center', gap: 14, background: '#07111f' };
 const summaryIcon = { width: 42, height: 42, borderRadius: 8, display: 'grid', placeItems: 'center', fontWeight: 950 };
-const dashboardWelcomeBanner = { background: 'linear-gradient(135deg, rgba(37,99,235,.22), rgba(124,58,237,.18)), #0c1a2e', border: '1px solid #2563eb', borderRadius: 10, padding: 22, marginBottom: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, boxShadow: '0 12px 30px rgba(0,0,0,.25)' };
-const dashboardWelcomeEyebrow = { color: '#93c5fd', fontSize: 12, fontWeight: 950, textTransform: 'uppercase', letterSpacing: .6 };
-const dashboardWelcomeTitle = { margin: '7px 0 8px', color: '#e0f2fe', fontSize: 24, fontWeight: 950 };
-const dashboardWelcomeText = { margin: 0, color: '#cbd5e1', fontSize: 13, fontWeight: 750, lineHeight: 1.6, maxWidth: 720 };
-const dashboardWelcomeBadge = { border: '1px solid rgba(147,197,253,.45)', borderRadius: 999, background: 'rgba(7,17,31,.55)', color: '#bfdbfe', padding: '10px 14px', fontSize: 12, fontWeight: 950, whiteSpace: 'nowrap' };
-const dashboardInfoPanel = { background: '#0c1a2e', border: '1px solid #1e3a5f', borderRadius: 8, padding: 20, marginBottom: 18, boxShadow: '0 10px 24px rgba(0,0,0,.24)' };
-const dashboardInfoGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 };
-const dashboardInfoCard = { minHeight: 118, border: '1px solid #1e3a5f', borderRadius: 8, background: '#07111f', padding: 18, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 52px', gap: 14, alignItems: 'center' };
-const dashboardInfoIcon = { width: 36, height: 36, borderRadius: 8, display: 'grid', placeItems: 'center', fontWeight: 950 };
-const dashboardInfoLabel = { display: 'block', color: '#93c5fd', fontSize: 11, fontWeight: 950, marginBottom: 5 };
-const dashboardStatusEnabled = { display: 'inline-flex', width: 'fit-content', borderRadius: 999, background: 'rgba(34,197,94,.16)', color: '#4ade80', padding: '3px 8px', fontSize: 10, fontWeight: 950, marginBottom: 8 };
-const dashboardStatusDisabled = { ...dashboardStatusEnabled, background: 'rgba(239,68,68,.16)', color: '#f87171' };
-const dashboardInfoValue = { display: 'block', color: '#e2e8f0', fontSize: 20, fontWeight: 950, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-const dashboardInfoSub = { margin: '4px 0 0', color: '#94a3b8', fontSize: 11, fontWeight: 750, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const docCardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginTop: 18 };
 const docMiniCard = { minHeight: 64, border: '1px solid #1e3a5f', borderRadius: 8, background: '#07111f', padding: 12, display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr)', gap: 10, alignItems: 'center', color: '#e2e8f0' };
 const docMiniCardButton = { ...docMiniCard, width: '100%', textAlign: 'left', cursor: 'pointer' };

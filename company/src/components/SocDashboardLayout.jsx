@@ -186,8 +186,8 @@ export default function SocDashboardLayout() {
             </small>
           )}
           <button
-            onClick={() => {
-              logout();
+            onClick={async () => {
+              await logout();
               window.location.href = '/login';
             }}
             style={{ width: '100%', padding: 8, border: '1px solid #334155', borderRadius: 7, background: '#111c2e', color: '#fca5a5', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
@@ -324,8 +324,8 @@ export default function SocDashboardLayout() {
                     🔐 Lock screen
                   </button>
                   <button
-                    onClick={() => {
-                      logout();
+                    onClick={async () => {
+                      await logout();
                       window.location.href = '/login';
                     }}
                     style={{

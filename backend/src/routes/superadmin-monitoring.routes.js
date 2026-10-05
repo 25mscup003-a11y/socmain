@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
+const { requireActiveSuperadminSession, requireOriginalSuperadminSession } = require('../middleware/superadminSession.middleware');
+const { createSuperadminLoginToken } = require('../services/superadminLogin.service');
 
 const User = require('../models/User.model');
 const Company = require('../models/Company.model');
@@ -792,23 +794,13 @@ router.delete('/soc-managers/:id/shifts/:shiftId', async (req, res) => {
 });
 
 // ── POST /api/super-admin/soc-managers/:id/impersonate ── Login as SOC Manager
-router.post('/soc-managers/:id/impersonate', async (req, res) => {
+router.post('/soc-managers/:id/impersonate', requireActiveSuperadminSession, requireOriginalSuperadminSession, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: 'SOC Manager not found' });
+    if (!user || user.role !== 'soc_manager') return res.status(404).json({ message: 'SOC Manager not found' });
 
-    const jwt = require('jsonwebtoken');
-    const token = jwt.sign({
-      id: user._id,
-      email: user.email,
-      role: user.role || 'soc_manager',
-      tenantId: user.tenantId || null,
-      companyId: user.companyId || null,
-      departmentId: user.departmentId || null,
-      impersonatedBy: req.user?.id || 'superadmin',
-      impersonatedByRole: 'superadmin',
-      impersonationMode: 'soc_manager_login',
-    }, process.env.JWT_SECRET || 'secret', { expiresIn: '4h' });
+    const token = await createSuperadminLoginToken(req, user, 'soc_manager_login');
+    res.set('Cache-Control', 'no-store');
 
     const frontendUrl = process.env.COMPANY_FRONTEND_URL || 'http://localhost:3000';
     res.json({
@@ -822,7 +814,7 @@ router.post('/soc-managers/:id/impersonate', async (req, res) => {
       }
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   }
 });
 

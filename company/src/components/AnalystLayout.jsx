@@ -148,7 +148,7 @@ export default function AnalystLayout() {
           <div style={{ fontSize:11, color:'#60a5fa', marginBottom:12, opacity: 0.85 }}>
             {user?.email}
           </div>
-          <button onClick={() => { logout(); window.location.href = '/'; }} style={{
+          <button onClick={async () => { await logout(); window.location.href = '/'; }} style={{
             width: '100%',
             background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%)',
             border: '1px solid rgba(59, 130, 246, 0.4)',

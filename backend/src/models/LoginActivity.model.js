@@ -55,6 +55,7 @@ const LoginActivitySchema = new mongoose.Schema({
   device:     { type: String },
 
   // Session
+  sessionId: { type: String }, // Stable across token refreshes; never a bearer token.
   sessionToken: { type: String }, // JWT token hash (not actual token)
   
   // Geo (optional, can be enriched later)
@@ -82,6 +83,7 @@ const LoginActivitySchema = new mongoose.Schema({
 // Indexes for fast queries
 LoginActivitySchema.index({ companyId: 1, createdAt: -1 });
 LoginActivitySchema.index({ userId: 1, createdAt: -1 });
+LoginActivitySchema.index({ userId: 1, sessionId: 1, createdAt: -1 });
 LoginActivitySchema.index({ email: 1, action: 1, createdAt: -1 });
 LoginActivitySchema.index({ companyId: 1, action: 1, createdAt: -1 });
 
