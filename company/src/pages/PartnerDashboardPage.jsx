@@ -4,36 +4,12 @@ import api from '../api/axios';
 import { SOCKET_URL, connectSocket, socketOptions, io } from '../api/config';
 import { useAuth } from '../context/AuthContext';
 import Swal from 'sweetalert2';
+import PartnerCompaniesSummary from '../components/PartnerCompaniesSummary';
 
 const emptyRequest = {
   numberOfCompanies: '',
   numberOfAgents: '',
   proposedCommission: '',
-};
-
-const homeDash = {
-  quickStats: { display:'grid', gridTemplateColumns:'repeat(7, minmax(118px, 1fr))', gap:14, marginBottom:18 },
-  insightGrid: { display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:18, marginBottom:18 },
-  cardHead: { display:'flex', justifyContent:'space-between', gap:12, alignItems:'center', marginBottom:14 },
-  cardLink: { color:'#a78bfa', fontSize:10, fontWeight:850, whiteSpace:'nowrap' },
-  trendCard: { minHeight:86, background:'#0c1a2e', border:'1px solid #1e3a5f', borderRadius:8, padding:'13px 14px', display:'grid', alignContent:'start', gap:5, boxShadow:'0 10px 24px rgba(0,0,0,.24)', overflow:'hidden' },
-  trendTitle: { color:'#93c5fd', fontSize:10, fontWeight:900 },
-  trendValue: { color:'#e0f2fe', fontSize:20, lineHeight:1, fontWeight:950 },
-  trendMeta: { display:'flex', alignItems:'center', gap:8, color:'#94a3b8', fontSize:10, fontWeight:850 },
-  spark: { width:'100%', height:22, display:'block', marginTop:2 },
-  roleSplit: { minHeight:150, display:'grid', gridTemplateColumns:'140px 1fr', gap:24, alignItems:'center' },
-  multiDonut: { width:140, height:140, borderRadius:'50%', background:'conic-gradient(#2563eb 0 12%, #7c3aed 12% 22%, #06b6d4 22% 46%, #16a34a 46% 88%, #f59e0b 88% 100%)', display:'grid', placeItems:'center' },
-  healthSplit: { minHeight:150, display:'grid', gridTemplateColumns:'154px 1fr', gap:28, alignItems:'center' },
-  distributionRow: { display:'grid', gap:8, margin:'18px 0' },
-  distributionMeta: { display:'flex', justifyContent:'space-between', gap:12, color:'#cbd5e1', fontSize:11, fontWeight:800 },
-  distributionTrack: { height:7, background:'#12243d', borderRadius:999, overflow:'hidden' },
-  distributionFooter: { display:'flex', justifyContent:'space-between', gap:12, color:'#94a3b8', fontSize:11, fontWeight:850, marginTop:18 },
-  feedRow: { minHeight:32, display:'grid', gridTemplateColumns:'22px 1fr auto', gap:10, alignItems:'center', borderBottom:'1px solid rgba(30,58,95,.55)', color:'#cbd5e1', fontSize:11, fontWeight:750 },
-  feedIcon: { width:18, height:18, border:'1px solid', borderRadius:5, display:'grid', placeItems:'center', fontSize:11, fontWeight:950 },
-  companyRow: { minHeight:31, display:'grid', gridTemplateColumns:'24px minmax(88px, 1fr) minmax(80px, 110px) 76px', gap:10, alignItems:'center', color:'#cbd5e1', fontSize:11, fontWeight:800 },
-  companyRank: { width:20, height:20, borderRadius:'50%', background:'#07111f', border:'1px solid #1e3a5f', display:'grid', placeItems:'center', color:'#e0f2fe', fontSize:10, fontWeight:950 },
-  companyBar: { height:5, background:'#12243d', borderRadius:999, overflow:'hidden' },
-  companyBarFill: { display:'block', height:'100%', background:'#7c3aed', borderRadius:999 },
 };
 
 export default function PartnerDashboardPage({ embedded = false, viewOverride = '', initialPlanData = null }) {
@@ -44,6 +20,9 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [companies, setCompanies] = useState([]);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
+  const [companiesError, setCompaniesError] = useState('');
   const [request, setRequest] = useState(emptyRequest);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -97,37 +76,44 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
     'companies'
   );
 
-  const load = async (cachedPlanData = null) => {
+  const load = async (cachedPlanData = null, forceRefresh = true) => {
     setLoading(true);
     setMessage('');
     try {
       // If planData was pre-fetched by the gate, skip /payment/partner-plan call
       const planFetch = cachedPlanData
         ? Promise.resolve({ data: cachedPlanData })
-        : api.get('/payment/partner-plan');
+        : api.get('/payment/partner-plan', { skipCache: forceRefresh });
 
-      const [dashboardResult, planResult] = await Promise.allSettled([
-        api.get('/partner/dashboard', { timeout: 8000 }),
+      const [dashboardResult, planResult, companiesResult] = await Promise.allSettled([
+        api.get('/partner/dashboard', { timeout: 8000, skipCache: forceRefresh }),
         planFetch,
+        api.get('/partner/companies', { timeout: 8000, skipCache: forceRefresh }),
       ]);
-      const dashboardData = dashboardResult.status === 'fulfilled' ? dashboardResult.value.data : {};
+      const dashboardData = dashboardResult.status === 'fulfilled' ? dashboardResult.value.data : null;
       const planPartner = planResult.status === 'fulfilled' ? planResult.value.data?.partner : null;
+      setSummaryError(dashboardResult.status === 'rejected'
+        ? 'Could not refresh the partner summary. Any previous data is still shown. Use Sync to retry.'
+        : dashboardData?.partial ? 'Some partner summary data is unavailable. Use Sync to retry.' : '');
+      if (companiesResult.status === 'fulfilled' && Array.isArray(companiesResult.value.data)) {
+        setCompanies(companiesResult.value.data);
+        setCompaniesLoaded(true);
+        setCompaniesError('');
+      } else {
+        setCompaniesError('Could not refresh companies. Any previous list is still shown. Use Sync to retry.');
+      }
       if (dashboardResult.status === 'rejected' && !planPartner) throw dashboardResult.reason;
-      setStats({
-        ...dashboardData,
-        partner: { ...(dashboardData.partner || {}), ...(planPartner || {}) },
-      });
+      setStats(prev => ({
+        ...(dashboardData || prev || {}),
+        partner: { ...(dashboardData?.partner || prev?.partner || {}), ...(planPartner || {}) },
+      }));
     } catch (err) {
       setMessage('');
-      setStats(prev => prev || { partner: { name: user?.name || 'Partner Admin', status: 'active' } });
+      setSummaryError('Could not refresh the partner summary. Any previous data is still shown. Use Sync to retry.');
+      setStats(prev => prev || { partner: { name: user?.name || 'Partner Admin' } });
     } finally {
       setLoading(false);
     }
-    api.get('/partner/companies', { timeout: 8000 }).then((companiesRes) => {
-      setCompanies(companiesRes.data || []);
-    }).catch(() => {
-      setCompanies([]);
-    });
   };
 
   useEffect(() => { load(initialPlanData); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -140,7 +126,7 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
     });
     socket.emit('join:partner', user.partnerId);
     socket.on('partner:update', (event) => {
-      if (String(event.partnerId) === String(user.partnerId)) load();
+      if (String(event.partnerId) === String(user.partnerId)) load(null, true);
     });
     return connectSocket(socket);
   }, [user?.role, user?.partnerId]);
@@ -162,7 +148,7 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
     }
   };
 
-  if (loading) return <div className="loading">Loading...</div>;
+  if (loading && !stats) return <div className="loading" role="status">Loading...</div>;
 
   const partner = stats?.partner || {};
   const resource = stats?.resourceRequest || {};
@@ -196,7 +182,7 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
   };
 
   return (
-    <div style={embedded ? embeddedPage : page}>
+    <div style={embedded ? embeddedPage : view === 'dashboard' ? { minWidth: 0 } : page}>
       {/* ── Invite Company Modal — portal-level overlay ── */}
       {showInviteModal && (
         <div style={{ position:'fixed', inset:0, zIndex:9999, background:'rgba(5,10,30,0.82)', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
@@ -233,7 +219,9 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
       ) : (
         <>
           {message && <div style={liveNotice}>{message}</div>}
-          {view === 'dashboard' && <div style={embedded ? embeddedDashboardShell : dashboardShell}><DashboardView embedded={embedded} partner={partner} companies={companies} summary={summary} setMessage={setMessage} /></div>}
+          {view === 'dashboard' && (embedded
+            ? <div style={embeddedDashboardShell}><DashboardView embedded partner={partner} companies={companies} summary={summary} setMessage={setMessage} /></div>
+            : <PartnerCompaniesSummary partner={partner} companies={companies} companiesLoaded={companiesLoaded} loading={loading} error={summaryError} companiesError={companiesError} onRefresh={() => load(null, true)} />)}
           {view === 'revenue' && <RevenueView partner={partner} summary={summary} companies={companies} />}
           {view === 'payment-control' && <PaymentControlView partner={partner} summary={summary} companies={companies} onRefresh={load} setMessage={setMessage} />}
           {view === 'companies' && <CompaniesView companies={companies} partner={partner} summary={summary} />}
@@ -1275,16 +1263,6 @@ function CompaniesView({ companies, partner, summary }) {
 function DashboardView({ embedded, partner, companies, summary, setMessage }) {
   const inactiveAgents = Math.max(summary.totalAgents - summary.activeAgents, 0);
   const rows = dashboardActivity(companies);
-  const companyRows = companies.slice(0, 5);
-  const totalTenants = Math.max(summary.totalCompanies, companies.length, 1);
-  const otherTenants = Math.max(totalTenants - 1, 0);
-  const totalUsers = Number(summary.totalAgents || 0) + Number(summary.totalCompanies || 0);
-  const healthTotal = Math.max(summary.totalAgents, 1);
-  const healthyPct = percent(summary.activeAgents, healthTotal);
-  const warningCount = Math.max(summary.expiringPlans || 0, 0);
-  const criticalCount = 0;
-  const offlineCount = Math.max(inactiveAgents, 0);
-  const agreementPdf = partner.agreementFilePath ? partner.agreementFileName || '' : '';
   const agreementFilePath = partner.agreementFilePath || '';
   const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
   const agreementUrl = agreementFilePath ? `${apiBase}/uploads/${agreementFilePath}` : '';
@@ -1389,117 +1367,7 @@ function DashboardView({ embedded, partner, companies, summary, setMessage }) {
     );
   }
 
-  return (
-    <>
-      <header style={dashboardHeader}>
-        <h1 style={dashboardTitle}>Welcome, Partner Admin</h1>
-        <p style={dashboardSubtitle}>Partner Company: {partner.name || 'SecureTech Solutions Pvt. Ltd.'}</p>
-      </header>
-
-      <div style={dashboardStats}>
-        <DashboardMetric icon="▦" tone="#5b5ff7" title="Total Companies" value={summary.totalCompanies} sub={<>Active: <b style={{ color:'#34d399' }}>{summary.activeCompanies}</b> <span>|</span> Inactive: <b>{Math.max(summary.totalCompanies - summary.activeCompanies, 0)}</b></>} />
-        <DashboardMetric icon="▰" tone="#2563eb" title="Total Agents" value={summary.totalAgents} sub={<>Active: <b style={{ color:'#34d399' }}>{summary.activeAgents}</b> <span>|</span> Inactive: <b>{inactiveAgents}</b></>} />
-        <DashboardMetric icon="□" tone="#3b82f6" title="Active Subscriptions" value={summary.activePlans} sub={<>Expiring Soon: <b style={{ color:'#34d399' }}>{summary.expiringPlans}</b></>} />
-        <DashboardMetric icon="▣" tone="#16a34a" title="Total Collection" value={fmtInr(summary.totalCollection)} sub={<>Commission: <b>{fmtInr(summary.platformCommission)}</b></>} />
-      </div>
-
-      <div style={homeDash.quickStats}>
-        <DashboardTrend title="Total Tenants" value={totalTenants} delta="+ 20%" tone="#8b5cf6" />
-        <DashboardTrend title="Partners" value="01" delta="+ 12%" tone="#a855f7" />
-        <DashboardTrend title="Companies" value={summary.totalCompanies} delta="+ 18%" tone="#3b82f6" />
-        <DashboardTrend title="Total Users" value={totalUsers} delta="+ 22%" tone="#06b6d4" />
-        <DashboardTrend title="Agents / Staff" value={summary.totalAgents} delta="+ 15%" tone="#22c55e" />
-        <DashboardTrend title="Active Systems" value={summary.activeAgents} delta="+ 14%" tone="#f59e0b" />
-        <DashboardTrend title="Total Alerts" value={warningCount + criticalCount} delta="- 10%" tone="#ef4444" down />
-      </div>
-
-      <div style={homeDash.insightGrid}>
-        <section style={dashboardCard}>
-          <div style={homeDash.cardHead}>
-            <h2 style={dashboardCardTitle}>Tenant Company Distribution</h2>
-            <span style={homeDash.cardLink}>Manage tenants →</span>
-          </div>
-          <DistributionRow label="Main Admin (main)" value={1} total={totalTenants} tone="#8b5cf6" />
-          <DistributionRow label="Other Tenants" value={otherTenants} total={totalTenants} tone="#a855f7" />
-          <div style={homeDash.distributionFooter}><span>Total Companies</span><b>{summary.totalCompanies}</b></div>
-        </section>
-
-        <section style={dashboardCard}>
-          <h2 style={dashboardCardTitle}>Users by Role</h2>
-          <div style={homeDash.roleSplit}>
-            <div style={homeDash.multiDonut}>
-              <div style={dashboardDonutInner}>
-                <strong>{totalUsers}</strong>
-                <span>Total Users</span>
-              </div>
-            </div>
-            <div style={dashboardLegend}>
-              <Legend color="#2563eb" text={`Partner Admin 1 (${totalUsers ? Math.round((1 / totalUsers) * 100) : 0}%)`} />
-              <Legend color="#06b6d4" text={`Company Admin ${summary.totalCompanies}`} />
-              <Legend color="#16a34a" text={`Agent / Staff ${summary.totalAgents}`} />
-              <Legend color="#f59e0b" text={`Other Users 0`} />
-            </div>
-          </div>
-        </section>
-
-        <section style={dashboardCard}>
-          <div style={homeDash.cardHead}>
-            <h2 style={dashboardCardTitle}>System Health Overview</h2>
-            <span style={homeDash.cardLink}>View all systems →</span>
-          </div>
-          <div style={homeDash.healthSplit}>
-            <div style={healthDonut(healthyPct)}>
-              <div style={dashboardDonutInner}>
-                <strong>{healthyPct}%</strong>
-                <span>Healthy</span>
-              </div>
-            </div>
-            <div style={dashboardLegend}>
-              <Legend color="#16a34a" text={`Healthy ${summary.activeAgents}`} />
-              <Legend color="#f59e0b" text={`Warning ${warningCount}`} />
-              <Legend color="#ef4444" text={`Critical ${criticalCount}`} />
-              <Legend color="#94a3b8" text={`Offline ${offlineCount}`} />
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div style={homeDash.insightGrid}>
-        <section style={dashboardCard}>
-          <div style={homeDash.cardHead}>
-            <h2 style={dashboardCardTitle}>Live Global Alert Feed</h2>
-            <span style={homeDash.cardLink}>View all alerts →</span>
-          </div>
-          <FeedRow tone="#ef4444" icon="△" text="High memory usage detected on server SRV-02" time="2m ago" />
-          <FeedRow tone="#22c55e" icon="▣" text={`New company registered: ${companyRows[0]?.name || partner.name || 'Partner Company'}`} time="10m ago" />
-          <FeedRow tone="#f59e0b" icon="△" text="Failed login attempt by user john.doe" time="15m ago" />
-          <FeedRow tone="#38bdf8" icon="▤" text="Database backup completed successfully" time="30m ago" />
-          <FeedRow tone="#ef4444" icon="△" text="API response time is slow for Agent Portal" time="45m ago" />
-        </section>
-
-        <section style={dashboardCard}>
-          <div style={homeDash.cardHead}>
-            <h2 style={dashboardCardTitle}>Recent Activity</h2>
-            <span style={homeDash.cardLink}>View all activity →</span>
-          </div>
-          {(rows.length ? rows : dashboardActivity([])).map((row, index) => (
-            <FeedRow key={`${row.activity}-${index}`} tone={index % 2 ? '#38bdf8' : '#22c55e'} icon={index % 2 ? '▧' : '▣'} text={`${row.activity}: ${row.details}`} time={row.date} />
-          ))}
-          <FeedRow tone="#22c55e" icon="▣" text={`New subscription activated: ${summary.activePlans || 0} active plan`} time="1h ago" />
-        </section>
-
-        <section style={dashboardCard}>
-          <div style={homeDash.cardHead}>
-            <h2 style={dashboardCardTitle}>Top Companies by Activity</h2>
-            <span style={homeDash.cardLink}>View all companies →</span>
-          </div>
-          {(companyRows.length ? companyRows : [{ name: partner.name || 'Partner Company' }]).map((company, index) => (
-            <ActivityCompany key={company._id || company.name || index} rank={index + 1} name={company.name || `Company ${index + 1}`} value={Math.max(24 - (index * 4), 6)} />
-          ))}
-        </section>
-      </div>
-    </>
-  );
+  return null;
 }
 
 function RevenueView({ partner, summary, companies = [] }) {
@@ -2404,60 +2272,6 @@ function DashboardMetric({ tone, icon, title, value, sub, success }) {
   );
 }
 
-function DashboardTrend({ title, value, delta, tone, down = false }) {
-  return (
-    <section style={homeDash.trendCard}>
-      <span style={homeDash.trendTitle}>{title}</span>
-      <strong style={homeDash.trendValue}>{value}</strong>
-      <div style={homeDash.trendMeta}>
-        <span style={{ color:down ? '#ef4444' : '#22c55e' }}>{down ? '↓' : '↑'} {delta.replace(/[+-]\s*/, '')}</span>
-        <small>vs last week</small>
-      </div>
-      <SparkLine tone={tone} />
-    </section>
-  );
-}
-
-function SparkLine({ tone }) {
-  const points = '0,20 14,15 28,18 42,11 56,17 70,19 84,12 98,15';
-  return (
-    <svg viewBox="0 0 98 24" style={homeDash.spark} preserveAspectRatio="none">
-      <polyline points={points} fill="none" stroke={tone} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function DistributionRow({ label, value, total, tone }) {
-  const pct = percent(value, total);
-  return (
-    <div style={homeDash.distributionRow}>
-      <div style={homeDash.distributionMeta}><span>{label}</span><b>{value}</b></div>
-      <div style={homeDash.distributionTrack}><span style={{ width:`${pct}%`, background:tone }} /></div>
-    </div>
-  );
-}
-
-function FeedRow({ tone, icon, text, time }) {
-  return (
-    <div style={homeDash.feedRow}>
-      <span style={{ ...homeDash.feedIcon, color:tone, borderColor:`${tone}55` }}>{icon}</span>
-      <p>{text}</p>
-      <time>{time}</time>
-    </div>
-  );
-}
-
-function ActivityCompany({ rank, name, value }) {
-  return (
-    <div style={homeDash.companyRow}>
-      <span style={homeDash.companyRank}>{rank}</span>
-      <p>{name}</p>
-      <div style={homeDash.companyBar}><i style={{ ...homeDash.companyBarFill, width:`${Math.min(100, value * 4)}%` }} /></div>
-      <b>{value} Activities</b>
-    </div>
-  );
-}
-
 function CompactUsage({ label, value, total, suffix = '' }) {
   const pct = percent(value, total);
   return (
@@ -2735,18 +2549,6 @@ function dashboardDonut(active, total) {
     height:154,
     borderRadius:'50%',
     background:`conic-gradient(#16a34a 0 ${activePct}%, #ef4444 ${activePct}% ${inactivePct}%, #e2e8f0 ${inactivePct}% 100%)`,
-    display:'grid',
-    placeItems:'center',
-  };
-}
-
-function healthDonut(value) {
-  const pct = Math.max(0, Math.min(100, Number(value || 0)));
-  return {
-    width:154,
-    height:154,
-    borderRadius:'50%',
-    background:`conic-gradient(#16a34a 0 ${pct}%, #1e3a5f ${pct}% 100%)`,
     display:'grid',
     placeItems:'center',
   };

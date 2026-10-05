@@ -1,0 +1,120 @@
+.partner-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  color: #e2e8f0;
+  background: #070b14;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.partner-layout-header {
+  position: relative;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-shrink: 0;
+  padding: 10px 24px;
+  border-bottom: 1px solid #1e2a42;
+  background: rgba(7, 11, 20, .96);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .3);
+  backdrop-filter: blur(16px);
+}
+
+.partner-layout-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  color: #f8fafc;
+  text-decoration: none;
+}
+
+.partner-layout-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: #070b14;
+  background: linear-gradient(135deg, #00f2fe, #3b82f6);
+  box-shadow: 0 0 16px rgba(0, 242, 254, .3);
+}
+
+.partner-layout-brand-mark .partner-layout-icon { width: 23px; height: 23px; }
+.partner-layout-brand-title { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 800; letter-spacing: .6px; }
+.partner-layout-brand-badge { padding: 1px 6px; border: 1px solid rgba(0, 242, 254, .3); border-radius: 4px; background: rgba(0, 242, 254, .12); color: #00f2fe; font-size: 10px; }
+.partner-layout-brand-subtitle { display: block; font-size: 10px; color: #94a3b8; letter-spacing: .2px; }
+.partner-layout-icon { width: 16px; height: 16px; flex-shrink: 0; }
+
+.partner-layout-navigation { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.partner-layout-links { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; padding: 3px 0; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #243954 transparent; }
+.partner-layout-links::-webkit-scrollbar { height: 4px; }
+.partner-layout-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .18s ease, background .18s ease, border-color .18s ease;
+}
+
+.partner-layout-link:hover { color: #e2e8f0; background: #101c2e; }
+.partner-layout-header .is-active { color: #00f2fe; background: rgba(0, 242, 254, .1); border-color: rgba(0, 242, 254, .3); box-shadow: 0 0 12px rgba(0, 242, 254, .1); }
+.partner-layout-header :is(a, button):focus-visible { outline: 2px solid #00f2fe; outline-offset: 2px; }
+.partner-layout-tool-icon { width: 18px; flex-shrink: 0; text-align: center; font-size: 14px; }
+
+.partner-layout-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
+.partner-layout-notifications { position: relative; display: grid; place-items: center; width: 36px; height: 36px; color: #94a3b8; border: 1px solid #1b2a42; border-radius: 8px; text-decoration: none; }
+.partner-layout-notifications:hover { color: #00f2fe; background: #0e1726; }
+.partner-layout-notification-count { position: absolute; top: -5px; right: -5px; display: grid; place-items: center; height: 17px; min-width: 17px; padding: 0 3px; border-radius: 9px; background: #ef4444; color: #fff; font-size: 10px; font-weight: 700; }
+.partner-layout-profile { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 10px; border: 1px solid #1b2a42; border-radius: 8px; background: #0e1726; color: #f1f5f9; text-decoration: none; }
+.partner-layout-profile-avatar { position: relative; display: grid; place-items: center; width: 24px; height: 24px; color: #93c5fd; }
+.partner-layout-status-dot { position: absolute; right: -1px; bottom: 0; width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 7px rgba(16, 185, 129, .6); }
+.partner-layout-identity { display: flex; flex-direction: column; line-height: 1.4; }
+.partner-layout-identity strong { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
+.partner-layout-identity small { font-size: 9px; font-weight: 700; letter-spacing: .6px; color: #00f2fe; }
+.partner-layout-logout { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 12px; border: 1px solid rgba(239, 68, 68, .25); border-radius: 8px; background: rgba(239, 68, 68, .08); color: #f87171; font-size: 12px; font-weight: 600; cursor: pointer; }
+.partner-layout-logout:hover { background: rgba(239, 68, 68, .2); border-color: rgba(239, 68, 68, .5); }
+
+.partner-layout-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 30px; background: linear-gradient(135deg, #0a0e27 0%, #0f1535 100%); }
+.partner-layout-content-flush { padding: 0; overflow: hidden; }
+.partner-layout-content-summary { padding: 24px; background: #070b14; }
+.partner-layout-impersonation { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; flex-shrink: 0; padding: 8px 18px; background: #7f1d1d; border-bottom: 1px solid #fca5a5; color: #fff; font-size: 13px; font-weight: 700; }
+.partner-layout-impersonation button { padding: 7px 10px; border: 1px solid rgba(255, 255, 255, .55); border-radius: 6px; background: rgba(255, 255, 255, .12); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.partner-layout-impersonation button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+@media (max-width: 1100px) {
+  .partner-layout-header { flex-wrap: wrap; gap: 10px 16px; padding: 12px 20px 8px; }
+  .partner-layout-navigation { order: 3; flex: 0 0 100%; }
+}
+
+@media (max-width: 600px) {
+  .partner-layout-content-summary { padding: 14px; }
+  .partner-layout-header { padding: 10px 12px 6px; gap: 10px; }
+  .partner-layout-brand-subtitle, .partner-layout-identity, .partner-layout-logout > span { display: none; }
+  .partner-layout-brand { gap: 8px; }
+  .partner-layout-brand-title { font-size: 12px; gap: 4px; }
+  .partner-layout-brand-badge { font-size: 9px; padding: 1px 4px; }
+  .partner-layout-actions { gap: 7px; }
+  .partner-layout-profile { padding: 4px 6px; }
+  .partner-layout-logout { width: 36px; padding: 7px; }
+  .partner-layout-link { min-height: 42px; padding: 8px 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .partner-layout-header * { transition: none; }
+}

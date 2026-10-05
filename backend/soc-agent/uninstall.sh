@@ -91,6 +91,8 @@ if [ "$OS" = "Linux" ]; then
     systemctl disable soc-suricata-nfqueue.service 2>/dev/null || true
     systemctl stop soc-suricata-nfqueue.service 2>/dev/null || true
     nft delete table inet soc_suricata_ips 2>/dev/null || true
+    nft delete table inet soc_country_block 2>/dev/null || true
+    rm -f /var/lib/soc-agent/country-block.json
     rm -f /etc/systemd/system/soc-agent.service
     rm -f /etc/systemd/system/soc-suricata-nfqueue.service
     rm -f /etc/systemd/system/suricata.service.d/soc-inline-ips.conf
@@ -158,8 +160,10 @@ elif [ "$OS" = "Darwin" ]; then
     echo "Step 3: Removing pfctl firewall rules..."
     if command -v pfctl &>/dev/null; then
       pfctl -t soc_blocklist -T flush 2>/dev/null || true
+      pfctl -a com.soc.agent/country-block -F all 2>/dev/null || true
     fi
     rm -f /etc/soc-agent/firewall_rules.json 2>/dev/null || true
+    rm -f "/Library/Application Support/AJNAT/state/country-block.json"
     echo "✅  pfctl rules flushed"
 
     echo ""

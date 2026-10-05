@@ -22,7 +22,10 @@ class HeartbeatCommandTests(unittest.TestCase):
         _SECURITY_LOCKDOWN.clear()
 
     def test_lockdown_rejects_response_commands_and_allows_authorized_unlock(self):
-        heartbeat = HeartbeatService({})
+        class Config(dict):
+            def update_runtime(self, values, **kwargs):
+                self.update(values)
+        heartbeat = HeartbeatService(Config())
         handler = ResponseHandler()
         heartbeat.set_response_handler(handler)
         _SECURITY_LOCKDOWN.set()
@@ -34,8 +37,10 @@ class HeartbeatCommandTests(unittest.TestCase):
         self.assertFalse(heartbeat._security_action_results[0]['ok'])
         self.assertIn('security lockdown', heartbeat._security_action_results[0]['message'])
 
-        heartbeat._execute_pending_commands([{'command': 'security-unlock'}])
+        with patch.object(heartbeat, '_refresh_security_report', return_value={'integrityStatus': 'verified'}):
+            heartbeat._execute_pending_commands([{'command': 'security-unlock'}])
         self.assertFalse(_SECURITY_LOCKDOWN.is_set())
+        self.assertFalse(heartbeat.config['security_lockdown_active'])
 
     def test_queued_ip_block_uses_response_handler_without_response_id(self):
         heartbeat = HeartbeatService({})

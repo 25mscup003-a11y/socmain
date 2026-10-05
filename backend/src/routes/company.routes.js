@@ -1,4 +1,6 @@
 const router = require('express').Router();
+const crypto = require('crypto');
+const { requireCompanySupportAccess, emitCompanySupport, supportText, validSupportId, markCompanySupportRead } = require('../utils/companySupport');
 const mongoose = require('mongoose');
 const Company = require('../models/Company.model');
 const Department = require('../models/Department.model');
@@ -426,9 +428,8 @@ router.patch('/profile', requireCompanyAdmin, async (req, res) => {
 });
 
 // GET /api/company/support-tickets - list tickets
-router.get('/support-tickets', requireAnalyst, async (req, res) => {
+router.get('/support-tickets', requireAnalyst, requireCompanySupportAccess, async (req, res) => {
   try {
-    const CompanySupportTicket = require('../models/CompanySupportTicket.model');
     const tickets = await CompanySupportTicket.find({ companyId: req.user.companyId })
       .sort({ createdAt: -1 });
     res.json(tickets);
@@ -437,16 +438,23 @@ router.get('/support-tickets', requireAnalyst, async (req, res) => {
   }
 });
 
+router.post('/support-tickets/:id/read', requireAnalyst, requireCompanySupportAccess, async (req, res) => {
+  try { await markCompanySupportRead(req, res, req.params.id, req.supportCompany); }
+  catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 // POST /api/company/support-tickets - submit ticket
-router.post('/support-tickets', requireAnalyst, async (req, res) => {
+router.post('/support-tickets', requireAnalyst, requireCompanySupportAccess, async (req, res) => {
   try {
-    const { subject, message, severity } = req.body;
+    const subject = supportText(req.body.subject, 200);
+    const message = supportText(req.body.message, 10000);
+    const severity = req.body.severity || 'low';
+    if (!['low', 'medium', 'high', 'payment'].includes(severity)) return res.status(400).json({ message: 'Invalid severity' });
     if (!subject || !message) {
-      return res.status(400).json({ message: 'Subject and message are required' });
+      return res.status(400).json({ message: 'Subject (1–200 characters) and message (1–10,000 characters) are required' });
     }
 
-    const CompanySupportTicket = require('../models/CompanySupportTicket.model');
-    const ticketId = 'SOC-' + Math.floor(1000 + Math.random() * 9000);
+    const ticketId = 'SOC-' + crypto.randomBytes(6).toString('hex').toUpperCase();
     const ticket = await CompanySupportTicket.create({
       ticketId,
       companyId: req.user.companyId,
@@ -463,11 +471,7 @@ router.post('/support-tickets', requireAnalyst, async (req, res) => {
       }]
     });
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to('superadmin').emit('support:ticket_new', { ticket, companyId: req.user.companyId });
-      io.to(`company:${req.user.companyId}`).emit('support:ticket_new', { ticket, companyId: req.user.companyId });
-    }
+    emitCompanySupport(req, req.supportCompany, 'support:ticket_new', ticket);
 
     res.status(201).json(ticket);
   } catch (err) {
@@ -476,18 +480,19 @@ router.post('/support-tickets', requireAnalyst, async (req, res) => {
 });
 
 // POST /api/company/support-tickets/:id/messages - send chat message
-router.post('/support-tickets/:id/messages', requireAnalyst, async (req, res) => {
+router.post('/support-tickets/:id/messages', requireAnalyst, requireCompanySupportAccess, async (req, res) => {
   try {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ message: 'Message is required' });
+    if (!validSupportId(req.params.id)) return res.status(400).json({ message: 'Invalid ticket ID' });
+    const message = supportText(req.body.message, 10000);
+    if (!message) return res.status(400).json({ message: 'Message must contain 1–10,000 characters.' });
 
-    const CompanySupportTicket = require('../models/CompanySupportTicket.model');
     const ticket = await CompanySupportTicket.findOne({
       _id: req.params.id,
       companyId: req.user.companyId
     });
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
 
+    if (ticket.status === 'Closed') return res.status(409).json({ message: 'This ticket is closed. Please create a new ticket.' });
     ticket.messages.push({
       senderId: req.user.id,
       senderName: req.user.name || req.user.email,
@@ -497,11 +502,7 @@ router.post('/support-tickets/:id/messages', requireAnalyst, async (req, res) =>
     ticket.status = 'Open'; // update to open when customer messages
     await ticket.save();
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to('superadmin').emit('support:message_new', { ticketId: ticket.ticketId, ticket });
-      io.to(`company:${req.user.companyId}`).emit('support:message_new', { ticketId: ticket.ticketId, ticket });
-    }
+    emitCompanySupport(req, req.supportCompany, 'support:message_new', ticket);
 
     res.json(ticket);
   } catch (err) {

@@ -160,7 +160,7 @@ async function startAlertLoop(incidentKey, incident) {
   const tick = async () => {
     // If incident was manually resolved, stop
     const current = activeIncidents.get(incidentKey);
-    if (!current || current.status === 'resolved' || current.status === 'manual-override') {
+    if (!current || current !== incident || current.status !== 'alerting') {
       logger.info(`[AlertEngine] Incident ${incidentKey} resolved — stopping alert loop`);
       return;
     }
@@ -188,6 +188,8 @@ async function startAlertLoop(incidentKey, incident) {
       });
     }
 
+    if (activeIncidents.get(incidentKey) !== current || current.status !== 'alerting') return;
+
     // Update alert count
     current.alertCount = alertCount;
     current.lastAlert = new Date();
@@ -210,68 +212,29 @@ async function startAlertLoop(incidentKey, incident) {
 // ── Phase 2: Auto-Isolation ───────────────────────────────────────────────────
 async function triggerAutoIsolation(incidentKey, incident) {
   const current = activeIncidents.get(incidentKey);
-  if (!current) return;
-  if (current.status === 'resolved' || current.status === 'manual-override') return;
-
-  logger.warn(`[AlertEngine] AUTO-ISOLATION: ${incident.srcIp} [company=${incident.companyId}] attack=${incident.attackType}`);
-
-  current.status = 'isolated';
-  current.isolatedAt = new Date();
-  activeIncidents.set(incidentKey, current);
-
-  // Send isolation email
-  if (incident.adminEmail) {
-    await _sendEmail({
-      to: incident.adminEmail,
-      subject: `🔴 CRITICAL: System Isolation Triggered — ${incident.srcIp} [${incident.companyId}]`,
-      html: _isolationEmailHtml(incident),
-      text: `CRITICAL: System isolation triggered for IP ${incident.srcIp} (${incident.companyId}). Attack: ${incident.attackType}. Auto-recovery check in 15 minutes.`,
-    });
-  }
-
-  // Store isolation event in DB
+  if (!current || current !== incident || current.status !== 'alerting') return;
+  // Only the SOC backend owns endpoint commands and agent acknowledgments.
+  // An escalation event is not evidence that a machine has been isolated.
+  current.status = 'isolation_requested';
+  current.isolationRequestedAt = new Date();
+  current.isolationConfirmed = false;
   await mongoService.storeLog({
-    level: 'ISOLATION',
-    message: `🔴 AUTO-ISOLATED: ${incident.srcIp} [${incident.companyId}] — ${incident.attackType}`,
-    ip: incident.srcIp,
-    mac: incident.mac,
-    attackType: incident.attackType,
-    severity: incident.severity,
-    phase: 'auto-isolation',
+    level: 'ALERT', message: `Isolation requested for ${incident.srcIp}; endpoint enforcement requires the SOC backend`,
+    ip: incident.srcIp, phase: 'isolation-requested',
   }, incident.companyId).catch(() => {});
-
-  await mongoService.storeAttackEvent({
-    srcIp: incident.srcIp,
-    mac: incident.mac,
-    attackType: incident.attackType,
-    threatLevel: incident.severity || 'high',
-    score: 90,
-    direction: 'inbound',
-    autoBlocked: true,
-    isolated: true,
-    isolatedAt: new Date(),
-  }, incident.companyId).catch(() => {});
-
-  // Emit real-time event
   if (typeof global.emitIPSEvent === 'function') {
-    global.emitIPSEvent('isolation', {
-      companyId: incident.companyId,
-      srcIp: incident.srcIp,
-      mac: incident.mac,
-      attackType: incident.attackType,
-      isolatedAt: new Date().toISOString(),
+    global.emitIPSEvent('isolation-requested', {
+      companyId: incident.companyId, srcIp: incident.srcIp,
+      enforced: false, status: current.status,
     });
   }
-
-  // Schedule auto-recovery check in 15 min
-  setTimeout(() => autoRecoveryCheck(incidentKey, incident), AUTO_RECOVERY_MS);
 }
 
 // ── Phase 3: Auto-Recovery ────────────────────────────────────────────────────
 async function autoRecoveryCheck(incidentKey, incident) {
   const current = activeIncidents.get(incidentKey);
   if (!current) return;
-  if (current.status === 'resolved' || current.status === 'manual-override') return;
+  if (current.status !== 'isolated' || current.isolationConfirmed !== true) return;
 
   logger.info(`[AlertEngine] Auto-recovery check for ${incidentKey}`);
 
@@ -367,7 +330,7 @@ async function handleDetection({
   // If incident already active for this IP, update but don't restart
   if (activeIncidents.has(incidentKey)) {
     const existing = activeIncidents.get(incidentKey);
-    if (existing.status === 'alerting' || existing.status === 'isolated') {
+    if (['alerting', 'isolated', 'isolation_requested'].includes(existing.status)) {
       if (!existing.mac && mac) existing.mac = mac;
       logger.info(`[AlertEngine] Incident already active for ${incidentKey} (${existing.status})`);
       return existing;

@@ -66,9 +66,15 @@ function decryptJsonPayload(envelope, agentKey) {
   return JSON.parse(decryptPayload(envelope, agentKey, REQUEST_AAD).toString('utf8'));
 }
 
-function installEncryptedResponse(res, agentKey) {
+function installEncryptedResponse(res, agentKey, requestNonce = '') {
   const originalSend = res.send.bind(res);
   let sendingEncrypted = false;
+  const authenticateResponse = body => {
+    const digest = crypto.createHash('sha256').update(body).digest('hex');
+    const signature = crypto.createHmac('sha256', agentKey).update(`AJNAT-RESPONSE-V1.${requestNonce}.${res.statusCode}.${digest}`).digest('hex');
+    res.setHeader('X-AJNAT-Response-SHA256', digest);
+    res.setHeader('X-AJNAT-Response-Signature', signature);
+  };
   res.send = function encryptedAgentResponse(body) {
     if (sendingEncrypted || body == null || res.statusCode === 204 || res.statusCode === 304) {
       return originalSend(body);
@@ -77,7 +83,10 @@ function installEncryptedResponse(res, agentKey) {
     // Installer/dependency downloads are already authenticated with SHA-256 and
     // must remain directly executable. JSON/text control-plane responses are
     // protected by this application-layer envelope in addition to TLS.
-    if (Buffer.isBuffer(body)) return originalSend(body);
+    if (Buffer.isBuffer(body)) {
+      authenticateResponse(body);
+      return originalSend(body);
+    }
 
     const plaintext = Buffer.from(
       typeof body === 'string' ? body : JSON.stringify(body),
@@ -85,6 +94,7 @@ function installEncryptedResponse(res, agentKey) {
     );
     const encrypted = encryptPayload(plaintext, agentKey, RESPONSE_AAD);
     const wire = Buffer.from(JSON.stringify(encrypted), 'utf8');
+    authenticateResponse(wire);
     const originalContentType = String(res.getHeader('Content-Type') || 'application/json; charset=utf-8');
     res.setHeader(TRANSPORT_HEADER, TRANSPORT_VERSION);
     res.setHeader(ORIGINAL_CONTENT_TYPE_HEADER, originalContentType);
@@ -119,7 +129,7 @@ async function agentPayloadEncryption(req, res, next) {
 
     req.agentTransportSystem = system;
     req.agentEncryptedEnvelope = req.body;
-    installEncryptedResponse(res, system.agentKey);
+    installEncryptedResponse(res, system.agentKey, String(req.headers['x-agent-nonce'] || ''));
 
     if (!['GET', 'HEAD'].includes(req.method)) {
       req.body = decryptJsonPayload(req.body, system.agentKey);

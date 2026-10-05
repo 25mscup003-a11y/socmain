@@ -80,6 +80,10 @@ class AutoResponseEngine:
         Returns {'ok': bool, 'result': str, 'timestamp': iso}.
         """
         params = params or {}
+        from .heartbeat import security_command_error
+        denied = security_command_error(action)
+        if denied:
+            return {'ok': False, 'result': denied}
         started = time.monotonic()
         command_id = str(params.get('commandId') or '')
         response_id = str(params.get('responseId') or '')

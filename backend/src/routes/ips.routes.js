@@ -14,6 +14,7 @@ const { blockIP, unblockIP, getBlocklist, isBlocked, BlockedIP } = require('../s
 const Alert = require('../models/Alert.model');
 
 router.use(authenticate, requireAnalyst);
+router.use(require('./country-block.routes'));
 
 // ── GET /blocklist ─────────────────────────────────────────────────────────────
 router.get('/blocklist', async (req, res) => {

@@ -30,7 +30,7 @@ const os   = require('os');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
-const DEFAULT_AGENT_VERSION = '0.1.10';
+const DEFAULT_AGENT_VERSION = '0.1.13';
 const REQUIRED_AGENT_FILES = Object.freeze([
   'agent.py',
   'windows_service.py',
@@ -39,6 +39,9 @@ const REQUIRED_AGENT_FILES = Object.freeze([
   'core/config_protection.py',
   'core/device_identity.py',
   'core/heartbeat.py',
+  'core/self_protection.py',
+  'core/security_controls.py',
+  'core/file_open_protection.py',
   'core/sender.py',
   'collectors/processes.py',
   'detectors/ransomware.py',
@@ -945,6 +948,8 @@ echo "  OK: macOS PF native IPS is ready"
 function macNativeIpsCleanupSnippet() {
   return `
 # Remove only the SOC-owned PF anchor references and table.
+pfctl -a com.soc.agent/country-block -F all >/dev/null 2>&1 || true
+rm -f "/Library/Application Support/AJNAT/state/country-block.json"
 PF_CONF="/etc/pf.conf"
 PF_ANCHOR="/etc/pf.anchors/com.soc.agent"
 PF_ISOLATION_ANCHOR="/etc/pf.anchors/com.soc.agent.isolation"
@@ -1095,6 +1100,10 @@ ${requirePassword ? unixPasswordVerifySnippet() : ''}
 ${linuxUninstallNotificationSnippet()}
 fi
 systemctl stop soc-agent >/dev/null 2>&1 || true
+if [ "$ACTION" = "remove" ] || [ "$ACTION" = "purge" ]; then
+  nft delete table inet soc_country_block >/dev/null 2>&1 || true
+  rm -f /var/lib/soc-agent/country-block.json
+fi
 systemctl disable soc-agent >/dev/null 2>&1 || true
 systemctl stop suricata >/dev/null 2>&1 || true
 systemctl disable soc-suricata-nfqueue.service >/dev/null 2>&1 || true
@@ -2168,6 +2177,8 @@ VERIFY
   journalctl -u soc-agent -f
 
 TEST (no sudo)
+  If optional source clearing is armed, enable Maintenance Mode and wait for
+  agent acknowledgement before this command, source inspection or backups.
   python3 /opt/soc-agent/agent.py test
 
 UNINSTALL
@@ -2335,6 +2346,8 @@ else
   systemctl disable soc-suricata-nfqueue.service >/dev/null 2>&1 || true
   systemctl stop soc-suricata-nfqueue.service >/dev/null 2>&1 || true
   nft delete table inet soc_suricata_ips >/dev/null 2>&1 || true
+  nft delete table inet soc_country_block >/dev/null 2>&1 || true
+  rm -f /var/lib/soc-agent/country-block.json
   rm -f /etc/systemd/system/soc-agent.service
   rm -f /etc/systemd/system/soc-suricata-nfqueue.service
   rm -f /etc/systemd/system/suricata.service.d/soc-inline-ips.conf
@@ -2460,6 +2473,8 @@ $ErrorActionPreference = "SilentlyContinue"
 ${windowsPasswordVerifySnippet()}
 sc.exe stop $ServiceName | Out-Null
 sc.exe delete $ServiceName | Out-Null
+Get-NetFirewallRule -Group 'AJNAT Country Block' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+Remove-Item "$env:ProgramData\\AJNAT\\state\\country-block.json" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path $InstallDir -Recurse -Force
 Write-Host "SOC Agent removed." -ForegroundColor Green
 `;
@@ -3326,6 +3341,7 @@ Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
 $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($service) { try { $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30)) } catch {} }
 & sc.exe delete $ServiceName 2>$null | Out-Null
+Get-NetFirewallRule -Group 'AJNAT Country Block' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 Remove-Item $InstallDir              -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item C:\\ProgramData\\AJNAT    -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item C:\\ProgramData\\SOCAgent -Recurse -Force -ErrorAction SilentlyContinue
@@ -3719,6 +3735,7 @@ if ($service) {
 }
 Remove-Item C:\\ProgramData\\SOCAgent -Recurse -Force -ErrorAction SilentlyContinue
 if (-not $PreserveData) {
+    Get-NetFirewallRule -Group 'AJNAT Country Block' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     Remove-Item C:\\ProgramData\\AJNAT -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host "SOC Agent service removed."

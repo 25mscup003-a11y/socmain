@@ -3,39 +3,13 @@ import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { SOCKET_URL, connectSocket, io } from '../api/config';
-
-// ── PartnerNavItem: custom active check using location + search params ────
-function PartnerNavItem({ item, onClick }) {
-  const loc = useLocation();
-  const isActive = item.matchActive
-    ? item.matchActive({ pathname: loc.pathname, search: loc.search })
-    : loc.pathname === item.to || (item.end === false && loc.pathname.startsWith(item.to));
-
-  return (
-    <NavLink
-      to={item.to}
-      end
-      onClick={onClick}
-      style={() => ({
-        display: 'flex', alignItems: 'center', gap: 12, minHeight: 38,
-        padding: '0 12px', borderRadius: 7, textDecoration: 'none',
-        color: isActive ? '#fff' : '#c6d4e5',
-        background: isActive ? 'linear-gradient(90deg,#4259ff,#6847ea)' : 'transparent',
-        fontSize: 13, fontWeight: isActive ? 800 : 650,
-      })}
-    >
-      <span style={{ width: 18, textAlign: 'center', fontSize: 14 }}>{item.icon}</span>
-      <span>{item.label}</span>
-    </NavLink>
-  );
-}
+import PartnerLayout from './PartnerLayout';
 
 export default function Layout() {
   const { user, company, logout, isAdmin, isDeptAdmin, isAnalyst, impersonation, isImpersonating } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [openSection, setOpenSection] = useState('System Setup');
-  const [partnerOpenSections, setPartnerOpenSections] = useState(['Business']);
   const [notificationCount, setNotificationCount] = useState(0);
   const [alertCount, setAlertCount] = useState(0);
   const alertCountRequestRef = useRef(null);
@@ -140,33 +114,7 @@ export default function Layout() {
     }
   }, [user?.role, user?.partnerId, user?.companyId, user?._id]);
 
-  useEffect(() => {
-    if (user?.role !== 'partner_admin') return;
-    const params = new URLSearchParams(location.search);
-    const view = params.get('view');
-    const path = location.pathname;
-    const businessPaths = [
-      '/partner-companies', '/partner/companies',
-      '/partner/dashboard',
-      '/users', '/partner/users',
-      '/partner-soc-managers', '/partner/soc-managers',
-      '/fraud-intelligence', '/partner/fraud-intelligence',
-      '/partner-company-support', '/partner/company-support', '/partner/support',
-      '/partner/revenue', '/partner/payment-control'
-    ];
-    const monitoringPaths = ['/system-monitoring', '/alerts', '/edr', '/ids', '/ips', '/firewall', '/dns-sinkhole', '/security-score', '/investigate', '/log-monitor', '/soar', '/compliance', '/reports'];
-
-    if ((path === '/' && (view === 'revenue' || view === 'payment-control')) || businessPaths.some(p => path.startsWith(p))) {
-      setPartnerOpenSections(prev => prev.includes('Business') ? prev : [...prev, 'Business']);
-    } else if (monitoringPaths.some(p => path.startsWith(p))) {
-      setPartnerOpenSections(prev => prev.includes('Monitoring') ? prev : [...prev, 'Monitoring']);
-    } else if (path === '/' && !view) {
-      setPartnerOpenSections(prev => prev.includes('Business') ? prev : [...prev, 'Business']);
-    }
-  }, [user?.role, location.pathname, location.search]);
-
   if (user?.role === 'partner_admin') {
-    const partnerEmail = encodeURIComponent(user?.email || '');
     const partnerNavSections = [
       {
         title: '',
@@ -210,102 +158,17 @@ export default function Layout() {
           },
         ],
       },
-      {
-        title: 'Monitoring',
-        items: [
-          { to: '/system-monitoring', label: 'System Monitoring', icon: '📊' },
-          { to: '/alerts', label: 'Alerts', icon: '🔔' },
-          { to: '/edr', label: 'EDR', icon: '🛡' },
-          { to: '/ids', label: 'IDS', icon: '🔍' },
-          { to: '/ips', label: 'IPS', icon: '🛡️' },
-          { to: '/firewall', label: 'Firewall', icon: '🔥' },
-          { to: '/dns-sinkhole', label: 'DNS Sinkhole', icon: '🛡️' },
-          { to: '/security-score', label: 'Security Score', icon: '📊' },
-          { to: '/investigate', label: 'Investigate', icon: '🔎' },
-          { to: '/log-monitor', label: 'Log Monitor', icon: '🖥️' },
-          { to: '/soar', label: 'SOAR Rule', icon: '⚡' },
-          { to: '/compliance', label: 'Compliance', icon: '✅' },
-          { to: '/reports', label: 'Reports', icon: '📄' },
-          { to: '/reports?tab=analytics', label: 'Analytics', icon: '📈' },
-        ],
-      },
     ];
 
     return (
-      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif', background: 'linear-gradient(135deg, #0a0e27 0%, #0f1535 100%)', color: '#e2e8f0' }}>
-        <aside style={{ width: 250, background: 'linear-gradient(180deg, rgba(12, 26, 46, 0.95) 0%, rgba(15, 21, 53, 0.95) 100%)', color: '#dce8f7', display: 'flex', flexDirection: 'column', padding: '14px 0', flexShrink: 0, borderRight: '1px solid rgba(30, 58, 95, 0.6)', minHeight: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 22px 22px', fontWeight: 900, letterSpacing: .2 }}>
-            <span style={{ width: 28, height: 28, border: '1px solid #8fb2d9', borderRadius: 9, display: 'grid', placeItems: 'center' }}>◇</span>
-            <span>SCDC PLATFORM</span>
-          </div>
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 14px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
-            {partnerNavSections.map((section, sectionIdx) => {
-              const isGroup = Boolean(section.title);
-              const isOpen = !isGroup || partnerOpenSections.includes(section.title);
-              return (
-                <div key={`${section.title || 'main'}-${sectionIdx}`} style={{ display: 'grid', gap: 4 }}>
-                  {isGroup && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPartnerOpenSections(prev =>
-                          prev.includes(section.title)
-                            ? prev.filter(t => t !== section.title)
-                            : [...prev, section.title]
-                        );
-                      }}
-                      style={partnerNavTitleButton}
-                    >
-                      <span>{section.title}</span>
-                      <span style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .15s' }}>›</span>
-                    </button>
-                  )}
-                  {isOpen && section.items.map((item, idx) => (
-                    <PartnerNavItem
-                      key={`${item.label}-${idx}`}
-                      item={item}
-                    />
-                  ))}
-                </div>
-              );
-            })}
-            <button onClick={() => { logout(); window.location.href = '/'; }} style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 42, padding: '0 12px', borderRadius: 7, border: 'none', background: 'transparent', color: '#c6d4e5', fontSize: 13, fontWeight: 650, cursor: 'pointer', textAlign: 'left' }}>
-              <span style={{ width: 18, textAlign: 'center', fontSize: 15 }}>↪</span>
-              <span>Logout</span>
-            </button>
-          </nav>
-        </aside>
-
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {isImpersonating && (
-            <div style={impersonationBanner}>
-              <span>{impersonation?.banner || 'You are logged in as Partner Admin via Super Admin'}</span>
-              <button type="button" onClick={() => { logout(); window.location.href = 'http://localhost:3001/partners'; }} style={bannerButton}>
-                Back to Super Admin
-              </button>
-            </div>
-          )}
-          <header style={{ height: 58, background: '#0c1a2e', borderBottom: '1px solid #1e3a5f', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0 28px' }}>
-            <div />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
-              <NavLink to="/partner-profile?section=notifications" title="Notifications" style={{ position: 'relative', color: '#93c5fd', fontSize: 20, textDecoration: 'none', width: 28, height: 28, display: 'grid', placeItems: 'center' }}>
-                ♢{notificationCount > 0 && <span style={{ position: 'absolute', top: -5, right: -5, background: '#ef4444', color: '#fff', borderRadius: 8, fontSize: 10, minWidth: 16, height: 16, display: 'grid', placeItems: 'center' }}>{notificationCount > 9 ? '9+' : notificationCount}</span>}
-              </NavLink>
-              <NavLink to="/partner-profile?section=dashboard" title="Profile Dashboard" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none' }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#1e3a5f', display: 'grid', placeItems: 'center', color: '#93c5fd' }}>●</div>
-                <div style={{ lineHeight: 1.2 }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: '#e0f2fe' }}>{user?.name || 'Account'}</div>
-                </div>
-                <span style={{ color: '#60a5fa' }}>⌄</span>
-              </NavLink>
-            </div>
-          </header>
-
-          <main style={{ flex: 1, minHeight: 0, overflowY: location.pathname === '/ids' ? 'hidden' : 'auto', background: 'linear-gradient(135deg, #0a0e27 0%, #0f1535 100%)', padding: location.pathname === '/ids' ? 0 : '20px 30px 30px' }}>
-            <Outlet />
-          </main>
-        </div>
-      </div>
+      <PartnerLayout
+        sections={partnerNavSections}
+        user={user}
+        notificationCount={notificationCount}
+        logout={logout}
+        impersonation={impersonation}
+        isImpersonating={isImpersonating}
+      />
     );
   }
 
@@ -641,27 +504,4 @@ const bannerButton = {
   fontSize: 12,
   fontWeight: 900,
   cursor: 'pointer',
-};
-
-const partnerNavTitle = {
-  padding: '9px 12px 4px',
-  color: '#60a5fa',
-  fontSize: 10,
-  fontWeight: 900,
-  letterSpacing: '.8px',
-  textTransform: 'uppercase',
-};
-
-const partnerNavTitleButton = {
-  ...partnerNavTitle,
-  minHeight: 30,
-  width: '100%',
-  border: 'none',
-  background: 'transparent',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  cursor: 'pointer',
-  textAlign: 'left',
-  boxSizing: 'border-box',
 };

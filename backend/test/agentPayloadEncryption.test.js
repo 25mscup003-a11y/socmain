@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const System = require('../src/models/System.model');
 
 const {
@@ -53,6 +54,7 @@ test('middleware decrypts agent JSON and encrypts the JSON response', async (t) 
     headers: {
       'x-ajnat-payload-encryption': 'aes-256-gcm-v1',
       'x-agent-system-id': systemId,
+      'x-agent-nonce': 'request-one',
     },
     body: envelope,
   };
@@ -74,6 +76,11 @@ test('middleware decrypts agent JSON and encrypts the JSON response', async (t) 
   res.json({ accepted: req.body.secret });
   const wireText = Buffer.from(wireBody).toString('utf8');
   assert.equal(headers.get('x-ajnat-payload-encryption'), 'aes-256-gcm-v1');
+  const digest = crypto.createHash('sha256').update(wireBody).digest('hex');
+  assert.equal(headers.get('x-ajnat-response-sha256'), digest);
+  const signature = nonce => crypto.createHmac('sha256', AGENT_KEY).update(`AJNAT-RESPONSE-V1.${nonce}.200.${digest}`).digest('hex');
+  assert.equal(headers.get('x-ajnat-response-signature'), signature('request-one'));
+  assert.notEqual(headers.get('x-ajnat-response-signature'), signature('request-two'));
   assert.doesNotMatch(wireText, /agent-only-data/);
   assert.deepEqual(
     JSON.parse(decryptPayload(JSON.parse(wireText), AGENT_KEY, RESPONSE_AAD).toString('utf8')),

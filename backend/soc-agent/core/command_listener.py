@@ -256,6 +256,9 @@ class CommandListener:
                           self._config.get('server_port', 5000)))
 
         system_id  = self._config.get('system_id', '')
+        if not server_url.lower().startswith('https://'):
+            logger.info('Plaintext Socket.IO disabled; encrypted heartbeat and policy polling remain active')
+            return
         company_id = self._config.get('company_id', '')
         agent_key  = self._config.get('agent_key', '')
         
@@ -437,6 +440,10 @@ class CommandListener:
                 time.sleep(retry_delay)
 
     def _apply_sensor_policies(self, data: dict):
+        from .heartbeat import security_command_error
+        denied = security_command_error('sensor-policy')
+        if denied:
+            return {'ok': False, 'result': denied}
         try:
             if self._ips and 'ipsWhitelist' in data:
                 self._ips.set_dashboard_whitelist(data.get('ipsWhitelist') or [])
@@ -518,6 +525,10 @@ class CommandListener:
           'outbound' / 'out' → OUTPUT chain
           'both'             → both chains applied
         """
+        from .heartbeat import security_command_error
+        denied = security_command_error('firewall-rule')
+        if denied:
+            return {'ok': False, 'result': denied}
         action     = data.get('action', 'block')
         conditions = data.get('conditions', {})
         rule_name  = data.get('ruleName', 'unknown')
@@ -688,6 +699,10 @@ class CommandListener:
 
 
     def _dispatch(self, command: str, data: dict):
+        from .heartbeat import security_command_error
+        denied = security_command_error(command)
+        if denied:
+            return {'ok': False, 'result': denied}
         handlers = {
             'block_ip':              self._block_ip,
             'unblock_ip':            self._unblock_ip,

@@ -416,6 +416,9 @@ class AlertSender:
 
         Return True once persisted to the retry spool, False if rejected.
         """
+        from .heartbeat import is_monitoring_stopped
+        if is_monitoring_stopped():
+            return False
         alert.setdefault('event_id', uuid.uuid4().hex)
 
         if tag_insider_threat:
@@ -1211,6 +1214,10 @@ class AlertSender:
     def _loop(self):
         backoff = 1
         while True:
+            from .heartbeat import is_monitoring_stopped
+            if is_monitoring_stopped():
+                time.sleep(1)
+                continue
             batch: List[dict] = []
             try:
                 # Block until at least one item (priority, seq, alert)

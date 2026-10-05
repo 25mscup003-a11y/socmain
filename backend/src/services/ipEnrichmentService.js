@@ -1,7 +1,4 @@
-const net = require('net');
-const ipinfoConfig = require('../config/ipinfo');
-const IPINFO_TOKEN = ipinfoConfig.token;
-const IPINFO_ENDPOINT = ipinfoConfig.endpoint;
+const { lookupIpInfo, normalizeIp, isPrivateIp } = require('./ipinfo.service');
 
 // Caching in memory
 const _cache = new Map();
@@ -9,7 +6,6 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minutes cache for IPinfo
 const FAILURE_CACHE_TTL = 5 * 60 * 1000;
 const DEBUG_IP_ENRICHMENT = process.env.DEBUG_IP_ENRICHMENT === 'true';
 const providerState = {
-  ipinfo: { unavailableUntil: 0, lastWarningAt: 0 },
   ipApi: { unavailableUntil: 0, lastWarningAt: 0 },
   proxycheck: { unavailableUntil: 0, lastWarningAt: 0 },
 };
@@ -25,93 +21,25 @@ function markProviderUnavailable(provider, message) {
   }
 }
 
-function isPrivateIp(ip) {
-  if (!ip || !net.isIP(ip)) return true;
-  
-  const version = net.isIP(ip);
-  if (version === 4) {
-    const parts = ip.split('.').map(Number);
-    const [a, b] = parts;
-    if (a === 10) return true;                         // Private IPv4 (RFC1918)
-    if (a === 172 && b >= 16 && b <= 31) return true;  // Private IPv4 (RFC1918)
-    if (a === 192 && b === 168) return true;           // Private IPv4 (RFC1918)
-    if (a === 127) return true;                        // Loopback
-    if (a === 169 && b === 254) return true;           // Link Local (APIPA)
-    if (a === 100 && b >= 64 && b <= 127) return true; // Carrier Grade NAT (CGNAT)
-    if (a >= 224 && a <= 239) return true;             // Multicast
-    if (a >= 240 && a <= 255) return true;             // Reserved / Future Use / Broadcast
-    if (a === 0) return true;                          // Unspecified
-    return false;
-  }
-
-  // IPv6
-  const lower = ip.toLowerCase();
-  if (lower === '::1' || lower === '::') return true;  // Loopback / Unspecified
-  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // Private IPv6 (ULA)
-  
-  // Link Local (fe80::/10)
-  const firstHex = parseInt(lower.split(':')[0], 16);
-  if (!isNaN(firstHex) && firstHex >= 0xfe80 && firstHex <= 0xfebf) return true;
-  
-  if (lower.startsWith('ff')) return true; // Multicast (ff00::/8)
-  if (lower.startsWith('2001:db8:')) return true; // Documentation (2001:db8::/32)
-  if (lower.startsWith('::ffff:')) return true; // IPv4-Mapped IPv6
-  if (lower.startsWith('64:ff9b:')) return true; // NAT64
-  if (lower.startsWith('2002:')) return true; // 6to4
-  if (lower.startsWith('2001:0:') || lower.startsWith('2001:0000:')) return true; // Teredo
-  
-  return false;
-}
-
 /**
  * Fetch enrichment data from IPinfo Lite API
  * @param {string} ip
  * @returns {Promise<object>}
  */
 async function enrichIp(ip) {
-  if (!ip) {
-    throw new Error('IP address is required');
-  }
-
-  if (ip === '208.95.112.1') {
-    return {
-      ip: '208.95.112.1',
-      country: 'United States',
-      countryCode: 'US',
-      continent: 'North America',
-      continentCode: 'NA',
-      asn: 'AS53334',
-      organization: 'Total Uptime Technologies, LLC',
-      domain: 'ip-api.com',
-      city: 'Royal Pines',
-      region: 'North Carolina',
-      postal: '28776',
-      timezone: 'America/New_York',
-      loc: '35.4835,-82.5207',
-      anycast: true,
-      hostname: 'ip-api.com',
-      privacy: { vpn: false, proxy: false, tor: false, relay: false, hosting: true },
-      abuse: {
-        name: 'Total Uptime Technologies, LLC',
-        email: 'abuse@totaluptime.com',
-        phone: '+1-800-584-1514',
-        address: 'US, NC, Skyland, PO Box 2228, 28776',
-        network: '208.95.112.0/22'
-      },
-      domainsCount: 6,
-      asnRoute: '208.95.112.0/22'
-    };
-  }
+  ip = normalizeIp(ip);
 
   if (isPrivateIp(ip)) {
     return {
       ip,
-      country: 'Local Network',
+      countrySource: 'local',
+      countryLookupStatus: 'not_public',
+      country: 'Non-public address',
       countryCode: 'LAN',
       continent: 'Local Network',
       continentCode: 'LAN',
       asn: 'Internal',
-      organization: 'Private / Local Address (RFC 1918)',
+      organization: 'Private or reserved address',
       domain: 'local',
       city: 'Local',
       region: 'Local',
@@ -125,97 +53,6 @@ async function enrichIp(ip) {
       domainsCount: 0,
       asnRoute: ''
     };
-  }
-
-  const knownIps = {
-    '8.8.8.8': {
-      ip: '8.8.8.8',
-      country: 'United States',
-      countryCode: 'US',
-      continent: 'North America',
-      continentCode: 'NA',
-      asn: 'AS15169',
-      organization: 'Google LLC',
-      domain: 'google.com',
-      city: 'Mountain View',
-      region: 'California',
-      postal: '94043',
-      timezone: 'America/Los_Angeles',
-      loc: '37.4056,-122.0775',
-      anycast: true,
-      hostname: 'dns.google',
-      privacy: { vpn: false, proxy: false, tor: false, relay: false, hosting: false },
-      abuse: { name: 'Google LLC', email: 'abuse@google.com', phone: '', address: 'US', network: '8.8.8.0/24' },
-      domainsCount: 1,
-      asnRoute: '8.8.8.0/24'
-    },
-    '8.8.4.4': {
-      ip: '8.8.4.4',
-      country: 'United States',
-      countryCode: 'US',
-      continent: 'North America',
-      continentCode: 'NA',
-      asn: 'AS15169',
-      organization: 'Google LLC',
-      domain: 'google.com',
-      city: 'Mountain View',
-      region: 'California',
-      postal: '94043',
-      timezone: 'America/Los_Angeles',
-      loc: '37.4056,-122.0775',
-      anycast: true,
-      hostname: 'dns.google',
-      privacy: { vpn: false, proxy: false, tor: false, relay: false, hosting: false },
-      abuse: { name: 'Google LLC', email: 'abuse@google.com', phone: '', address: 'US', network: '8.8.4.0/24' },
-      domainsCount: 1,
-      asnRoute: '8.8.4.0/24'
-    },
-    '1.1.1.1': {
-      ip: '1.1.1.1',
-      country: 'Australia',
-      countryCode: 'AU',
-      continent: 'Oceania',
-      continentCode: 'OC',
-      asn: 'AS13335',
-      organization: 'Cloudflare, Inc.',
-      domain: 'cloudflare.com',
-      city: 'Sydney',
-      region: 'New South Wales',
-      postal: '2000',
-      timezone: 'Australia/Sydney',
-      loc: '-33.8688,151.2093',
-      anycast: true,
-      hostname: 'one.one.one.one',
-      privacy: { vpn: false, proxy: false, tor: false, relay: false, hosting: false },
-      abuse: { name: 'Cloudflare', email: 'abuse@cloudflare.com', phone: '', address: 'AU', network: '1.1.1.0/24' },
-      domainsCount: 1,
-      asnRoute: '1.1.1.0/24'
-    },
-    '208.95.112.1': {
-      ip: '208.95.112.1',
-      country: 'United States',
-      countryCode: 'US',
-      continent: 'North America',
-      continentCode: 'NA',
-      asn: 'AS2381',
-      organization: 'IPinfo.io',
-      domain: 'ipinfo.io',
-      city: 'Los Angeles',
-      region: 'California',
-      postal: '90001',
-      timezone: 'America/Los_Angeles',
-      loc: '34.0522,-118.2437',
-      anycast: true,
-      hostname: 'ipinfo.io',
-      privacy: { vpn: false, proxy: false, tor: false, relay: false, hosting: true },
-      abuse: { name: 'IPinfo', email: 'abuse@ipinfo.io', phone: '', address: 'US', network: '208.95.112.0/24' },
-      domainsCount: 1,
-      asnRoute: '208.95.112.0/24'
-    }
-  };
-
-  if (knownIps[ip]) {
-    return knownIps[ip];
   }
 
   const cachedResult = _cache.get(ip);
@@ -259,37 +96,7 @@ async function enrichIp(ip) {
   };
 
   try {
-    if (Date.now() < providerState.ipinfo.unavailableUntil) {
-      throw new Error('provider circuit open');
-    }
-    const url = `${IPINFO_ENDPOINT}/${ip}?token=${IPINFO_TOKEN}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!response.ok) {
-      throw new Error(`IPinfo Lite API returned status ${response.status}`);
-    }
-    const data = await response.json();
-
-    const result = {
-      ip: data.ip || ip,
-      country: data.country || '',
-      countryCode: data.country_code || data.country || '',
-      continent: data.continent || '',
-      continentCode: data.continent_code || '',
-      asn: data.asn?.asn || data.asn || '',
-      organization: data.company?.name || data.as_name || data.org || '',
-      domain: data.company?.domain || data.as_domain || '',
-      city: data.city || '',
-      region: data.region || '',
-      postal: data.postal || '',
-      timezone: data.timezone || '',
-      loc: data.loc || '',
-      anycast: data.anycast || false,
-      hostname: data.hostname || '',
-      privacy: data.privacy || null,
-      abuse: data.abuse || null,
-      domainsCount: data.domains?.total || 0,
-      asnRoute: data.asn?.route || ''
-    };
+    const result = { ...await lookupIpInfo(ip) };
 
     // If city, region, timezone, or coordinates are missing (common with IPinfo Lite), complement them via ip-api.com
     if (!result.city || !result.region || !result.loc || !result.timezone) {
@@ -300,7 +107,7 @@ async function enrichIp(ip) {
           if (!result.region) result.region = geo.regionName || '';
           if (!result.postal) result.postal = geo.zip || '';
           if (!result.timezone) result.timezone = geo.timezone || '';
-          if (!result.loc && geo.lat && geo.lon) result.loc = `${geo.lat},${geo.lon}`;
+          if (!result.loc && Number.isFinite(geo.lat) && Number.isFinite(geo.lon)) result.loc = `${geo.lat},${geo.lon}`;
           if (!result.hostname) result.hostname = geo.reverse || '';
           if (!result.organization) result.organization = geo.org || geo.isp || '';
           if (!result.asn && geo.as) {
@@ -338,53 +145,16 @@ async function enrichIp(ip) {
       }
     }
 
-    // Heuristic anycast detection based on organization name or ASN
-    const orgLower = String(result.organization || '').toLowerCase();
-    const isAnycast = orgLower.includes('cloudflare') || 
-                      orgLower.includes('fastly') || 
-                      orgLower.includes('akamai') || 
-                      orgLower.includes('google dns') || 
-                      orgLower.includes('quad9') || 
-                      orgLower.includes('opendns') || 
-                      orgLower.includes('cloudfront') ||
-                      result.anycast === true ||
-                      result.anycast === 'true';
-    result.anycast = isAnycast;
-
     // Fallback hostname resolution
     if (!result.hostname) {
-      const dns = require('dns').promises;
+      const resolver = new (require('dns').promises.Resolver)({ timeout: 1500, tries: 1 });
+      const timer = setTimeout(() => resolver.cancel(), 2000);
       try {
-        const hostnames = await dns.reverse(ip);
+        const hostnames = await resolver.reverse(ip);
         if (hostnames && hostnames.length > 0) {
           result.hostname = hostnames[0];
         }
-      } catch (e) {}
-    }
-
-    // Fallback range calculation
-    if (!result.asnRoute) {
-      const parts = ip.split('.');
-      if (parts.length === 4) {
-        result.asnRoute = `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
-      }
-    }
-
-    // Fallback domains count
-    if (!result.domainsCount || result.domainsCount === 0) {
-      result.domainsCount = 1;
-    }
-
-    // Fallback abuse contact
-    if (!result.abuse) {
-      const domainVal = result.domain || (result.organization ? result.organization.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com' : '');
-      result.abuse = {
-        name: result.organization || 'Abuse Dept',
-        email: domainVal ? `abuse@${domainVal}` : 'abuse@totaluptime.com',
-        phone: '',
-        address: result.country || 'US',
-        network: result.asnRoute || ''
-      };
+      } catch (e) {} finally { clearTimeout(timer); }
     }
 
     _cache.set(ip, {
@@ -394,16 +164,15 @@ async function enrichIp(ip) {
 
     return result;
   } catch (error) {
-    if (error.message !== 'provider circuit open') {
-      markProviderUnavailable('ipinfo', error.name === 'TimeoutError' ? 'timeout' : error.message);
-    }
-    
     // Attempt complete lookup using ip-api.com as primary fallback if IPinfo fails
     try {
       const geo = await fetchIpApi(ip);
       if (geo) {
         const result = {
           ip,
+          countrySource: 'ip-api',
+          countryLookupStatus: 'resolved',
+          countryCheckedAt: new Date().toISOString(),
           country: geo.country || '',
           countryCode: geo.countryCode || '',
           continent: '',
@@ -415,13 +184,13 @@ async function enrichIp(ip) {
           region: geo.regionName || '',
           postal: geo.zip || '',
           timezone: geo.timezone || '',
-          loc: (geo.lat && geo.lon) ? `${geo.lat},${geo.lon}` : '',
-          anycast: false,
+          loc: (Number.isFinite(geo.lat) && Number.isFinite(geo.lon)) ? `${geo.lat},${geo.lon}` : '',
+          anycast: null,
           hostname: geo.reverse || '',
           privacy: null,
           abuse: null,
-          domainsCount: 1,
-          asnRoute: geo.as ? geo.as.split(' ')[0] : ''
+          domainsCount: null,
+          asnRoute: ''
         };
         if (geo.as) {
           const match = geo.as.match(/^AS(\d+)/);
@@ -451,29 +220,6 @@ async function enrichIp(ip) {
           console.warn(`[IPinfo-Lite Fallback Privacy Supplement] Failed for ${ip}:`, err.message);
         }
 
-        // Heuristic anycast detection based on organization name or ASN
-        const orgLower = String(result.organization || '').toLowerCase();
-        const isAnycast = orgLower.includes('cloudflare') || 
-                          orgLower.includes('fastly') || 
-                          orgLower.includes('akamai') || 
-                          orgLower.includes('google dns') || 
-                          orgLower.includes('quad9') || 
-                          orgLower.includes('opendns') || 
-                          orgLower.includes('cloudfront') ||
-                          result.anycast === true ||
-                          result.anycast === 'true';
-        result.anycast = isAnycast;
-        
-        // Build fallback abuse
-        const domainVal = result.organization ? result.organization.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com' : '';
-        result.abuse = {
-          name: result.organization || 'Abuse Dept',
-          email: domainVal ? `abuse@${domainVal}` : 'abuse@totaluptime.com',
-          phone: '',
-          address: result.country || 'US',
-          network: result.asnRoute || ''
-        };
-
         _cache.set(ip, {
           data: result,
           expires: Date.now() + CACHE_TTL
@@ -487,6 +233,8 @@ async function enrichIp(ip) {
     // Return a graceful fallback instead of failing completely if both fail
     const unavailableResult = {
       ip,
+      countrySource: null,
+      countryLookupStatus: 'unavailable',
       country: '',
       countryCode: '',
       continent: '',

@@ -9,6 +9,7 @@
 
 const { MongoClient } = require('mongodb');
 const logger = require('../utils/logger');
+const { ensureTenantIndexes } = require('./indexes');
 
 let db = null;        // soc4_ips database
 let mainDb = null;    // main SOC4 database (for reading companies)
@@ -47,8 +48,8 @@ async function connectDB() {
 
     // Also get the main SOC4 DB (same cluster, different database)
     // The main backend uses the default DB from the connection string
-    const mainDbName = process.env.MAIN_DB_NAME || 'test';
-    mainDb = client.db(mainDbName);
+    mainDb = client.db(process.env.MAIN_DB_NAME || undefined);
+    const mainDbName = mainDb.databaseName;
 
     logger.info(`✅ Connected to MongoDB (soc4_ips + ${mainDbName} databases)`);
 
@@ -57,6 +58,11 @@ async function connectDB() {
 
     return db;
   } catch (err) {
+    await client?.close().catch(() => {});
+    client = null;
+    db = null;
+    mainDb = null;
+    await logger.setDatabase(null);
     logger.error(`❌ MongoDB connection failed: ${err.message}`);
     logger.warn('⚠️  Continuing in in-memory only mode (blocks will not persist across restarts)');
     // Don't exit - allow server to run in memory-only mode
@@ -69,9 +75,9 @@ async function connectDB() {
  */
 async function ensureIndexes() {
   try {
+    await ensureTenantIndexes(db);
     /* firewall_blocks */
     const blocks = db.collection('firewall_blocks');
-    await blocks.createIndex({ blockKey: 1 }, { unique: true, sparse: true });
     await blocks.createIndex({ ip: 1 });
     await blocks.createIndex({ domain: 1 });
     await blocks.createIndex({ application: 1 });
@@ -95,10 +101,6 @@ async function ensureIndexes() {
     await attacks.createIndex({ ip: 1 });
     await attacks.createIndex({ attackType: 1 });
     await attacks.createIndex({ ts: -1 });
-
-    /* whitelist */
-    const wl = db.collection('whitelist');
-    await wl.createIndex({ value: 1 }, { unique: true });
 
     logger.info('✅ Database indexes verified/created');
   } catch (err) {
@@ -141,6 +143,7 @@ async function disconnectDB() {
       logger.setDatabase(null);
       await client.close();
       db = null;
+      mainDb = null;
       client = null;
       logger.info('Disconnected from MongoDB');
     } catch (err) {

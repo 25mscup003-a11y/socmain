@@ -4,6 +4,8 @@ import api from '../api/axios';
 import { API_BASE_URL, SOCKET_URL, socketOptions, connectSocket, io, createEventBuffer } from '../api/config';
 import { useAuth } from '../context/AuthContext';
 import IdsIpsWafMap from '../components/IdsIpsWafMap';
+import CountryBlockTab from '../components/CountryBlockTab';
+import WhitelistBulkImport from '../components/WhitelistBulkImport';
 import './IDSPage.css';
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -22,6 +24,7 @@ const LEVEL_COLOR = { critical: '#f87171', high: '#f59e0b', medium: '#60a5fa', l
 const TABS = [
   { id: 'overview', label: '📡 IDS Overview' },
   { id: 'blocklist', label: '🛡️ Blocklist' },
+  { id: 'country', label: '🌐 Block Country' },
   { id: 'threats', label: '⚠️ Threats' },
   { id: 'logs', label: '📋 Logs' },
   { id: 'coverage', label: '🧭 Coverage' },
@@ -33,7 +36,7 @@ const TABS = [
 ];
 
 const IDS_TAB_IDS = new Set(['overview', 'threats', 'logs', 'coverage']);
-const IPS_TAB_IDS = new Set(['blocklist', 'whitelist', 'waf', 'policy', 'audit', 'isolationFlow']);
+const IPS_TAB_IDS = new Set(['blocklist', 'country', 'whitelist', 'waf', 'policy', 'audit', 'isolationFlow']);
 const IDS_SENSOR_NOISE_RULES = new Set([
   'SURICATA_2200003',
   'SURICATA_2210045',
@@ -2650,66 +2653,6 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
 
       const payload = { src: null, dest: null };
 
-      if (src === '208.95.112.1') {
-        payload.src = {
-          ip: '208.95.112.1',
-          country: 'United States',
-          countryCode: 'US',
-          continent: 'North America',
-          continentCode: 'NA',
-          asn: 'AS53334',
-          organization: 'Total Uptime Technologies, LLC',
-          domain: 'ip-api.com',
-          city: 'Royal Pines',
-          region: 'North Carolina',
-          postal: '28776',
-          timezone: 'America/New_York',
-          loc: '35.4835,-82.5207',
-          anycast: true,
-          hostname: 'ip-api.com',
-          privacy: { vpn: false, proxy: false, tor: false, relay: false, hosting: true },
-          abuse: {
-            name: 'Total Uptime Technologies, LLC',
-            email: 'abuse@totaluptime.com',
-            phone: '+1-800-584-1514',
-            address: 'US, NC, Skyland, PO Box 2228, 28776',
-            network: '208.95.112.0/22'
-          },
-          domainsCount: 6,
-          asnRoute: '208.95.112.0/22'
-        };
-      }
-
-      if (dest === '208.95.112.1') {
-        payload.dest = {
-          ip: '208.95.112.1',
-          country: 'United States',
-          countryCode: 'US',
-          continent: 'North America',
-          continentCode: 'NA',
-          asn: 'AS53334',
-          organization: 'Total Uptime Technologies, LLC',
-          domain: 'ip-api.com',
-          city: 'Royal Pines',
-          region: 'North Carolina',
-          postal: '28776',
-          timezone: 'America/New_York',
-          loc: '35.4835,-82.5207',
-          anycast: true,
-          hostname: 'ip-api.com',
-          privacy: { vpn: false, proxy: false, tor: false, relay: false, hosting: true },
-          abuse: {
-            name: 'Total Uptime Technologies, LLC',
-            email: 'abuse@totaluptime.com',
-            phone: '+1-800-584-1514',
-            address: 'US, NC, Skyland, PO Box 2228, 28776',
-            network: '208.95.112.0/22'
-          },
-          domainsCount: 6,
-          asnRoute: '208.95.112.0/22'
-        };
-      }
-
       if (!isPrivateIp(src)) {
         if (viewingLogDetail.raw.asn || viewingLogDetail.raw.asnOrg) {
           payload.src = {
@@ -2786,8 +2729,8 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
 
       setEnrichedData({ ...payload });
 
-      const srcNeedsEnrichment = payload.src === null || (typeof payload.src === 'object' && !payload.src.city && !payload.src.loc);
-      const destNeedsEnrichment = payload.dest === null || (typeof payload.dest === 'object' && !payload.dest.city && !payload.dest.loc);
+      const srcNeedsEnrichment = payload.src === null || (typeof payload.src === 'object' && !payload.src.countrySource);
+      const destNeedsEnrichment = payload.dest === null || (typeof payload.dest === 'object' && !payload.dest.countrySource);
 
       if (srcNeedsEnrichment && src && src !== '—') {
         try {
@@ -3185,14 +3128,16 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
 
               const rows = [
                 { label: 'Location', value: `${data.city ? data.city + ', ' : ''}${data.region ? data.region + ', ' : ''}${data.country ? data.country : ''} ${data.countryCode ? getFlag(data.countryCode) : ''}` },
+                { label: 'Country source', value: data.countrySource === 'ipinfo' ? 'IPinfo Lite' : data.countrySource === 'ip-api' ? 'ip-api.com (fallback)' : data.countrySource === 'local' ? 'Non-public address' : 'Not recorded' },
+                { label: 'Country checked', value: data.countryCheckedAt ? new Date(data.countryCheckedAt).toLocaleString() : 'Not recorded' },
                 { label: 'ASN', value: data.asn ? `${data.asn} — ${data.organization || ''}` : '—' },
                 { label: 'Hostname', value: data.hostname || '—' },
                 { label: 'Range', value: data.asnRoute || '—', isLink: true },
                 { label: 'Company', value: data.organization || '—' },
-                { label: 'Hosted domains', value: data.domainsCount || '0' },
-                { label: 'Privacy', value: isPrivacyTrue ? '✓ true' : '✗ false', isBadge: true, badgeColor: isPrivacyTrue ? '#10b981' : '#6b7280' },
-                { label: 'Anycast', value: data.anycast ? '✓ true' : '✗ false', isBadge: true, badgeColor: data.anycast ? '#10b981' : '#6b7280' },
-                { label: 'AS Type', value: data.privacy?.hosting ? 'Hosting' : 'Business' },
+                { label: 'Hosted domains', value: data.domainsCount ?? 'Unknown' },
+                { label: 'Privacy', value: !data.privacy ? 'Unknown' : isPrivacyTrue ? '✓ true' : '✗ false', isBadge: true, badgeColor: isPrivacyTrue ? '#10b981' : '#6b7280' },
+                { label: 'Anycast', value: data.anycast == null ? 'Unknown' : data.anycast ? '✓ true' : '✗ false', isBadge: true, badgeColor: data.anycast ? '#10b981' : '#6b7280' },
+                { label: 'AS Type', value: data.privacy?.hosting ? 'Hosting' : 'Unknown' },
                 { label: 'Abuse contact', value: data.abuse?.email || '—', isAbuse: true }
               ];
 
@@ -3426,7 +3371,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
                     {[
                       { label: 'DOMAIN', value: data.domain || '—', isLink: true, href: data.domain ? `https://${data.domain}` : '#' },
-                      { label: 'ASN TYPE', value: data.privacy?.hosting ? 'Hosting' : 'Business', isLink: false },
+                      { label: 'ASN TYPE', value: data.privacy?.hosting ? 'Hosting' : 'Unknown', isLink: false },
                       { label: 'ROUTE', value: data.asnRoute || '—', isLink: true, href: '#' }
                     ].map((col, idx) => (
                       <div key={idx} style={{ background: '#0f172a', padding: '12px 16px', borderRadius: '8px', border: '1px solid #1e293b' }}>
@@ -3726,7 +3671,9 @@ function WhitelistTab({ onTabChange }) {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ value: '', type: 'ip', reason: '' });
   const [submitting, setSubmitting] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [removing, setRemoving] = useState(null);
+  const removeDialogOpen = useRef(false);
   const [msg, setMsg] = useState('');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -3735,7 +3682,7 @@ function WhitelistTab({ onTabChange }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const d = await ipsFetch('/whitelist'); setList(d.whitelist || []); }
+    try { const { data } = await api.get('/ips-proxy/whitelist', { skipCache: true }); setList(data.whitelist || []); }
     catch (e) { setMsg(`❌ ${e.message}`); }
     finally { setLoading(false); }
   }, []);
@@ -3755,30 +3702,53 @@ function WhitelistTab({ onTabChange }) {
   };
 
   const remove = async (value) => {
-    if (!window.confirm(`Remove "${value}" from whitelist?`)) return;
-    setRemoving(value);
+    if (removeDialogOpen.current) return;
+    removeDialogOpen.current = true;
     try {
-      await api.delete(`/ips-proxy/whitelist/${encodeURIComponent(value)}`);
-      setMsg(`↩️ ${value} removed`); load();
-    } catch (e) { setMsg(`❌ ${e.response?.data?.message || e.message}`); }
-    finally { setRemoving(null); }
-  };
-
-  const bulkImport = async () => {
-    const input = window.prompt('Enter IPs, CIDRs, or domains separated by commas or new lines:');
-    if (!input) return;
-    const values = [...new Set(input.split(/[\n,]+/).map(value => value.trim()).filter(Boolean))];
-    if (!values.length) return;
-    setSubmitting(true); setMsg('');
-    try {
-      await Promise.all(values.map(value => {
-        const type = value.includes('/') ? 'cidr' : /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value) || value.includes(':') ? 'ip' : 'domain';
-        return api.post('/ips-proxy/whitelist', { value, type, reason: 'Bulk import' });
-      }));
-      setMsg(`✅ ${values.length} entries imported`);
-      await load();
-    } catch (e) { setMsg(`❌ ${e.response?.data?.message || e.message}`); }
-    finally { setSubmitting(false); }
+      const confirmation = await Swal.fire({
+        titleText: 'Remove from whitelist?',
+        text: `Remove "${value}" from the whitelist? Applicable security rules can block this entry after removal.`,
+        icon: 'warning',
+        position: 'center',
+        background: '#0b192a',
+        color: '#e2e8f0',
+        confirmButtonColor: '#dc2626',
+        cancelButtonColor: '#334155',
+        confirmButtonText: 'Remove',
+        cancelButtonText: 'Cancel',
+        showCancelButton: true,
+        showCloseButton: true,
+        closeButtonAriaLabel: 'Close removal confirmation',
+        reverseButtons: true,
+        focusCancel: true,
+        showLoaderOnConfirm: true,
+        allowOutsideClick: () => !Swal.isLoading(),
+        allowEscapeKey: () => !Swal.isLoading(),
+        customClass: { popup: 'ids-white-confirm', validationMessage: 'ids-white-confirm-error' },
+        preConfirm: async () => {
+          setRemoving(value);
+          Swal.getCloseButton().disabled = true;
+          try {
+            const { data } = await api.delete(`/ips-proxy/whitelist/${encodeURIComponent(value)}`);
+            if (data?.ok === false || data?.success === false) throw new Error(data.message || data.error || 'Removal rejected');
+            return true;
+          } catch (error) {
+            const message = error.response?.data?.message || error.response?.data?.error || error.message || 'Removal failed. Please retry.';
+            // SweetAlert validation accepts HTML; keep backend errors as plain text.
+            Swal.showValidationMessage('Removal failed.');
+            Swal.getValidationMessage().textContent = String(message);
+            return false;
+          } finally {
+            setRemoving(null);
+            Swal.getCloseButton().disabled = false;
+          }
+        },
+      });
+      if (confirmation.isConfirmed) {
+        setMsg(`↩️ ${value} removed`);
+        await load();
+      }
+    } finally { removeDialogOpen.current = false; }
   };
 
   const exportWhitelist = () => {
@@ -3826,7 +3796,7 @@ function WhitelistTab({ onTabChange }) {
       <form onSubmit={add} className="ids-white-add">
         <div className="ids-white-add-head">
           <strong>Add Whitelisted Entry</strong>
-          <button type="button" onClick={bulkImport} disabled={submitting}>⇧ Bulk Import</button>
+          <button type="button" onClick={() => { setMsg(''); setBulkImportOpen(true); }} disabled={submitting || loading}>⇧ Bulk Import</button>
         </div>
         <div className="ids-white-add-grid">
           <label>Type
@@ -3849,6 +3819,7 @@ function WhitelistTab({ onTabChange }) {
         </div>
       </form>
 
+      {bulkImportOpen && <WhitelistBulkImport existingEntries={list} onClose={() => setBulkImportOpen(false)} onImported={load} />}
       {msg && <div className={`ids-white-msg ${msg.startsWith('✅') || msg.startsWith('↩️') ? 'ok' : 'err'}`}>{msg}</div>}
 
       <section className="ids-white-table-card">
@@ -3979,6 +3950,7 @@ export default function IDSPage({ initialModule = 'ids' }) {
   const { user, company } = useAuth();
   const companyId = company?._id || user?.companyId?._id || user?.companyId;
   const [activeModule, setActiveModule] = useState(initialModule);
+  const [countryRuleCount, setCountryRuleCount] = useState(null);
   const [activeTab, setActiveTab] = useState(initialModule === 'ips' ? 'blocklist' : 'overview');
   const [reportFocus, setReportFocus] = useState('sources');
   const [logsSeverityInit, setLogsSeverityInit] = useState('ALL');
@@ -4012,6 +3984,16 @@ export default function IDSPage({ initialModule = 'ids' }) {
   // ── Fetch the single lightweight KPI summary. Detailed tab data is loaded
   // only when that tab is opened, instead of firing 13 API requests up front. ──
   const summaryCache = useRef(null);
+  useEffect(() => {
+    if (activeModule !== 'ips') return undefined;
+    let active = true;
+    const refresh = () => api.get('/ips/country-blocks/summary').then(({ data }) => {
+      if (active) setCountryRuleCount(data.enabled);
+    }).catch(() => {});
+    refresh();
+    const timer = autoRefresh ? setInterval(refresh, 60000) : null;
+    return () => { active = false; if (timer) clearInterval(timer); };
+  }, [activeModule, autoRefresh]);
   const fetchSummary = useCallback(async () => {
     try {
       let nextSummary;
@@ -4133,6 +4115,7 @@ export default function IDSPage({ initialModule = 'ids' }) {
             {[
               { id: 'overview', icon: '📡', label: 'IDS Overview', color: '#3b82f6', value: tabMetrics.overview.value, sub: `${idsKpis?.severity?.critical ?? 0} critical` },
               { id: 'blocklist', icon: '🛡️', label: 'Blocklist', color: '#ef4444', value: tabMetrics.blocklist.value, sub: '24H blocks' },
+              { id: 'country', icon: '🌐', label: 'Block Country', color: '#38bdf8', value: countryRuleCount, sub: 'Enabled country rules' },
               { id: 'threats', icon: '⚠️', label: 'Threats', color: '#f97316', value: tabMetrics.threats.value, sub: `${idsKpis?.severity?.high ?? 0} high alerts` },
               { id: 'logs', icon: '📋', label: 'Logs', color: '#60a5fa', value: tabMetrics.logs.value, sub: 'All IDS/IPS logs' },
               { id: 'coverage', icon: '🧭', label: 'Coverage', color: '#14b8a6', value: tabMetrics.coverage.value, sub: 'Monitored classes' },
@@ -4169,7 +4152,7 @@ export default function IDSPage({ initialModule = 'ids' }) {
                     <span style={{ fontSize: '9px' }}>{statusIndicator}</span>
                   </div>
                   <strong style={{ color: isActive ? tab.color : '#e7f0fb', fontSize: '23px', margin: '4px 0 2px 0', fontWeight: '800' }}>
-                    {Number(tab.value || 0).toLocaleString()}
+                    {tab.id === 'country' && tab.value === null ? '—' : Number(tab.value || 0).toLocaleString()}
                   </strong>
                   <small style={{ color: '#71839b', fontSize: '8px' }}>{tab.sub}</small>
                 </button>
@@ -4186,6 +4169,7 @@ export default function IDSPage({ initialModule = 'ids' }) {
           {activeTab === 'overview' && <OverviewTab onTabChange={setActiveTab} onOpenReport={openReport} onSeverityFilter={(sev) => { setLogsSeverityInit(sev); changeTab('logs'); }} summary={summary} ipsOnline={ipsOnline} />}
           {activeTab === 'report' && <FullReportTab focus={reportFocus} onBack={() => changeTab('overview')} />}
           {activeTab === 'blocklist' && <BlocklistTab onTabChange={setActiveTab} />}
+          {activeTab === 'country' && <CountryBlockTab onRulesChange={setCountryRuleCount} autoRefresh={autoRefresh} />}
           {activeTab === 'threats' && <ThreatsTab onTabChange={setActiveTab} />}
           {activeTab === 'logs' && <LogsTab onTabChange={setActiveTab} initLevel={logsSeverityInit} companyId={companyId} />}
           {activeTab === 'coverage' && <CoverageTab />}
@@ -5309,7 +5293,7 @@ function WAFTab() {
     if (listenerDetails.length) return listenerDetails.map((detail, pi) => ({
       agent, ai, pi, port: Number(detail.port), detail,
       alive: agent.online !== false,
-      lastReportedOpen: false,
+      observedAt: agent.listenerInventoryAt || agent.lastWafReportAt || agent.lastSeen,
       isWebMonitored: (agent.ports || []).map(Number).includes(Number(detail.port)),
       portName: `${String(detail.protocol || 'tcp').toUpperCase()} Listener`,
     }));
@@ -5318,8 +5302,8 @@ function WAFTab() {
       agent, ai, pi, port,
       detail: detailsByPort.get(Number(port)) || null,
       isWebMonitored: true,
-      alive: hasReportedPortStatus(port) ? statusMap[port] !== false : agent.online !== false,
-      lastReportedOpen: hasReportedPortStatus(port) && statusMap[port] !== false && agent.online === false,
+      alive: agent.online !== false && (!hasReportedPortStatus(port) || statusMap[port] !== false),
+      observedAt: portStatus.find(report => Number(report.port) === Number(port))?.observedAt || agent.lastWafReportAt || agent.lastSeen,
       portName: detailsByPort.get(Number(port))?.scheme?.toUpperCase() || PORT_NAMES[port] || 'HTTP Service',
     }));
   });
@@ -5331,8 +5315,8 @@ function WAFTab() {
     return true;
   });
   const activeAgents = status?.activeAgents ?? (status?.agents || []).length;
-  const protectedPorts = status?.totalPortsProtected ?? services.filter(s => !s.empty && s.isWebMonitored).length;
-  const listeningPorts = status?.totalListeningPorts ?? services.filter(s => !s.empty).length;
+  const protectedPorts = status?.totalPortsProtected ?? services.filter(s => !s.empty && s.alive && s.isWebMonitored).length;
+  const listeningPorts = status?.totalListeningPorts ?? services.filter(s => !s.empty && s.alive).length;
   const blocked24h = status?.stats24h?.blocked ?? attacks.filter(a => a.blocked !== false).length;
   const requests24h = status?.stats24h?.requests ?? status?.requests24h ?? status?.totalRequests24h ?? 0;
   const blockedPct = requests24h ? (blocked24h / requests24h) * 100 : 0;
@@ -5567,32 +5551,32 @@ function WAFTab() {
             <div className="ids-waf-left">
               <section className="ids-waf-card ids-waf-services">
                 <div className="ids-waf-card-head">
-                  <div><strong>🛡 All Open Port Monitor</strong><small>Every listening TCP/UDP port; HTTP/HTTPS listeners are additionally inspected by WAF</small></div>
+                  <div><strong>🛡 Port Monitoring</strong><small>Current listeners and recent inventory ({WAF_WINDOW_LABEL}). Offline entries show history, not active monitoring.</small></div>
                   <select value={serviceFilter} onChange={event => setServiceFilter(event.target.value)}>
                     <option value="all">All Services</option>
                     <option value="waf">WAF Protected</option>
                     <option value="host">Host Monitor Only</option>
                     <option value="online">Online</option>
-                    <option value="offline">Offline</option>
+                    <option value="offline">Offline / Stopped</option>
                   </select>
                 </div>
                 <div className="ids-waf-table-wrap">
                   <table className="ids-waf-table">
-                    <thead><tr>{['Server / Hostname', 'IP Address', 'Monitored Port', 'Process / Bind', 'Monitoring Mode', 'Status', 'Last Seen'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+                    <thead><tr>{['Server / Hostname', 'IP Address', 'Port', 'Process / Bind', 'Monitoring Mode', 'Status', 'Last Port Report'].map(h => <th key={h}>{h}</th>)}</tr></thead>
                     <tbody>
                       {filteredServices.length === 0 ? (
-                        <tr><td colSpan="7"><Empty icon="🔍" msg="Koi agent connected nahi hai abhi" /></td></tr>
+                        <tr><td colSpan="7"><Empty icon="🔍" msg="No ports match this filter in the current time window" /></td></tr>
                       ) : filteredServices.slice((servicePage - 1) * servicePageSize, servicePage * servicePageSize).map((s, i) => s.empty ? (
                         <tr key={`empty-${s.ai}`}><td>▱ {s.agent.hostname || s.agent.systemId || `Agent ${s.ai + 1}`}</td><td>{s.agent.agentIP || '—'}</td><td colSpan="5">No active HTTP/HTTPS listener detected on this agent</td></tr>
                       ) : (
                         <tr key={`${s.ai}-${s.pi}`}>
                           <td>{s.pi === 0 ? `▱ ${s.agent.hostname || s.agent.systemId || `Agent ${s.ai + 1}`}` : ''}{s.pi === 0 && s.agent.autoConnected && <b>AUTO-CONNECTED</b>}</td>
                           <td>{s.pi === 0 ? s.agent.agentIP || '—' : ''}</td>
-                          <td><code className="blue">:{s.port}</code><span>{s.portName}</span><i /></td>
+                          <td><code className="blue">:{s.port}</code><span>{s.portName}</span>{s.alive && <i />}</td>
                           <td><strong>{s.detail?.processName || (s.agent.configuredIntegration ? s.agent.agentVersion : 'Process pending')}</strong><small>{s.detail?.bindAddress || s.agent.agentIP || 'Bind address pending'}{s.detail?.pid ? ` · PID ${s.detail.pid}` : ''}</small></td>
-                          <td><strong>{s.agent.configuredIntegration ? 'Configured WAF' : s.isWebMonitored ? 'WAF + Host Monitor' : 'Host Port Monitor'}</strong><small>{s.isWebMonitored ? 'HTTP/HTTPS inspection active' : 'Listener exposure and policy monitoring'}</small></td>
-                          <td><em className={s.alive ? 'ok' : 'bad'}>{s.alive ? (s.lastReportedOpen ? '● Last reported open' : '● Monitoring') : '● Stopped'}</em></td>
-                          <td>{s.pi === 0 && s.agent.lastSeen ? new Date(s.agent.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}</td>
+                          <td><strong>{!s.alive ? 'Not currently monitoring' : s.agent.configuredIntegration ? 'Configured WAF' : s.isWebMonitored ? 'WAF + Host Monitor' : 'Host Port Monitor'}</strong><small>{s.agent.online === false ? 'Last reported inventory; current port state is unknown' : !s.alive ? 'Port reported closed' : s.isWebMonitored ? 'HTTP/HTTPS inspection active' : 'Listener exposure and policy monitoring'}</small></td>
+                          <td><em className={s.alive ? 'ok' : 'bad'}>{s.agent.online === false ? '● Agent offline' : s.alive ? '● Monitoring' : '● Stopped'}</em></td>
+                          <td>{s.observedAt ? new Date(s.observedAt).toLocaleString() : '—'}</td>
                         </tr>
                       ))}
                     </tbody>

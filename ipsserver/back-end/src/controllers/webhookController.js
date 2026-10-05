@@ -68,11 +68,11 @@ async function handleWebhook(req, res) {
     }
 
     const effectiveProtocol = (blockProtocol || protocol || '').toLowerCase() || undefined;
-    if (!ip && !domain && !application && !port && !effectiveProtocol) {
+    if (!ip && !domain && !application && !port && !effectiveProtocol && !(action === 'unblock' && rawBlockKey)) {
       return sendError(res, 'At least one of: ip, domain, application, port, or protocol is required', 400);
     }
 
-    const effectiveDirection = firewallService.normalizeDirection(direction || 'both');
+    const effectiveDirection = firewallService.normalizeDirection(direction ?? 'both');
 
     let detectedAttack = null;
     if (payload) {
@@ -96,7 +96,7 @@ async function handleWebhook(req, res) {
 
     const blockCriteria = {
       ip: ip || undefined,
-      port: port || undefined,
+      port: port ?? undefined,
       domain: domain || undefined,
       application: application || undefined,
       protocol: effectiveProtocol,
@@ -112,7 +112,8 @@ async function handleWebhook(req, res) {
       agentName: agentName || undefined,
       agentHostname: agentHostname || undefined,
       agentIp: agentIp || undefined,
-      ttlHours: ttlHours || undefined,
+      ttlHours: ttlHours ?? undefined,
+      rawBlockKey,
     };
 
     logger.info(
@@ -169,7 +170,7 @@ async function handleWebhook(req, res) {
       if (ip) alertEngine.resolveIncident(req.company, ip);
     }
 
-    _storeThreatAsync(ip, domain, threat, effectiveReason, manualAttackType || detectedAttack, req.company);
+    if (action === 'block') _storeThreatAsync(ip, domain, threat, effectiveReason, manualAttackType || detectedAttack, req.company, result.enforced === true);
 
     mongoService.storeLog({
       level: action === 'block' ? 'BLOCK' : 'UNBLOCK',
@@ -183,6 +184,8 @@ async function handleWebhook(req, res) {
         ...blockCriteria,
         blockKey: result.blockKey || rawBlockKey || null,
         method: result.method || '',
+        enforced: result.enforced === true,
+        delegated: result.delegated === true,
         ts: new Date(),
       },
       threat: {
@@ -194,6 +197,7 @@ async function handleWebhook(req, res) {
 
     const eventPayload = {
       action, ip, mac, domain, port, application,
+      enforced: result.enforced === true, delegated: result.delegated === true,
       direction: effectiveDirection, reason: effectiveReason,
       company: req.company || null,
       systemId: systemId || null,
@@ -222,11 +226,11 @@ async function handleWebhook(req, res) {
     });
   } catch (err) {
     logger.error(`[Webhook] Error: ${err.message}`);
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 
-function _storeThreatAsync(ip, domain, threat, reason, explicitType, company = null) {
+function _storeThreatAsync(ip, domain, threat, reason, explicitType, company = null, enforced = false) {
   const doc = {
     ip: ip || null, domain: domain || null,
     attackType: explicitType || threat.attackType,
@@ -238,7 +242,7 @@ function _storeThreatAsync(ip, domain, threat, reason, explicitType, company = n
     mongoService.storeAttackEvent({
       srcIp: ip || null, attackType: doc.attackType,
       threatLevel: doc.threatLevel, score: doc.score,
-      direction: 'inbound', autoBlocked: true,
+      direction: 'inbound', autoBlocked: enforced,
     }, company).catch(() => {});
   }
 }
@@ -257,7 +261,7 @@ async function analyzePayload(req, res) {
     const reqAnalysis = attackDetection.analyzeRequest(req, data);
     return sendSuccess(res, { ip: ip || null, detection: detected, threat, requestAnalysis: reqAnalysis, autoAction: threat.recommendedAction });
   } catch (err) {
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 
@@ -415,7 +419,7 @@ async function getAuditLogs(req, res) {
     const url = new URL(req.url, `http://localhost`);
     const limit = parseInt(url.searchParams.get('limit') || '500', 10);
     // Audit logs include consent forms, admin actions, isolation events
-    const logs = await mongoService.getRecentLogs(limit, null, null); // no company filter = super admin
+    const logs = await mongoService.getRecentLogs(limit, null, req.company);
     const auditLogs = logs.filter(l =>
       ['CONSENT', 'ISOLATION', 'RECOVERY', 'MANUAL-OVERRIDE', 'ADMIN-ACTION', 'ALERT'].includes(l.level)
     );
@@ -440,7 +444,7 @@ async function addWhitelist(req, res) {
     logger.info(`[Whitelist] Added: ${value} (${type})`);
     return sendSuccess(res, { added: true, value, type });
   } catch (err) {
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 
@@ -452,7 +456,7 @@ async function removeWhitelist(req, res, value) {
     logger.info(`[Whitelist] Removed: ${value}`);
     return sendSuccess(res, { removed: true, value });
   } catch (err) {
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 
@@ -464,7 +468,8 @@ async function registerCompany(req, res) {
 // ── GET /companies ────────────────────────────────────────────────────────────
 async function getCompanies(req, res) {
   try {
-    const companies = await mongoService.getAllCompanies();
+    const allCompanies = await mongoService.getAllCompanies();
+    const companies = req.company ? allCompanies.filter(company => company.companyId === req.company) : allCompanies;
     const enrichedCompanies = await Promise.all(
       companies.map(async (comp) => {
         const [threats, blocks] = await Promise.all([
@@ -477,7 +482,7 @@ async function getCompanies(req, res) {
     return sendSuccess(res, { count: enrichedCompanies.length, companies: enrichedCompanies });
   } catch (err) {
     logger.error(`[Company] Fetch error: ${err.message}`);
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 
@@ -513,90 +518,17 @@ async function getIncidents(req, res) {
     const incidents = alertEngine.getIncidents(companyId);
     return sendSuccess(res, { count: incidents.length, incidents, supportedAttackTypes: ATTACK_TYPES_16 });
   } catch (err) {
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 
 // ── POST /isolate — Manual Isolation (no consent needed for initial) ──────────
 async function isolateSystem(req, res) {
-  try {
-    const data = await parseBody(req);
-    const { srcIp, mac, attackType, reason, adminEmail } = data;
-    const companyId = req.company;
-    if (!companyId) return sendError(res, 'company_id required', 400);
-    if (!srcIp) return sendError(res, 'srcIp required', 400);
-
-    // Trigger immediate isolation (bypassing alert loop)
-    const incident = alertEngine.getIncident(companyId, srcIp) || {
-      companyId, srcIp, mac, attackType: attackType || 'Manual',
-      severity: 'high', adminEmail: adminEmail || process.env.SMTP_USER,
-      description: reason || 'Manual isolation',
-    };
-    incident.status = 'isolated';
-    incident.isolatedAt = new Date();
-
-    await mongoService.storeLog({
-      level: 'ISOLATION',
-      message: `🔴 MANUAL-ISOLATED: ${srcIp} [${companyId}] — ${reason || 'Manual action'}`,
-      ip: srcIp, mac, attackType, phase: 'manual-isolation',
-      adminAction: true,
-    }, companyId).catch(() => {});
-
-    if (typeof global.emitIPSEvent === 'function') {
-      global.emitIPSEvent('isolation', { companyId, srcIp, mac, attackType, isolatedAt: new Date().toISOString(), manual: true });
-    }
-
-    return sendSuccess(res, { isolated: true, srcIp, companyId, ts: new Date().toISOString() });
-  } catch (err) {
-    return sendError(res, err.message, 400);
-  }
+  return sendError(res, 'Endpoint isolation must be performed through the SOC backend system isolation API; this IPS service cannot confirm endpoint isolation.', 501);
 }
 
-// ── POST /unisolate — Manual Unisolation (requires consent attached) ──────────
 async function unisolateSystem(req, res) {
-  try {
-    const data = await parseBody(req);
-    const { srcIp, mac, consentId, adminName, adminEmail, reason } = data;
-    const companyId = req.company;
-    if (!companyId) return sendError(res, 'company_id required', 400);
-    if (!srcIp) return sendError(res, 'srcIp required', 400);
-    if (!consentId) return sendError(res, 'consentId is required — submit consent form first', 400);
-
-    // Verify consent exists in DB
-    const db = require('../db/mongodb').getDB();
-    let consentValid = false;
-    if (db) {
-      const consent = await db.collection('consent_logs').findOne({ consentId, companyId, srcIp });
-      consentValid = !!consent;
-    }
-    if (!consentValid) {
-      return sendError(res, 'Invalid or missing consent. Submit consent form before override.', 403);
-    }
-
-    // Resolve incident
-    alertEngine.resolveIncident(companyId, srcIp);
-
-    await mongoService.storeLog({
-      level: 'MANUAL-OVERRIDE',
-      message: `🔓 MANUAL-UNISOLATED: ${srcIp} [${companyId}] by ${adminName || adminEmail || 'admin'} — ${reason || 'Manual override'}`,
-      ip: srcIp, mac, consentId, adminName, adminEmail,
-      phase: 'manual-unisolation', adminAction: true,
-    }, companyId).catch(() => {});
-
-    await mongoService.storeLog({
-      level: 'ADMIN-ACTION',
-      message: `[AUDIT] Admin ${adminName || adminEmail} unisolated ${srcIp} with consent ${consentId}`,
-      ip: srcIp, companyId, consentId, adminAction: true,
-    }, null).catch(() => {}); // null = stored globally for superadmin audit
-
-    if (typeof global.emitIPSEvent === 'function') {
-      global.emitIPSEvent('recovery', { companyId, srcIp, mac, recoveredAt: new Date().toISOString(), manual: true });
-    }
-
-    return sendSuccess(res, { unisolated: true, srcIp, companyId, consentId, ts: new Date().toISOString() });
-  } catch (err) {
-    return sendError(res, err.message, 400);
-  }
+  return sendError(res, 'Endpoint recovery must be performed through the SOC backend system isolation API; this IPS service cannot confirm endpoint recovery.', 501);
 }
 
 // ── POST /consent — Submit consent form before manual override ────────────────
@@ -608,7 +540,7 @@ async function submitConsent(req, res) {
     if (!companyId) return sendError(res, 'company_id required', 400);
     if (!srcIp) return sendError(res, 'srcIp required', 400);
     if (!adminName || !reason) return sendError(res, 'adminName and reason required', 400);
-    if (!acknowledged) return sendError(res, 'You must acknowledge the consent form', 400);
+    if (acknowledged !== true) return sendError(res, 'You must acknowledge the consent form', 400);
 
     const consentId = `CONSENT-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
     const consentDoc = {
@@ -619,9 +551,8 @@ async function submitConsent(req, res) {
     };
 
     const db = require('../db/mongodb').getDB();
-    if (db) {
-      await db.collection('consent_logs').insertOne(consentDoc);
-    }
+    if (!db) return sendError(res, 'Consent storage is unavailable', 503);
+    await db.collection('consent_logs').insertOne(consentDoc);
 
     // Log to audit log
     await mongoService.storeLog({
@@ -640,7 +571,7 @@ async function submitConsent(req, res) {
       srcIp, companyId,
     });
   } catch (err) {
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 
@@ -694,7 +625,7 @@ async function simulateAttack(req, res) {
     });
   } catch (err) {
     logger.error(`[Simulate] Error: ${err.message}`);
-    return sendError(res, err.message, 400);
+    return sendError(res, err.message, err.statusCode || 400);
   }
 }
 

@@ -6,7 +6,7 @@
  * download time.
  */
 
-const AGENT_VERSION = process.env.AGENT_VERSION || '0.1.10';
+const AGENT_VERSION = process.env.AGENT_VERSION || '0.1.13';
 const PACKAGE_TYPES = ['deb', 'rpm', 'exe', 'msi', 'pkg', 'macpkg', 'dmg', 'zip', 'apk', 'solaris'];
 
 function arePackagesCached(companyId) {

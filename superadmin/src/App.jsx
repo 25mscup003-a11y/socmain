@@ -6,6 +6,7 @@ import SignupPage from './pages/SignupPage';
 import Layout from './components/Layout';
 import DashboardPage from './pages/DashboardPage';
 import CompaniesPage from './pages/CompaniesPage';
+import SupportPage from './pages/SupportPage';
 import CompanyDetail from './pages/CompanyDetail';
 import CompanyDashboard from './pages/CompanyDashboard';
 import DeptDashboard from './pages/DeptDashboard';
@@ -32,6 +33,7 @@ import FraudDashboardPage from './pages/FraudDashboardPage';
 import SOCManagersPage from './pages/SOCManagersPage';
 import SoarPage from './pages/SoarPage';
 import AgentSecurityPage from './pages/AgentSecurityPage';
+import UserPasswordsPage from './pages/UserPasswordsPage';
 import CorrelationPage from './pages/CorrelationPage';
 import ForensicsPage from './pages/ForensicsPage';
 
@@ -66,6 +68,7 @@ export default function App() {
         <Route index element={<HomeRedirect />} />
         <Route path="dashboard" element={<RoleOnly roles={['superadmin']}><DashboardPage /></RoleOnly>} />
         <Route path="companies" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
+        <Route path="support" element={<RoleOnly roles={['superadmin']}><SupportPage /></RoleOnly>} />
         <Route path="partners" element={<RoleOnly roles={['superadmin']}><PartnersPage /></RoleOnly>} />
         <Route path="partner-dashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
         <Route path="partnerdashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
@@ -105,6 +108,7 @@ export default function App() {
         <Route path="ajantsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="ajant-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="agent-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
+        <Route path="user-passwords" element={<RoleOnly roles={['superadmin']}><UserPasswordsPage /></RoleOnly>} />
         <Route path="agentsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
       </Route>
 
@@ -113,6 +117,7 @@ export default function App() {
         <Route index element={<HomeRedirect />} />
         <Route path="dashboard" element={<RoleOnly roles={['superadmin']}><DashboardPage /></RoleOnly>} />
         <Route path="companies" element={<RoleOnly roles={['superadmin']}><CompaniesPage /></RoleOnly>} />
+        <Route path="support" element={<RoleOnly roles={['superadmin']}><SupportPage /></RoleOnly>} />
         <Route path="partners" element={<RoleOnly roles={['superadmin']}><PartnersPage /></RoleOnly>} />
         <Route path="partner-dashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
         <Route path="partnerdashboard" element={<RoleOnly roles={['superadmin', 'partner_admin']}><PartnerDashboardPage /></RoleOnly>} />
@@ -152,6 +157,7 @@ export default function App() {
         <Route path="ajantsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="ajant-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="agent-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
+        <Route path="user-passwords" element={<RoleOnly roles={['superadmin']}><UserPasswordsPage /></RoleOnly>} />
         <Route path="agentsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
       </Route>
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SOC Agent v0.1.10 — main entry point.
+SOC Agent v0.1.13 — main entry point.
 Usage:
   python3 agent.py test       # connectivity test (NO root needed)
   python3 agent.py run        # run in foreground
@@ -200,7 +200,7 @@ def _send_startup_event(sender, config):
         f'  System   : {config.get("system_name", "?")}',
         f'  Company  : {config.get("company_name", "?")}',
         f'  Server   : {config.get("server_url", "?")}',
-        f'  Agent v  : {config.get("agent_version", "0.1.10")}',
+        f'  Agent v  : {config.get("agent_version", "0.1.13")}',
         f'  Hostname : {hostname}',
         f'  Platform : {platform.system()} {platform.release()}',
         f'  Log dir  : {LOG_DIR}',
@@ -216,8 +216,8 @@ def _send_startup_event(sender, config):
         'category':    'system',
         'severity':    'low',
         'description': (
-            f'Agent v{config.get("agent_version","0.1.10")} started — system={config.get("system_name","?")} '
-            f'v={config.get("agent_version","0.1.10")} '
+            f'Agent v{config.get("agent_version","0.1.13")} started — system={config.get("system_name","?")} '
+            f'v={config.get("agent_version","0.1.13")} '
             f'host={hostname}'
         ),
         'source':      'agent',
@@ -1015,7 +1015,7 @@ def _report_install():
             'arch':        arch,
             'ip':          ip,
             'macAddress':  mac,
-            'agentVersion': config.get('agent_version', '0.1.10'),
+            'agentVersion': config.get('agent_version', '0.1.13'),
         }
         resp = secure_request(
             config,

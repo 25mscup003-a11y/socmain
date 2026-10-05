@@ -1,5 +1,5 @@
 ╔══════════════════════════════════════════════════════════════════╗
-║          SOC Agent v0.1.10 — Installation Guide                 ║
+║          SOC Agent v0.1.13 — Installation Guide                 ║
 ╚══════════════════════════════════════════════════════════════════╝
 
 MODULES INCLUDED:
@@ -23,6 +23,12 @@ PREREQUISITES (all platforms)
   - pip3 (usually bundled with Python)
   - Internet access to reach your SOC server
   - Admin / root privileges for service installation
+
+Optional source clearing is off by default and only supported on Linux with
+fanotify permission events and CAP_SYS_ADMIN. If enabled from Self Protection,
+wait for Maintenance Mode acknowledgement before running a second agent CLI,
+inspecting source or backing it up. External opens can empty the opened source
+file and require reinstallation. Normal Self Protection does not arm this option.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 LINUX (Debian / Ubuntu / Kali / Mint)

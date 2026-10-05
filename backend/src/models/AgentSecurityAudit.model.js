@@ -12,7 +12,7 @@ const AgentSecurityAuditSchema = new mongoose.Schema({
   newValue: { type: mongoose.Schema.Types.Mixed, default: null },
   sourceIp: { type: String, default: '' },
   device: { type: String, default: '' },
-  result: { type: String, enum: ['queued', 'success', 'denied', 'failed'], required: true },
+  result: { type: String, enum: ['queued', 'success', 'denied', 'failed', 'superseded'], required: true },
 }, { timestamps: true, versionKey: false });
 
 AgentSecurityAuditSchema.index({ createdAt: -1 });

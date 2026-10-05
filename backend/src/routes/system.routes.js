@@ -11,9 +11,7 @@ const { resolveScope } = require('../utils/tenantScope');
 const { isBasePlanActive } = require('../utils/subscriptionEntitlement');
 const { getCompanyIngestionStatus } = require('../utils/agentEntitlement');
 const { resolvePackageForSystem } = require('../utils/agentPackageProfile');
-
-// ── Heartbeat interval for online/offline decision ────────────────────────────
-const ONLINE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+const { isSystemOnline } = require('../utils/systemPresence');
 
 // ── POST /api/system/heartbeat — NO JWT, agent uses agentKey ──────────────────
 // Now accepts: hostname, os, osType, osVersion, arch, agentVersion,
@@ -179,10 +177,16 @@ router.post('/heartbeat', async (req, res) => {
     const system = await System.findByIdAndUpdate(existing._id, sysUpdate, { new: true });
     const commandClaim = await System.findByIdAndUpdate(
       existing._id,
-      { $set: { pendingCommands: [] } },
+      // Security actions and OTA updates are acknowledged on the primary
+      // heartbeat. A fallback delivery must not erase their durable record.
+      { $pull: { pendingCommands: {
+        auditId: { $exists: false },
+        command: { $nin: ['update', 'security-policy-sync', 'verify-integrity', 'security-force-recovery', 'security-lockdown', 'security-unlock'] },
+      } } },
       { new: false },
     ).select('pendingCommands');
-    const pendingCommands = commandClaim?.pendingCommands || [];
+    const pendingCommands = (commandClaim?.pendingCommands || []).filter(command => command.command !== 'update'
+      || !['downloading', 'installing'].includes(system.updateStatus));
     const fimStartAt = system.fimStartAt || system.installDate || now;
 
     // Emit real-time status update to monitoring dashboards
@@ -386,14 +390,7 @@ router.get('/', requireAnalyst, async (req, res) => {
     const now = Date.now();
     const enriched = systems.map(s => {
       const obj = s.toObject();
-      const st = String(s.status || '').toLowerCase();
-      const isStale = s.lastSeen ? (now - new Date(s.lastSeen).getTime()) >= ONLINE_THRESHOLD_MS : true;
-      obj.isOnline = Boolean(
-        s.isActive !== false &&
-        (st === 'active' || st === 'online') &&
-        s.agentVersion &&
-        !isStale
-      );
+      obj.isOnline = isSystemOnline(s, now);
       return obj;
     });
 
@@ -408,12 +405,7 @@ router.get('/:id', requireAnalyst, async (req, res) => {
       .populate('departmentId', 'name');
     if (!system) return res.status(404).json({ message: 'System not found' });
     const obj = system.toObject();
-    obj.isOnline = Boolean(
-      system.status === 'active' &&
-      system.agentVersion &&
-      system.lastSeen &&
-      (Date.now() - new Date(system.lastSeen).getTime()) < ONLINE_THRESHOLD_MS
-    );
+    obj.isOnline = isSystemOnline(system);
     res.json(obj);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });

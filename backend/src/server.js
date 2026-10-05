@@ -579,7 +579,7 @@ app.get('/health', (_req, res) => {
   res.status(ready ? 200 : 503).json({ status: ready ? 'ok' : 'not_ready', ts: new Date() });
 });
 // This release value also drives enrolled desktop-agent update discovery.
-app.get('/', (_req, res) => res.json({ name: 'SOC4 Backend API', status: 'running', version: process.env.AGENT_VERSION || '0.1.10', docs: '/api', ts: new Date() }));
+app.get('/', (_req, res) => res.json({ name: 'SOC4 Backend API', status: 'running', version: process.env.AGENT_VERSION || '0.1.13', docs: '/api', ts: new Date() }));
 
 // ── 404 ────────────────────────────────────────────────
 app.use((req, res) => {

@@ -23,6 +23,7 @@ const logger   = require('./src/utils/logger');
 const { connectDB, disconnectDB, isConnected } = require('./src/db/mongodb');
 const { loadPersistedBlocks, sweepExpiredBlocks } = require('./src/services/firewallService');
 const mongoService = require('./src/services/mongoService');
+const { configureSockets, emitIPSEvent: emitScopedEvent } = require('./src/services/socketService');
 
 const PORT = parseInt(process.env.IPS_WEBHOOK_PORT || '5050', 10);
 
@@ -36,15 +37,7 @@ let io;
 function emitIPSEvent(event, data) {
   if (!io) return;
   try {
-    const eventName = `ips:${event}`;
-    io.emit(eventName, data);
-    if (data && (data.company || data.companyId)) {
-      const room = `company:${data.company || data.companyId}`;
-      io.to(room).emit(eventName, data);
-    }
-    if (['isolation', 'recovery', 'alert'].includes(event)) {
-      io.to('superadmin').emit(eventName, data);
-    }
+    emitScopedEvent(io, event, data);
   } catch (err) {
     logger.warn(`[Socket] Emit error: ${err.message}`);
   }
@@ -91,25 +84,7 @@ async function startServer() {
       },
     });
 
-    io.on('connection', (socket) => {
-      logger.info(`[Socket] Dashboard connected: ${socket.id}`);
-
-      socket.on('join:company', (companyId) => {
-        if (companyId) {
-          socket.join(`company:${companyId}`);
-          logger.info(`[Socket] ${socket.id} joined company:${companyId}`);
-        }
-      });
-
-      socket.on('join:superadmin', () => {
-        socket.join('superadmin');
-        logger.info(`[Socket] ${socket.id} joined superadmin room`);
-      });
-
-      socket.on('disconnect', () => {
-        logger.info(`[Socket] Dashboard disconnected: ${socket.id}`);
-      });
-    });
+    configureSockets(io);
 
     // Listen on the HTTP server (not appServer) so Socket.IO shares the port
     httpServer.listen(PORT, () => {

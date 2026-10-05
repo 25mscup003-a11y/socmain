@@ -1,5 +1,5 @@
 ╔══════════════════════════════════════════════════════════════════╗
-║         SOC Agent v0.1.10 — README                              ║
+║         SOC Agent v0.1.13 — README                              ║
 ║         Security Monitoring Agent for SOC4 Platform             ║
 ╚══════════════════════════════════════════════════════════════════╝
 
@@ -22,6 +22,16 @@ QUICK START
   1. python3 agent.py test        (verify connectivity — no root needed)
   2. sudo python3 agent.py install (install as system service)
 
+OPTIONAL LINUX SOURCE CLEARING (off by default)
+────────────────────────────────────────────────
+  Superadmin → Agent Security → Self Protection → Clear source on external open.
+  Requires Linux fanotify and CAP_SYS_ADMIN. Only manifested Python source files
+  are targeted. Another process opening one can empty it and break the agent.
+  Enable Maintenance Mode and wait for its acknowledgement before local CLI
+  commands, inspection or backups. OTA updates suspend the listener automatically.
+  Configurations, logs and dependency files are excluded. Copies, bytecode and
+  privileged administrators are outside this protection. This is not secure erasure.
+
 COMMANDS
 ─────────
   python3 agent.py run        # run in foreground (Ctrl+C to stop)
@@ -38,7 +48,7 @@ DATA REPORTED TO SERVER (every heartbeat)
   • MAC Address      (primary NIC, used for dedup)
   • Hostname
   • OS Name & Version
-  • Agent Version    (v0.1.10)
+  • Agent Version    (v0.1.13)
   • Agent Status     (Online)
   • File, network, process, USB events (as alerts)
 

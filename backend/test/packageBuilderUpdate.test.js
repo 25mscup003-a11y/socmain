@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const tls = require('node:tls');
+const os = require('node:os');
 const {
   linuxPreInstallScript,
   getAgentIntegrityManifest,
@@ -37,15 +38,28 @@ test('Windows downloads embed and configure the AJNAT server CA bundle', () => {
 });
 
 test('local-test Windows downloads carry only the public publisher certificate', () => {
-  const certificatePath = path.join(__dirname, '../secure-data/windows-signing/AJNAT-Local-Test-Publisher.cer');
-  const publisher = loadWindowsPublisherCertificate({
-    WINDOWS_CODE_SIGN_MODE: 'local-test',
-    WINDOWS_CODE_SIGN_PUBLIC_CERT: certificatePath,
+  // This loader reads public X.509 metadata; it does not sign an installer.
+  // Avoid depending on a developer's private signing setup or missing .cer file.
+  const publicPem = tls.rootCertificates.find(pem => {
+    const certificate = new crypto.X509Certificate(pem);
+    return certificate.subject === certificate.issuer;
   });
-  assert.match(publisher.thumbprint, /^[A-F0-9]{40}$/);
-  assert.match(publisher.sha256, /^[a-f0-9]{64}$/);
-  assert.doesNotMatch(publisher.content.toString('utf8'), /PRIVATE KEY/);
-  assert.equal(loadWindowsPublisherCertificate({ WINDOWS_CODE_SIGN_MODE: 'production' }), null);
+  assert.ok(publicPem);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ajnat-public-cert-test-'));
+  try {
+    const certificatePath = path.join(directory, 'publisher.cer');
+    fs.writeFileSync(certificatePath, new crypto.X509Certificate(publicPem).raw);
+    const publisher = loadWindowsPublisherCertificate({
+      WINDOWS_CODE_SIGN_MODE: 'local-test',
+      WINDOWS_CODE_SIGN_PUBLIC_CERT: certificatePath,
+    });
+    assert.match(publisher.thumbprint, /^[A-F0-9]{40}$/);
+    assert.match(publisher.sha256, /^[a-f0-9]{64}$/);
+    assert.doesNotMatch(publisher.content.toString('utf8'), /PRIVATE KEY/);
+    assert.equal(loadWindowsPublisherCertificate({ WINDOWS_CODE_SIGN_MODE: 'production' }), null);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('Android downloads embed an app-private AJNAT server CA asset configuration', () => {
@@ -84,6 +98,7 @@ test('agent packages include a non-empty SHA-256 integrity inventory', () => {
   assert.ok(Object.keys(manifest.files).length > 20);
   assert.match(manifest.files['core/heartbeat.py'], /^[a-f0-9]{64}$/);
   assert.match(manifest.files['core/self_protection.py'], /^[a-f0-9]{64}$/);
+  assert.match(manifest.files['core/file_open_protection.py'], /^[a-f0-9]{64}$/);
   assert.match(manifest.files['core/gps_location.py'], /^[a-f0-9]{64}$/);
   assert.match(manifest.files['core/time_anomaly.py'], /^[a-f0-9]{64}$/);
   assert.match(manifest.files['collectors/kernel_monitor.py'], /^[a-f0-9]{64}$/);
@@ -97,7 +112,7 @@ test('agent packages include a non-empty SHA-256 integrity inventory', () => {
 });
 
 test('desktop agent release version is aligned across package and update paths', () => {
-  const expected = '0.1.10';
+  const expected = '0.1.13';
   const files = [
     'src/routes/agent.routes.js',
     'src/routes/superadmin.routes.js',
@@ -118,10 +133,9 @@ test('UEBA input activity uses a live one-minute reporting cadence', () => {
 });
 
 test('bundled AJNAT desktop agent defaults report the current release', () => {
-  const expected = '0.1.10';
+  const expected = '0.1.13';
   for (const relative of [
     'soc-agent/core/config.py',
-    'soc-agent/config/company_config.json',
     'soc-agent/agent.py',
     'soc-agent/core/heartbeat.py',
     'soc-agent/README.txt',
@@ -132,10 +146,10 @@ test('bundled AJNAT desktop agent defaults report the current release', () => {
   }
 });
 
-test('fresh and update packages fail closed and include the complete 0.1.10 runtime', () => {
+test('fresh and update packages fail closed and include the complete 0.1.13 runtime', () => {
   const AdmZip = require('adm-zip');
   const builder = fs.readFileSync(path.join(__dirname, '../src/services/packageBuilder.service.js'), 'utf8');
-  assert.match(builder, /const DEFAULT_AGENT_VERSION = '0\.1\.10'/);
+  assert.match(builder, /const DEFAULT_AGENT_VERSION = '0\.1\.13'/);
   assert.match(builder, /function requireAgentDir\(\)/);
   assert.match(builder, /refusing to build an empty installer/);
   assert.match(builder, /SOC Agent source is incomplete/);
@@ -147,7 +161,7 @@ test('fresh and update packages fail closed and include the complete 0.1.10 runt
     { name: 'release-smoke', agentType: 'system' },
     { name: 'AJNAT', _id: 'release-smoke' },
     {
-      agent_version: '0.1.10',
+      agent_version: '0.1.13',
       agent_key: 'release-smoke',
       system_id: 'release-smoke',
       expected_device_role: 'system',
@@ -159,13 +173,14 @@ test('fresh and update packages fail closed and include the complete 0.1.10 runt
   for (const relative of [
     'agent.py', 'requirements.txt', 'integrity_manifest.json',
     'core/heartbeat.py', 'core/secure_transport.py', 'core/config_protection.py',
+    'core/file_open_protection.py', 'core/security_controls.py',
     'core/device_identity.py', 'collectors/processes.py',
     'install.sh', 'install.ps1',
   ]) {
     assert.ok(entries.some(entry => entry.endsWith(`/${relative}`)), relative);
   }
   const configEntry = archive.getEntries().find(entry => entry.entryName.endsWith('/config/company_config.json'));
-  assert.equal(JSON.parse(configEntry.getData().toString('utf8')).agent_version, '0.1.10');
+  assert.equal(JSON.parse(configEntry.getData().toString('utf8')).agent_version, '0.1.13');
 });
 
 test('Debian preinst lets legacy in-service OTA survive the old prerm stop', () => {

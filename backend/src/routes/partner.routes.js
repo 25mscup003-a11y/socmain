@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const crypto = require('crypto');
 const Company = require('../models/Company.model');
+const { emitCompanySupport, validSupportId, supportText } = require('../utils/companySupport');
 const Partner = require('../models/Partner.model');
 const User = require('../models/User.model');
 const Referral = require('../models/Referral.model');
@@ -167,7 +168,12 @@ const sanitizePartnerUploadedFiles = (partner) => {
 
 router.post('/register', registerPartner);
 
-router.use(authenticate, requirePartnerAdmin);
+router.use(authenticate, requirePartnerAdmin, (req, res, next) => {
+  if (req.user.role === 'partner_admin' && !/^[a-f\d]{24}$/i.test(String(req.user.partnerId || ''))) {
+    return res.status(403).json({ message: 'A linked partner account is required' });
+  }
+  next();
+});
 
 // ── POST /partner/upload-doc — KYC document upload (PDF/image) ─────────────
 router.post('/upload-doc', partnerDocUpload.single('file'), async (req, res) => {
@@ -314,7 +320,7 @@ async function requireApprovedPartner(req, res, next) {
 const ownPartnerFilter = (req) => {
   if (req.user.role === 'superadmin') return {};
   if (req.user.partnerId) return { partnerId: req.user.partnerId };
-  return {};
+  return { _id: { $in: [] } };
 };
 
 router.get('/dashboard', requireApprovedPartner, async (req, res) => {
@@ -676,7 +682,9 @@ router.get('/companies', requireActivePartnerPlan, async (req, res) => {
       const inactiveAgents = Math.max(Number(stats.inactive || 0), Number(agentStats.inactive || 0), totalAgents - activeAgents);
       const isExistingUser = Boolean(company.plan?.paymentStatus === 'paid' || payments.paymentCount > 0 || company.razorpay?.paymentId);
       const planAmount = company.plan?.paymentStatus === 'paid' ? Number(company.plan?.amountPaid || 0) : 0;
-      const revenue = Number(payments.totalCollection || latestPayment?.amountInr || planAmount || 0);
+      const revenue = Number(payments.paymentCount > 0
+        ? payments.totalCollection
+        : latestPayment?.status === 'captured' ? latestPayment.amountInr : planAmount);
       return {
         ...company,
         partnerId: company.partnerId,
@@ -1072,12 +1080,15 @@ router.patch('/notifications/read', requireActivePartnerPlan, async (req, res) =
 // GET /api/partner/company-support-tickets
 router.get('/company-support-tickets', requireActivePartnerPlan, async (req, res) => {
   try {
+    if (req.user.role !== 'partner_admin' || !validSupportId(String(req.user.partnerId || ''))) return res.status(403).json({ message: 'Partner account required for partner company support.' });
     const CompanySupportTicket = require('../models/CompanySupportTicket.model');
     const companies = await Company.find({ partnerId: req.user.partnerId }).select('_id').lean();
     const companyIds = companies.map(c => c._id);
 
     const query = { companyId: { $in: companyIds } };
     if (req.query.companyId) {
+      if (!validSupportId(req.query.companyId)) return res.status(400).json({ message: 'Invalid company ID' });
+      if (!companyIds.some(id => String(id) === req.query.companyId)) return res.status(403).json({ message: 'Access denied' });
       query.companyId = req.query.companyId;
     }
 
@@ -1093,8 +1104,10 @@ router.get('/company-support-tickets', requireActivePartnerPlan, async (req, res
 // POST /api/partner/company-support-tickets/:ticketId/messages
 router.post('/company-support-tickets/:ticketId/messages', requireActivePartnerPlan, async (req, res) => {
   try {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ message: 'Message is required' });
+    if (req.user.role !== 'partner_admin' || !validSupportId(String(req.user.partnerId || ''))) return res.status(403).json({ message: 'Partner account required for partner company support.' });
+    if (!validSupportId(req.params.ticketId)) return res.status(400).json({ message: 'Invalid ticket ID' });
+    const message = supportText(req.body.message, 10000);
+    if (!message) return res.status(400).json({ message: 'Message must contain 1–10,000 characters.' });
 
     const CompanySupportTicket = require('../models/CompanySupportTicket.model');
     const ticket = await CompanySupportTicket.findById(req.params.ticketId);
@@ -1103,6 +1116,7 @@ router.post('/company-support-tickets/:ticketId/messages', requireActivePartnerP
     const company = await Company.findOne({ _id: ticket.companyId, partnerId: req.user.partnerId });
     if (!company) return res.status(403).json({ message: 'Access denied' });
 
+    if (ticket.status === 'Closed') return res.status(409).json({ message: 'Reopen this ticket before replying.' });
     ticket.messages.push({
       senderId: req.user.id,
       senderName: req.user.name || req.user.email,
@@ -1114,12 +1128,7 @@ router.post('/company-support-tickets/:ticketId/messages', requireActivePartnerP
     }
     await ticket.save();
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to('superadmin').emit('support:message_new', { ticketId: ticket.ticketId, ticket });
-      io.to(`company:${ticket.companyId}`).emit('support:message_new', { ticketId: ticket.ticketId, ticket });
-      io.to(`partner:${req.user.partnerId}`).emit('support:message_new', { ticketId: ticket.ticketId, ticket });
-    }
+    emitCompanySupport(req, company, 'support:message_new', ticket);
 
     res.json(ticket);
   } catch (err) {
@@ -1130,6 +1139,8 @@ router.post('/company-support-tickets/:ticketId/messages', requireActivePartnerP
 // PATCH /api/partner/company-support-tickets/:ticketId/status
 router.patch('/company-support-tickets/:ticketId/status', requireActivePartnerPlan, async (req, res) => {
   try {
+    if (req.user.role !== 'partner_admin' || !validSupportId(String(req.user.partnerId || ''))) return res.status(403).json({ message: 'Partner account required for partner company support.' });
+    if (!validSupportId(req.params.ticketId)) return res.status(400).json({ message: 'Invalid ticket ID' });
     const { status } = req.body;
     if (!status || !['Open', 'In Progress', 'Resolved', 'Closed'].includes(status)) {
       return res.status(400).json({ message: 'Valid status required' });
@@ -1145,12 +1156,7 @@ router.patch('/company-support-tickets/:ticketId/status', requireActivePartnerPl
     ticket.status = status;
     await ticket.save();
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to('superadmin').emit('support:ticket_updated', { ticketId: ticket.ticketId, ticket });
-      io.to(`company:${ticket.companyId}`).emit('support:ticket_updated', { ticketId: ticket.ticketId, ticket });
-      io.to(`partner:${req.user.partnerId}`).emit('support:ticket_updated', { ticketId: ticket.ticketId, ticket });
-    }
+    emitCompanySupport(req, company, 'support:ticket_updated', ticket);
 
     res.json(ticket);
   } catch (err) {

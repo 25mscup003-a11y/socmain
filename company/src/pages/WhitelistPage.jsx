@@ -29,9 +29,7 @@ function WhitelistPage() {
       setLoading(true);
       setError(null);
 
-      const response = await api.get('http://localhost:5050/whitelist', {
-        withCredentials: false,
-      });
+      const response = await api.get('/ips-proxy/whitelist');
 
       const data = response.data || {};
       setWhitelist(data.whitelist || []);
@@ -60,9 +58,7 @@ function WhitelistPage() {
     try {
       setSubmitting(true);
 
-      const response = await api.post('http://localhost:5050/whitelist', newEntry, {
-        withCredentials: false,
-      });
+      await api.post('/ips-proxy/whitelist', { ...newEntry, type: newEntry.type.toLowerCase() });
 
       showToast('✅ Added to whitelist', 'success');
       setNewEntry({ value: '', type: 'IP', reason: '' });
@@ -82,9 +78,7 @@ function WhitelistPage() {
     if (!window.confirm(`Remove "${value}" from whitelist?`)) return;
 
     try {
-      await api.delete(`http://localhost:5050/whitelist/${encodeURIComponent(value)}`, {
-        withCredentials: false,
-      });
+      await api.delete(`/ips-proxy/whitelist/${encodeURIComponent(value)}`);
 
       showToast('✅ Removed from whitelist', 'success');
       await fetchWhitelist();

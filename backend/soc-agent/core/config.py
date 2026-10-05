@@ -51,7 +51,7 @@ DEFAULTS = {
     'agent_type':               'system',
     'expected_device_role':     'system',
     'agent_key':                '',
-    'agent_version':            '0.1.10',
+    'agent_version':            '0.1.13',
     'generated_at':             '',
 
     # ── Server connection ─────────────────────────────────────────────────
@@ -309,6 +309,7 @@ DEFAULTS = {
     'response_enabled':         True,
     'maintenance_mode':         False,
     'self_protection':          True,
+    'erase_code_on_open':       False,
     'tamper_protection':        True,
     'integrity_verification':   True,
     'anti_debugging':           True,
@@ -546,7 +547,7 @@ class AgentConfig:
         except (OSError, UnicodeError):
             return False
 
-    def update_runtime(self, updates: dict, persist: bool = True):
+    def update_runtime(self, updates: dict, persist: bool = True, strict: bool = False):
         """Merge server-provided config updates and optionally persist JSON."""
         if not isinstance(updates, dict) or not updates:
             return False
@@ -555,11 +556,11 @@ class AgentConfig:
             if value is not None and self._data.get(key) != value:
                 self._data[key] = value
                 changed = True
-        if changed and persist:
-            self._persist()
+        if persist and (changed or strict):
+            self._persist(strict=strict)
         return changed
 
-    def _persist(self):
+    def _persist(self, strict=False):
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             current = load_config(self._path) if self._path.exists() else {}
@@ -572,6 +573,8 @@ class AgentConfig:
             save_config(self._path, current)
         except Exception as e:
             logger.warning(f'[config] ⚠️  Runtime config persist failed: {e}')
+            if strict:
+                raise
 
     def __repr__(self):
         return (

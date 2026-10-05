@@ -658,6 +658,12 @@
 .ids-white-type { color:#86f3b6; background:#0b3327; border:1px solid #136e49; border-radius:999px; padding:3px 8px; }
 .ids-white-remove { height:22px; padding:0 10px; border:1px solid #74313b; border-radius:4px; background:#6f252d; color:#ffd5d9; font-size:8px; cursor:pointer; }
 .ids-white-remove:disabled { opacity:.6; cursor:default; }
+.ids-white-confirm.swal2-popup { width:min(480px, calc(100vw - 32px)); border:1px solid #2a455e; border-radius:14px; box-shadow:0 24px 90px #0009; font-family:system-ui,sans-serif; }
+.ids-white-confirm .swal2-title { font-size:22px; }
+.ids-white-confirm .swal2-html-container { color:#96aac1; font-size:14px; line-height:1.6; overflow-wrap:anywhere; }
+.ids-white-confirm .swal2-styled { font-size:14px; border-radius:7px; }
+.ids-white-confirm .swal2-close:disabled { opacity:.4; cursor:not-allowed; }
+.ids-white-confirm .ids-white-confirm-error { background:#381d2a; color:#fda4af; font-size:13px; overflow-wrap:anywhere; }
 .ids-white-empty { min-height:226px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 12px; text-align:center; }
 .ids-white-empty-art { width:108px; height:82px; position:relative; display:grid; place-items:center; margin-bottom:10px; border-radius:16px 16px 36px 36px; background:linear-gradient(180deg,#10395888,#0c233988); box-shadow:inset 0 -16px 22px #18516f55,0 0 40px #22c55e12; }
 .ids-white-empty-art:before { content:""; position:absolute; width:64px; height:64px; border-radius:50%; border:3px solid #18b98188; box-shadow:0 0 20px #22c55e4d; }

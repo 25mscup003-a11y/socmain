@@ -12,6 +12,13 @@ describe('whitelist matching', () => {
     expect(_test.whitelistEntryMatches('2001:db9::42', { type: 'cidr', value: '2001:db8::/32' })).toBe(false);
   });
 
+  test('equivalent IPv6 addresses match and malformed CIDRs never become allow-all', () => {
+    expect(_test.whitelistEntryMatches('2001:db8::1', { type: 'ip', value: '2001:0db8:0:0:0:0:0:1' })).toBe(true);
+    for (const value of ['0.0.0.0/', '0.0.0.0/0/garbage', '2001:db8::/129']) {
+      expect(_test.whitelistEntryMatches('203.0.113.9', { type: 'cidr', value })).toBe(false);
+    }
+  });
+
   test('matches domains without allowing suffix confusion', () => {
     expect(_test.whitelistEntryMatches('api.trusted.example', { type: 'domain', value: 'trusted.example' })).toBe(true);
     expect(_test.whitelistEntryMatches('nottrusted.example', { type: 'domain', value: 'trusted.example' })).toBe(false);

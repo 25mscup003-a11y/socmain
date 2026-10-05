@@ -1,0 +1,73 @@
+.sa-support { display: flex; flex-direction: column; height: 100%; min-height: 0; color: #e2e8f0; min-width: 0; }
+.sa-support button, .sa-support select, .sa-support input, .sa-support textarea { font: inherit; font-size: 13px; }
+.sa-support button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #263950; border-radius: 8px; padding: 9px 12px; background: #101c2e; color: #cbd5e1; cursor: pointer; }
+.sa-support button:hover:not(:disabled) { background: #182b40; border-color: #3c5979; }
+.sa-support button:disabled { opacity: .5; cursor: not-allowed; }
+.sa-support :is(button, input, select, textarea):focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+.sa-support-filters { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 12px; margin-bottom: 18px; }
+.sa-support-search { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 220px; padding: 0 12px; background: #0c1422; border: 1px solid #24344d; border-radius: 8px; color: #64748b; }
+.sa-support-search input { width: 100%; min-width: 0; padding: 11px 0; border: 0; background: transparent; color: #e2e8f0; }
+.sa-support select, .sa-support textarea { padding: 10px 12px; max-width: 100%; border: 1px solid #24344d; border-radius: 8px; background: #0c1422; color: #e2e8f0; }
+.sa-support-filters select { max-width: 280px; }
+.sa-support-workspace { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 18px; align-items: stretch; }
+.sa-support-inbox, .sa-support-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; border: 1px solid #1e2e45; border-radius: 12px; background: #0b1220; overflow: hidden; }
+.sa-support-conversation-picker { display: none; }
+.sa-support-inbox-title, .sa-support-pagination, .sa-support-chat-header, .sa-support-composer, .sa-support-closed, .sa-support-error, .sa-support-notice { flex-shrink: 0; }
+.sa-support-inbox-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border-bottom: 1px solid #1e2e45; }
+.sa-support-inbox-title h2 { margin: 0; font-size: 14px; }
+.sa-support-inbox-title > span { color: #94a3b8; font-size: 11px; }
+.sa-support-ticket-list { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+.sa-support button.sa-support-ticket { display: flex; flex-direction: column; align-items: stretch; gap: 9px; width: 100%; padding: 14px; margin-bottom: 6px; text-align: left; background: transparent; border-color: transparent; }
+.sa-support button.sa-support-ticket.selected { background: rgba(34, 211, 238, .07); border-color: rgba(34, 211, 238, .35); }
+.sa-support-ticket > strong { color: #f1f5f9; font-size: 13px; overflow-wrap: anywhere; }
+.sa-support-ticket-meta { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 5px 8px; color: #94a3b8; font-size: 10px; }
+.sa-support-company { display: flex; align-items: center; gap: 6px; color: #93c5fd; font-size: 12px; overflow-wrap: anywhere; }
+.sa-support-company svg { flex-shrink: 0; }
+.sa-support-status { padding: 3px 6px; border-radius: 4px; background: #172538; color: #94a3b8; white-space: nowrap; }
+.sa-support-status.status-open { color: #fbbf24; background: rgba(251, 191, 36, .08); }
+.sa-support-status.status-in-progress { color: #60a5fa; background: rgba(96, 165, 250, .1); }
+.sa-support-status.status-resolved { color: #34d399; background: rgba(52, 211, 153, .1); }
+.sa-support-severity { text-transform: capitalize; }
+.sa-support-pagination { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 12px; border-top: 1px solid #1e2e45; font-size: 10px; color: #94a3b8; }
+.sa-support-pagination button { padding: 7px 9px; font-size: 11px; }
+.sa-support-chat-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 16px; padding: 20px; border-bottom: 1px solid #1e2e45; }
+.sa-support-chat-header > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sa-support-chat-header h2 { margin: 6px 0; font-size: 18px; color: #f1f5f9; }
+.sa-support-chat-header span, .sa-support-chat-header p { margin: 0; font-size: 12px; color: #94a3b8; }
+.sa-support-chat-header label { display: grid; gap: 5px; font-size: 11px; color: #94a3b8; }
+.sa-support-messages { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 16px; overflow-y: auto; padding: 18px 22px; }
+.sa-support-message { flex-shrink: 0; align-self: flex-start; max-width: 85%; padding: 12px 15px; border: 1px solid #263950; border-radius: 10px; background: #121e30; overflow-wrap: anywhere; }
+.sa-support-message.from-admin { align-self: flex-end; background: rgba(8, 145, 178, .13); border-color: rgba(34, 211, 238, .25); }
+.sa-support-message > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; }
+.sa-support-message > div span { color: #94a3b8; font-size: 10px; }
+.sa-support-message p { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin: 8px 0; }
+.sa-support-message time { display: block; text-align: right; color: #94a3b8; font-size: 10px; }
+.sa-support-message-footer { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+.sa-support-receipt { display: inline-flex; color: #94a3b8; }
+.sa-support-receipt.is-read { color: #38bdf8; }
+.sa-support-composer { display: grid; gap: 8px; padding: 12px 20px; border-top: 1px solid #1e2e45; }
+.sa-support-composer > label { font-size: 12px; color: #cbd5e1; }
+.sa-support-composer textarea { width: 100%; resize: none; height: 64px; min-height: 64px; overflow-y: auto; }
+.sa-support-composer > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sa-support-composer > div > span { color: #64748b; font-size: 11px; }
+.sa-support-composer button { color: #67e8f9; background: #10303c; border-color: #155e75; }
+.sa-support-empty { padding: 32px 22px; color: #94a3b8; font-size: 13px; line-height: 1.7; text-align: center; }
+.sa-support-closed { padding: 18px 20px; margin: 0; color: #94a3b8; font-size: 13px; border-top: 1px solid #1e2e45; }
+.sa-support-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; margin-bottom: 12px; background: rgba(239, 68, 68, .08); color: #fca5a5; font-size: 13px; border: 1px solid rgba(239, 68, 68, .25); border-radius: 8px; }
+.sa-support-notice { padding: 10px 20px; margin: 0; color: #6ee7b7; background: rgba(16, 185, 129, .08); font-size: 12px; }
+@media (max-width: 800px) {
+  .sa-support-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
+  .sa-support-inbox-title { padding: 8px 12px; border-bottom: 0; }
+  .sa-support-conversation-picker { display: block; flex-shrink: 0; width: calc(100% - 24px); margin: 0 12px 10px; }
+  .sa-support-ticket-list, .sa-support-pagination[data-single-page="true"] { display: none; }
+}
+@media (max-width: 480px) {
+  .sa-support-filters { gap: 8px; margin-bottom: 12px; }
+  .sa-support-search { min-width: 0; flex: 0 0 100%; }
+  .sa-support-filters select { min-width: 0; max-width: 100%; flex: 1; width: 0; }
+  .sa-support-chat-header, .sa-support-composer, .sa-support-messages { padding: 10px 12px; }
+  .sa-support-chat-header { gap: 8px; }
+  .sa-support-chat-header h2 { font-size: 15px; }
+  .sa-support-composer textarea { height: 52px; min-height: 52px; }
+  .sa-support-message { max-width: 95%; }
+}

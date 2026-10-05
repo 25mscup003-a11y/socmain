@@ -22,6 +22,8 @@ const { getDB, getMainDB } = require('../db/mongodb');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
 const net = require('net');
+const { ensureTenantIndexes } = require('../db/indexes');
+const memoryWhitelist = new Map();
 
 // ── Collection Names ──────────────────────────────────────────────────────────
 const COLLECTIONS = {
@@ -44,6 +46,7 @@ async function ensureAllIndexes() {
   const db = getDB();
   if (!db) return;
   try {
+    await ensureTenantIndexes(db);
     /* firewall_blocks */
     const blocks = db.collection(COLLECTIONS.BLOCKS);
     await blocks.createIndex({ blockKey: 1, company: 1 }, { unique: true, sparse: true });
@@ -308,32 +311,50 @@ async function getAttackStats(since = new Date(Date.now() - 24 * 3600 * 1000), c
 // WHITELIST
 // ──────────────────────────────────────────────────────────────────────────────
 
+function normalizeWhitelistEntry(value, type) {
+  if (typeof value !== 'string' || typeof type !== 'string') throw new Error('Invalid whitelist entry');
+  type = type.toLowerCase();
+  value = value.trim();
+  if (type === 'ip' && net.isIP(value)) return { value, type };
+  if (type === 'cidr') {
+    const parts = value.split('/');
+    const base = ipToBigInt(parts[0]);
+    if (parts.length === 2 && base && /^\d+$/.test(parts[1]) && Number(parts[1]) <= base.bits) return { value, type };
+  }
+  if (type === 'domain') {
+    value = normalizeWhitelistDomain(value);
+    if (value.length <= 253 && value.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return { value, type };
+  }
+  throw new Error('Invalid whitelist IP, CIDR, or domain');
+}
+
 async function addToWhitelist(value, type = 'ip', reason = '', company = null) {
+  ({ value, type } = normalizeWhitelistEntry(value, type));
+  const doc = { value, type, reason, company, updatedAt: new Date() };
   const c = col(COLLECTIONS.WHITELIST);
-  if (!c) return null;
+  if (!c) {
+    const key = JSON.stringify([company, value]);
+    memoryWhitelist.set(key, { addedAt: memoryWhitelist.get(key)?.addedAt || new Date(), ...doc });
+    return { acknowledged: true };
+  }
   try {
-    const doc = { value, type, reason, updatedAt: new Date(), ...(company && { company }) };
-    return await c.updateOne(
-      { value, ...(company && { company }) },
-      {
-        $set: doc,
-        $setOnInsert: { addedAt: new Date() },
-      },
-      { upsert: true }
-    );
-  } catch (err) {
-    logger.warn(`[MongoService] addToWhitelist: ${err.message}`);
-    return null;
+    return await c.updateOne({ value, company }, {
+      $set: doc, $setOnInsert: { addedAt: new Date() },
+    }, { upsert: true });
+  } catch (error) {
+    logger.warn(`[MongoService] addToWhitelist: ${error.message}`);
+    throw Object.assign(new Error('Unable to save whitelist entry'), { statusCode: 503 });
   }
 }
 
 async function removeFromWhitelist(value, company = null) {
   const c = col(COLLECTIONS.WHITELIST);
-  if (!c) return null;
+  if (!c) return { deletedCount: Number(memoryWhitelist.delete(JSON.stringify([company, value]))) };
   try {
-    const filter = { value, ...(company && { company }) };
-    return await c.deleteOne(filter);
-  } catch { return null; }
+    return await c.deleteOne({ value, company });
+  } catch {
+    throw Object.assign(new Error('Unable to remove whitelist entry'), { statusCode: 503 });
+  }
 }
 
 function normalizeWhitelistDomain(value = '') {
@@ -376,9 +397,15 @@ function whitelistEntryMatches(value, entry = {}) {
     const allowed = normalizeWhitelistDomain(candidate);
     return Boolean(host && allowed && (host === allowed || host.endsWith(`.${allowed}`)));
   }
-  if (type === 'ip') return String(value || '').trim().toLowerCase() === candidate.toLowerCase();
+  if (type === 'ip') {
+    const address = ipToBigInt(value);
+    const allowed = ipToBigInt(candidate);
+    return Boolean(address && allowed && address.version === allowed.version && address.value === allowed.value);
+  }
   if (type !== 'cidr') return false;
-  const [network, prefixText] = candidate.split('/', 2);
+  const parts = candidate.split('/');
+  if (parts.length !== 2 || !/^\d+$/.test(parts[1])) return false;
+  const [network, prefixText] = parts;
   const address = ipToBigInt(value);
   const base = ipToBigInt(network);
   const prefix = Number(prefixText);
@@ -389,16 +416,17 @@ function whitelistEntryMatches(value, entry = {}) {
 
 async function isWhitelisted(value, company = null) {
   const c = col(COLLECTIONS.WHITELIST);
-  if (!c) return false;
+  if (!c) return [...memoryWhitelist.values()].some(entry => entry.company === company && whitelistEntryMatches(value, entry));
   try {
-    const entries = await c.find({ ...(company && { company }) }).toArray();
+    const entries = await c.find({ company }).toArray();
     return entries.some(entry => whitelistEntryMatches(value, entry));
-  } catch { return false; }
+  } catch { throw Object.assign(new Error('Unable to check whitelist; block not applied'), { statusCode: 503 }); }
 }
 
 async function getWhitelist(filter = {}, company = null) {
   const c = col(COLLECTIONS.WHITELIST);
-  if (!c) return [];
+  if (!c) return [...memoryWhitelist.values()].filter(entry => (!company || entry.company === company)
+    && Object.entries(filter).every(([key, value]) => entry[key] === value));
   try {
     const query = { ...filter, ...(company && { company }) };
     return await c.find(query).sort({ addedAt: -1 }).toArray();
@@ -487,6 +515,8 @@ function _socIpsAlert({ action = 'block', company, block = {}, threat = {} }) {
   const departmentId = _socCompanyId(block.departmentId);
 
   const isBlock = action === 'block';
+  const enforced = block.enforced ?? !['log-only', 'endpoint-agent', 'none'].includes(block.method);
+  const appliedBlock = isBlock && enforced;
   const target = block.ip || block.domain || block.application ||
     (block.port ? `port ${block.port}` : block.protocol || 'target');
   const severity = ['low', 'medium', 'high', 'critical'].includes(String(threat.level || '').toLowerCase())
@@ -520,16 +550,16 @@ function _socIpsAlert({ action = 'block', company, block = {}, threat = {} }) {
     severity,
     status: isBlock ? 'open' : 'resolved',
     ruleId: isBlock ? 'IPS_BLOCK_APPLIED' : 'IPS_BLOCK_REMOVED',
-    description: `IPS ${isBlock ? 'blocked' : 'unblocked'} ${target}`,
+    description: `IPS ${enforced ? (isBlock ? 'blocked' : 'unblocked') : (isBlock ? 'block requested for' : 'unblock requested for')} ${target}`,
     srcip: block.ip || null,
     destip: block.agentIp || null,
     destPort: block.port ? Number(block.port) : null,
     port: block.port ? Number(block.port) : null,
     protocol: block.protocol || 'all',
     direction: block.direction || 'both',
-    blocked: isBlock,
-    actionTaken: isBlock ? 'Blocked' : 'Allowed',
-    containmentStatus: isBlock ? 'blocked' : 'allowed',
+    blocked: appliedBlock,
+    actionTaken: enforced ? (isBlock ? 'Blocked' : 'Allowed') : 'Requested',
+    containmentStatus: enforced ? (isBlock ? 'blocked' : 'allowed') : 'pending',
     detectionSource: 'IPS Server',
     riskScore: Number(threat.score || 0),
     agentName: block.agentName || block.agentHostname || 'IPS Server',
@@ -546,6 +576,8 @@ function _socIpsAlert({ action = 'block', company, block = {}, threat = {} }) {
       action,
       reason: block.reason || '',
       method: block.method || '',
+      enforced,
+      delegated: block.delegated === true || block.method === 'endpoint-agent',
       source: block.source || '',
       attackType: block.attackType || threat.type || '',
       systemId: systemId ? String(systemId) : null,

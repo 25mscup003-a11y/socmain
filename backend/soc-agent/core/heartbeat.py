@@ -29,6 +29,8 @@ from .config import AgentConfig
 from .security import signed_headers
 from .secure_transport import secure_request, certificate_status
 from .self_protection import collect_security_report
+from .security_controls import RuntimeSecurity, normalize_policy
+from .country_block import CountryBlockEnforcer
 
 logger = logging.getLogger('soc-agent.heartbeat')
 
@@ -111,6 +113,16 @@ def _sensor_executable_available(name: str) -> bool:
 def is_monitoring_stopped() -> bool:
     """Returns True if the server told the agent to halt (subscription expired)."""
     return _STOP_MONITORING.is_set() or _MAINTENANCE_MODE.is_set()
+
+
+def security_command_error(command):
+    if str(command).lower() in _LOCKDOWN_ALLOWED_COMMANDS:
+        return ''
+    if _SECURITY_LOCKDOWN.is_set():
+        return 'Command denied: agent is in evidence-preserving security lockdown'
+    if _MAINTENANCE_MODE.is_set():
+        return 'Command denied: agent is in maintenance mode'
+    return ''
 
 
 def _get_primary_ip() -> str:
@@ -474,6 +486,10 @@ class HeartbeatService:
         self._security_action_results = []
         self._security_report = None
         self._security_report_at = 0.0
+        self._runtime_security = RuntimeSecurity()
+        self._security_policy_error = ''
+        self._security_completed = dict(config.get('security_completed_commands', {}))
+        self._country_blocks = CountryBlockEnforcer(config)
 
     def set_response_handler(self, handler):
         self._response_handler = handler
@@ -485,6 +501,12 @@ class HeartbeatService:
         self._cache_poison_detector = detector
 
     def start(self):
+        self._runtime_security.apply(self.config)
+        if self.config.get('security_lockdown_active', False):
+            _SECURITY_LOCKDOWN.set()
+        if self.config.get('maintenance_mode', False):
+            _MAINTENANCE_MODE.set()
+        self._country_blocks.start()
         self._thread.start()
         logger.info(f'Heartbeat started (every {self._interval}s)')
 
@@ -499,10 +521,15 @@ class HeartbeatService:
             command_id = str(item.get('id') or item.get('commandId') or '')
             message = ''
             try:
+                if audit_id and audit_id in self._security_completed:
+                    self._security_action_results.append(self._security_completed[audit_id])
+                    continue
                 if _SECURITY_LOCKDOWN.is_set() and command not in _LOCKDOWN_ALLOWED_COMMANDS:
                     raise RuntimeError(
                         'command denied: agent is in evidence-preserving security lockdown'
                     )
+                if _MAINTENANCE_MODE.is_set() and command not in _LOCKDOWN_ALLOWED_COMMANDS:
+                    raise RuntimeError('command denied: agent is in maintenance mode')
                 if self._response_handler and command in _RESPONSE_COMMANDS:
                     result = self._response_handler.dispatch(command, item)
                     ok = bool(result and result.get('ok') is True)
@@ -518,7 +545,7 @@ class HeartbeatService:
                         self._security_action_results.append({
                             'auditId': audit_id, 'ok': True, 'message': message,
                         })
-                    if command_id:
+                    if command_id and not audit_id:
                         self._security_action_results.append({
                             'commandId': command_id, 'command': command,
                             'ip': item.get('ip'), 'ok': True, 'message': message,
@@ -587,7 +614,7 @@ class HeartbeatService:
                             'ok': not failed,
                             'message': message,
                         })
-                    if command_id:
+                    if command_id and not audit_id:
                         self._security_action_results.append({
                             'commandId': command_id, 'command': command,
                             'ok': not failed, 'message': message,
@@ -596,15 +623,28 @@ class HeartbeatService:
                 elif command == 'verify-integrity':
                     self._verify_agent_integrity()
                 elif command == 'security-policy-sync':
-                    logger.warning('Security policy synchronization requested')
+                    if self._security_policy_error:
+                        raise RuntimeError(self._security_policy_error)
+                    message = 'Security policy applied (v{})'.format(self.config.get('policy_version', 0))
                 elif command == 'security-lockdown':
+                    self.config.update_runtime({'security_lockdown_active': True}, persist=True, strict=True)
                     _SECURITY_LOCKDOWN.set()
                     logger.warning('Security lockdown enabled by authorized server command')
                 elif command == 'security-unlock':
+                    report = self._refresh_security_report(force=True)
+                    if not _MAINTENANCE_MODE.is_set() and self.config.get('self_protection', True) and (
+                        report.get('integrityStatus') in {'mismatch', 'missing', 'error'}
+                        or report.get('debuggerDetected') or report.get('analysisTools')
+                    ):
+                        raise RuntimeError('Active security findings remain. Repair the agent or use authorized maintenance before unlocking.')
+                    self.config.update_runtime({'security_lockdown_active': False}, persist=True, strict=True)
                     _SECURITY_LOCKDOWN.clear()
                     self._security_report_at = 0.0
                     logger.warning('Security lockdown cleared by authorized server command')
                 elif command == 'security-force-recovery':
+                    # Persist a restart marker before exec; the next process
+                    # reports completion, rather than losing the audit ACK.
+                    self.config.update_runtime({'security_recovery_audit': audit_id}, persist=True, strict=True)
                     logger.warning('Agent recovery requested; restarting service process')
                     os.execv(os.sys.executable, [os.sys.executable] + os.sys.argv)
                 else:
@@ -615,7 +655,7 @@ class HeartbeatService:
                             'auditId': audit_id, 'ok': False,
                             'message': message,
                         })
-                    if command_id:
+                    if command_id and not audit_id:
                         self._security_action_results.append({
                             'commandId': command_id, 'command': command,
                             'ip': item.get('ip'), 'ok': False, 'message': message,
@@ -623,11 +663,13 @@ class HeartbeatService:
                     continue
                 logger.warning('Executed pending heartbeat command: %s', command)
                 if audit_id:
-                    self._security_action_results.append({
+                    result = {
                         'auditId': audit_id, 'ok': True,
                         'message': message or f'{command} executed by agent',
-                    })
-                if command_id:
+                    }
+                    self._remember_security_result(audit_id, result)
+                    self._security_action_results.append(result)
+                if command_id and not audit_id:
                     self._security_action_results.append({
                         'commandId': command_id, 'command': command,
                         'ip': item.get('ip'), 'ok': True,
@@ -639,11 +681,17 @@ class HeartbeatService:
                     self._security_action_results.append({
                         'auditId': audit_id, 'ok': False, 'message': str(exc)[:500],
                     })
-                if command_id:
+                if command_id and not audit_id:
                     self._security_action_results.append({
                         'commandId': command_id, 'command': command,
                         'ip': item.get('ip'), 'ok': False, 'message': str(exc)[:500],
                     })
+
+    def _remember_security_result(self, audit_id, result):
+        self._security_completed[audit_id] = result
+        self._security_completed = dict(list(self._security_completed.items())[-100:])
+        if hasattr(self.config, 'update_runtime'):
+            self.config.update_runtime({'security_completed_commands': self._security_completed}, persist=True, strict=True)
 
     def _verify_agent_integrity(self):
         """Check packaged files against a build manifest and unsafe permissions."""
@@ -662,25 +710,65 @@ class HeartbeatService:
     def _refresh_security_report(self, force=False):
         now = time.monotonic()
         if force or self._security_report is None or now - self._security_report_at >= 30:
-            self._security_report = collect_security_report()
+            master = self.config.get('self_protection', True)
+            verify = master and self.config.get('integrity_verification', True)
+            self._security_report = collect_security_report(
+                check_integrity=force or (verify and (self._security_report is None or self.config.get('code_integrity_monitoring', True))),
+                check_debugger=master and self.config.get('anti_debugging', True),
+                check_tools=master and self.config.get('anti_reverse_engineering', True),
+                check_permissions=master and self.config.get('tamper_protection', True),
+                previous=self._security_report if verify else None,
+            )
             self._security_report_at = now
         report = dict(self._security_report)
+        open_findings = self._runtime_security.file_open.findings()
+        if open_findings:
+            report['findings'] = (open_findings + list(report.get('findings', [])))[:40]
+            report['integrityStatus'] = 'mismatch' if any(item['type'] == 'source_cleared_on_open' for item in open_findings) else 'error'
         should_lock = (
-            report.get('integrityStatus') in {'mismatch', 'error'}
+            report.get('integrityStatus') in {'mismatch', 'missing', 'error'}
             or (report.get('debuggerDetected') and self.config.get('anti_debugging', True))
             or (report.get('analysisTools') and self.config.get('anti_reverse_engineering', True))
         )
-        if should_lock and self.config.get('lockdown_mode', True):
+        if should_lock and self.config.get('self_protection', True) and self.config.get('lockdown_mode', True) and not _MAINTENANCE_MODE.is_set():
             if not _SECURITY_LOCKDOWN.is_set():
                 logger.critical('Agent tamper/analysis activity detected; entering safe security lockdown')
             _SECURITY_LOCKDOWN.set()
+            if not self.config.get('security_lockdown_active', False) and hasattr(self.config, 'update_runtime'):
+                self.config.update_runtime({'security_lockdown_active': True}, persist=True)
         report['lockdownActive'] = _SECURITY_LOCKDOWN.is_set()
+        report['version'] = 2
+        report['policyVersion'] = self.config.get('policy_version', 0)
+        file_open_status = self._runtime_security.file_open.report(self.config)
+        file_open_error = file_open_status['detail'] if file_open_status['enabled'] and file_open_status['state'] in {'error', 'unsupported'} else ''
+        report['policyError'] = file_open_error or self._security_policy_error
+        report['maintenanceActive'] = _MAINTENANCE_MODE.is_set()
+        report['controls'] = self._runtime_security.report(self.config, report, certificate_status(self.config), report['lockdownActive'], report['maintenanceActive'])
+        recovery_audit = self.config.get('security_recovery_audit', '')
+        if recovery_audit:
+            result = {'auditId': recovery_audit, 'ok': report.get('integrityStatus') == 'verified', 'message': 'Agent restarted; integrity ' + str(report.get('integrityStatus'))}
+            self._remember_security_result(recovery_audit, result)
+            self._security_action_results.append(result)
+            self.config.update_runtime({'security_recovery_audit': ''}, persist=True, strict=True)
         return report
 
     def _apply_security_policy(self, policy):
         if not isinstance(policy, dict):
             return
-        changed = self.config.update_runtime(policy, persist=True)
+        try:
+            normalized = normalize_policy(policy)
+            if normalized['policy_version'] < self.config.get('policy_version', 0):
+                raise ValueError('Refusing an older security policy')
+            changed = self.config.update_runtime(normalized, persist=True, strict=True)
+            self._runtime_security.apply(self.config)
+            self._security_policy_error = self._runtime_security.dump_status['detail'] if self._runtime_security.dump_status['state'] == 'error' else ''
+            if changed:
+                self._security_report = None
+                self._security_report_at = 0.0
+        except Exception as error:
+            self._security_policy_error = str(error)[:500]
+            logger.error('Security policy could not be applied: %s', error)
+            return
         if policy.get('maintenance_mode') is True:
             if not _MAINTENANCE_MODE.is_set():
                 logger.warning('Maintenance Mode enabled by Platform Super Admin')
@@ -870,7 +958,7 @@ class HeartbeatService:
             url = f'{self._server_url().rstrip("/")}/api/agent/heartbeat'
             payload = {
                 'agent_key':     self.config.get('agent_key', ''),
-                'agent_version': self.config.get('agent_version', '0.1.10'),
+                'agent_version': self.config.get('agent_version', '0.1.13'),
                 'status':        'running',
                 'update_status': self._update_status,
                 'update_error':  self._update_error or '',
@@ -906,6 +994,7 @@ class HeartbeatService:
         self._update_status = 'installing'
         self._report_update_status()  # push progress before the installer may restart us
         try:
+            self._runtime_security.file_open.suspend_for_update()
             self._install_update_package(pkg_type, path)
             logger.warning('OTA installer finished; service restarting into v%s', target)
             # Success is confirmed by the backend when the new build reports its version.
@@ -913,6 +1002,7 @@ class HeartbeatService:
             self._update_status = 'failed'
             self._update_error = f'install failed: {exc}'
             logger.error('OTA install failed: %s', exc)
+            self._runtime_security.file_open.update_failed(self.config)
             self._report_update_status()
         finally:
             try:
@@ -959,7 +1049,7 @@ class HeartbeatService:
             )
             payload = {
                 'agent_key':     self.config.get('agent_key', ''),
-                'agent_version': self.config.get('agent_version', '0.1.10'),
+                'agent_version': self.config.get('agent_version', '0.1.13'),
                 'velociraptor_client_id': velociraptor_client_id,
                 'status':        'running',
                 'update_request_id': (
@@ -970,6 +1060,7 @@ class HeartbeatService:
                 **_module_status(self.config),
                 'transport_security': certificate_status(self.config),
                 'agent_security': self._refresh_security_report(),
+                'countryBlockStatus': self._country_blocks.status(),
             }
             if self._cache_poison_detector:
                 payload['dnsCachePoisonStatus'] = self._cache_poison_detector.status()
@@ -1030,6 +1121,8 @@ class HeartbeatService:
                         if self._cache_poison_detector:
                             self._cache_poison_detector.configure(data['config_update'])
                 self._apply_security_policy(data.get('security_policy'))
+                if 'country_blocks' in data:
+                    self._country_blocks.submit(data['country_blocks'])
                 self._sync_isolation_state(data)
                 self._execute_pending_commands(data.get('commands', []))
             else:
@@ -1045,7 +1138,7 @@ class HeartbeatService:
                 )
                 payload = {
                     'agentKey':    self.config.get('agent_key', ''),
-                    'agentVersion':self.config.get('agent_version', '0.1.10'),
+                    'agentVersion':self.config.get('agent_version', '0.1.13'),
                     'velociraptor_client_id': velociraptor_client_id,
                     **_system_info(),
                     **_module_status(self.config),

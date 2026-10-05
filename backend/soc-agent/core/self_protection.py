@@ -66,6 +66,17 @@ def _debugger_attached():
             reasons.append('python runtime tracing/debugger is attached')
     except Exception:
         pass
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            kernel = ctypes.windll.kernel32
+            kernel.GetCurrentProcess.restype = ctypes.c_void_p
+            remote = ctypes.c_int(0)
+            kernel.CheckRemoteDebuggerPresent(kernel.GetCurrentProcess(), ctypes.byref(remote))
+            if kernel.IsDebuggerPresent() or remote.value:
+                reasons.append('Windows process debugger is attached')
+        except Exception:
+            pass
     if sys.platform.startswith('linux'):
         try:
             for line in Path('/proc/self/status').read_text(encoding='utf-8').splitlines():
@@ -104,7 +115,7 @@ def _running_analysis_tools():
     return sorted(names)[:20]
 
 
-def collect_security_report(root=None):
+def _collect_integrity_report(root=None, check_permissions=True):
     root = Path(root or Path(__file__).resolve().parent.parent).resolve()
     findings = []
     manifest, manifest_error = _load_manifest(root)
@@ -127,7 +138,7 @@ def collect_security_report(root=None):
             if path.is_symlink():
                 findings.append({'type': 'symlink', 'file': relative, 'detail': 'protected code is a symbolic link'})
                 continue
-            if os.name != 'nt' and path.stat().st_mode & 0o022:
+            if check_permissions and os.name != 'nt' and path.stat().st_mode & 0o022:
                 findings.append({'type': 'permissions', 'file': relative, 'detail': 'protected code is group/world writable'})
             actual_files[relative] = _sha256(path)
 
@@ -154,13 +165,6 @@ def collect_security_report(root=None):
         reported_fleet_hash = ''
         findings.append({'type': 'scan_error', 'file': '', 'detail': str(exc)[:200]})
 
-    debugger_reasons = _debugger_attached()
-    for detail in debugger_reasons:
-        findings.append({'type': 'debugger', 'file': '', 'detail': detail})
-    tools = _running_analysis_tools()
-    for tool in tools:
-        findings.append({'type': 'analysis_tool', 'file': '', 'detail': f'analysis tool process detected: {tool}'})
-
     expected_hash = manifest.get('fleetSha256', '') if manifest else ''
     if expected_hash and expected_hash != reported_fleet_hash and integrity_status == 'verified':
         integrity_status = 'mismatch'
@@ -172,7 +176,24 @@ def collect_security_report(root=None):
         'integrityStatus': integrity_status,
         'expectedFleetSha256': expected_hash[:64],
         'reportedFleetSha256': reported_fleet_hash[:64],
-        'debuggerDetected': bool(debugger_reasons),
-        'analysisTools': tools,
+        'debuggerDetected': False,
+        'analysisTools': [],
         'findings': findings[:MAX_FINDINGS],
     }
+
+
+def collect_security_report(root=None, check_integrity=True, check_debugger=True, check_tools=True, check_permissions=True, previous=None):
+    if check_integrity:
+        report = _collect_integrity_report(root, check_permissions=check_permissions)
+    else:
+        report = dict(previous or {
+            'version': 1, 'integrityStatus': 'unknown', 'expectedFleetSha256': '',
+            'reportedFleetSha256': '', 'checkedAt': datetime.now(timezone.utc).isoformat(),
+        })
+    findings = [item for item in report.get('findings', []) if item['type'] not in ('debugger', 'analysis_tool')]
+    reasons = _debugger_attached() if check_debugger else []
+    tools = _running_analysis_tools() if check_tools else []
+    findings.extend({'type': 'debugger', 'file': '', 'detail': reason} for reason in reasons)
+    findings.extend({'type': 'analysis_tool', 'file': '', 'detail': 'Analysis tool process detected: ' + tool} for tool in tools)
+    report.update(debuggerDetected=bool(reasons), analysisTools=tools, findings=findings[:MAX_FINDINGS])
+    return report

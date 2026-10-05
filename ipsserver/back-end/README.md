@@ -1,5 +1,43 @@
 # IPS Webhook Server
 
+## Current integration contract
+
+The SOC backend is the authenticated entry point for browser clients. Use
+`/api/ips-proxy/...` from the company/superadmin portal; do not expose the shared
+service secret to browser code. This repository does not contain the separate
+dashboard referenced by some of the historical examples below.
+
+- `GET /health` is public. Every other HTTP endpoint requires
+  `X-Webhook-Secret`, matching `IPS_WEBHOOK_SECRET` in both services. If that
+  secret is missing, protected endpoints return HTTP 503.
+- Every mutation also requires a valid `X-Company-ID` (the company's MongoDB ID).
+  An unsigned or decoded JWT does not authorize requests to this service.
+- Socket.IO is also an internal integration: supply `auth.secret` and optionally
+  `auth.companyId`. Company-scoped connections cannot subscribe to other tenants.
+- In `auto` mode, unprivileged Linux processes delegate to endpoint agents;
+  privileged Linux uses nftables, and Windows uses Windows Defender Firewall.
+  `log-only` records intent without applying a firewall rule. Check `enforced`
+  and `delegated` in responses; a recorded request is not an endpoint ACK.
+- The local adapters currently support IP-only rules (nftables: both directions;
+  Windows: inbound/outbound/both). Unsupported port, protocol, domain, and app
+  filters are rejected instead of silently expanding them to all IP traffic.
+  Use the SOC backend's endpoint-agent flow for those filters.
+- Unblock by the returned `rawBlockKey` or the exact original target, port/range,
+  protocol, and direction. An IP-only unblock does not delete other rules for
+  that IP. Another tenant's shared host rule is retained.
+- `ttlHours: 0` means permanent; positive values expire after the full duration.
+  Failed cleanup is retried, and the entry remains visible until cleanup succeeds.
+- Block/whitelist indexes are tenant-scoped. Startup replaces only obsolete
+  global unique indexes after creating their compound replacements; it deletes
+  no records. Without MongoDB, blocks and whitelist entries are process-local.
+- Standalone `/isolate` and `/unisolate` return HTTP 501: actual endpoint
+  isolation/recovery belongs to the SOC backend's system isolation API, which
+  waits for agent acknowledgment. Local escalation emits `isolation-requested`
+  with `enforced: false`; it does not claim isolation or automatic recovery.
+
+Run regressions with `npm test -- --runInBand`. Tests use mocked firewall commands
+or log-only mode; they do not modify host firewall rules or send email.
+
 A modular Node.js webhook server that receives and executes firewall blocking/unblocking commands from security threat intelligence systems (SOC, IDS, Firewall).
 
 🎉 **Now with React Dashboard!** - Monitor and manage blocks in real-time with a modern web interface.

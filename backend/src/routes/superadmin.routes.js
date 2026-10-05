@@ -6,6 +6,7 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 const Company = require('../models/Company.model');
 const User = require('../models/User.model');
+const Token = require('../models/Token.model');
 const Tenant = require('../models/Tenant.model');
 const Partner = require('../models/Partner.model');
 const Referral = require('../models/Referral.model');
@@ -17,11 +18,16 @@ const LoginActivity = require('../models/LoginActivity.model');
 const AgentSecurityAudit = require('../models/AgentSecurityAudit.model');
 const PartnerNotification = require('../models/PartnerNotification.model');
 const PartnerSupportTicket = require('../models/PartnerSupportTicket.model');
+const CompanySupportTicket = require('../models/CompanySupportTicket.model');
+const { directSupportCompanies, requireDirectSupportCompany, emitCompanySupport, supportText, validSupportId, markCompanySupportRead } = require('../utils/companySupport');
 const { authenticate, requireSuperAdmin } = require('../middleware/auth.middleware');
 const { normalizeSlug, buildRegistrationUrl } = require('../utils/tenant');
+const { validatePassword } = require('../utils/validate');
 const { sendMail, partnerInvitationEmailHtml } = require('../utils/email');
 const { agreementUpload } = require('../middleware/upload.middleware');
 const { ensureDefaultSoarPlaybooks } = require('../services/defaultSoarPlaybooks.service');
+const { isSystemOnline } = require('../utils/systemPresence');
+const { CONTROL_KEYS, REQUIRED_CONTROLS, desktopSecuritySupported, securityPolicyPosture } = require('../utils/agentSecurityPolicy');
 
 router.use(authenticate, requireSuperAdmin);
 
@@ -41,6 +47,7 @@ function hasConfiguredEnv(...keys) {
 }
 
 const SECURITY_BOOLEAN_FIELDS = new Set([
+  'eraseCodeOnOpen',
   'selfProtection', 'tamperProtection', 'antiDebugging',
   'antiReverseEngineering', 'antiDumpProtection', 'integrityVerification',
   'secureCommunication', 'configurationEncryption', 'certificateValidation',
@@ -99,18 +106,15 @@ async function requireActiveSuperadminSession(req, res, next) {
 
 function serializeSecurityAgent(system, now = Date.now()) {
   const lastSeen = system.lastSeen ? new Date(system.lastSeen) : null;
-  const ageMs = lastSeen ? now - lastSeen.getTime() : Infinity;
   const controls = system.securityControls || {};
-  const enabled = [...SECURITY_BOOLEAN_FIELDS]
-    .filter(key => key !== 'maintenanceMode')
-    .filter(key => controls[key] !== false).length;
-  const expected = SECURITY_BOOLEAN_FIELDS.size - 1;
-  const online = ageMs <= 180000 && system.status === 'active' && system.isActive;
+  const posture = securityPolicyPosture(system, now);
+  const online = isSystemOnline(system, now);
   const posturePenalty = {
     verified: 0, unknown: 25, missing: 50, error: 60, mismatch: 80,
   }[system.agentIntegrityStatus || 'unknown'];
-  const controlScore = Math.round((enabled / expected) * 100);
-  const integrityScore = Math.max(0, controlScore - posturePenalty - (online ? 0 : 10));
+  const measured = Object.entries(posture.controlStatus).filter(([key, value]) => key !== 'maintenanceMode' && value.state !== 'not_applicable');
+  const controlScore = Math.round(100 * measured.filter(([, value]) => ['enforced', 'monitoring'].includes(value.state)).length / Math.max(1, measured.length));
+  const integrityScore = posture.policySync.state === 'applied' ? Math.max(0, controlScore - (posturePenalty ?? 25)) : null;
   const incidentActive = system.agentSecurityIncidentActive === true;
   const transportSecurity = system.agentTransportSecurity || {};
   const configurationEncrypted = Object.prototype.hasOwnProperty.call(
@@ -119,14 +123,16 @@ function serializeSecurityAgent(system, now = Date.now()) {
   return {
     id: system._id,
     agentId: system.agentId || String(system._id),
-    name: system.hostname || system.name,
+    name: system.name || system.hostname,
     company: system.companyId?.name || 'Unknown company',
     companyId: system.companyId?._id || system.companyId,
     tenantId: system.tenantId,
     os: system.os || system.osType || 'Unknown',
     ip: system.ip || '—',
     version: system.agentVersion || '—',
-    status: !online ? 'offline' : incidentActive ? 'critical' : integrityScore === 100 ? 'protected' : 'warning',
+    online,
+    ...posture,
+    status: !online ? 'offline' : incidentActive ? 'critical' : integrityScore === 100 && !system.agentSecurityLockdown && !controls.maintenanceMode ? 'protected' : 'warning',
     integrityScore,
     integrityStatus: system.agentIntegrityStatus || 'unknown',
     expectedIntegrityHash: system.agentExpectedIntegrityHash || '',
@@ -146,14 +152,15 @@ function serializeSecurityAgent(system, now = Date.now()) {
     lastSeen,
     controls: {
       selfProtection: controls.selfProtection !== false,
+      eraseCodeOnOpen: controls.eraseCodeOnOpen === true,
       tamperProtection: controls.tamperProtection !== false,
       antiDebugging: controls.antiDebugging !== false,
       antiReverseEngineering: controls.antiReverseEngineering !== false,
       antiDumpProtection: controls.antiDumpProtection !== false,
       integrityVerification: controls.integrityVerification !== false,
-      secureCommunication: controls.secureCommunication !== false,
-      configurationEncryption: controls.configurationEncryption !== false,
-      certificateValidation: controls.certificateValidation !== false,
+      secureCommunication: true,
+      configurationEncryption: true,
+      certificateValidation: true,
       codeIntegrityMonitoring: controls.codeIntegrityMonitoring !== false,
       lockdownMode: controls.lockdownMode !== false,
       maintenanceMode: controls.maintenanceMode === true,
@@ -168,25 +175,35 @@ function serializeSecurityAgent(system, now = Date.now()) {
 // live database session immediately before access.
 router.get('/agent-security', requireActiveSuperadminSession, async (req, res) => {
   try {
-    const auditPage = Math.max(1, Number.parseInt(req.query.auditPage, 10) || 1);
-    const auditLimit = 5;
+    const requestedPage = Math.max(1, Number.parseInt(req.query.auditPage, 10) || 1);
+    const auditLimit = 10;
+    const auditFilter = {};
+    if (req.query.auditSystemId) {
+      if (!mongoose.isValidObjectId(req.query.auditSystemId)) return res.status(400).json({ message: 'Invalid audit endpoint' });
+      auditFilter.systemId = req.query.auditSystemId;
+    }
+    if (req.query.auditResult) {
+      if (!['queued', 'success', 'failed', 'denied', 'superseded'].includes(req.query.auditResult)) return res.status(400).json({ message: 'Invalid audit result' });
+      auditFilter.result = req.query.auditResult;
+    }
     const serverProtocol = String(process.env.SERVER_PROTO || 'http').toLowerCase();
     const tlsEnabled = process.env.TLS_ENABLED === 'true' || process.env.TRUSTED_TLS_PROXY === 'true';
     const mtlsRequired = process.env.AGENT_MTLS_REQUIRED === 'true'
       || process.env.AGENT_MTLS_AT_PROXY === 'true';
     const systems = await System.find({}).select(
-      'name hostname agentId tenantId companyId os osType ip agentVersion lastSeen status isActive securityControls '
+      'name hostname agentId agentType tenantId companyId os osType ip agentVersion lastSeen status isActive securityControls agentSecurityPolicyStatus '
       + 'agentExpectedIntegrityHash agentPendingIntegrityHash agentReportedIntegrityHash agentIntegrityStatus '
       + 'agentIntegrityCheckedAt agentSecurityFindings agentDebuggerDetected agentAnalysisTools '
       + 'agentSecurityLockdown agentSecurityIncidentActive agentSecurityLastEventAt agentTransportSecurity '
       + '+agentCertificateFingerprint256 agentCertificateExpiresAt +agentCertificateRevokedAt'
     ).populate('companyId', 'name').sort({ lastSeen: -1 }).lean();
     const agents = systems.map(system => serializeSecurityAgent(system));
-    const [audits, auditTotal] = await Promise.all([
-      AgentSecurityAudit.find({}).sort({ createdAt: -1 })
-        .skip((auditPage - 1) * auditLimit).limit(auditLimit).lean(),
-      AgentSecurityAudit.countDocuments({}),
-    ]);
+    const auditTotal = await AgentSecurityAudit.countDocuments(auditFilter);
+    const totalPages = Math.max(1, Math.ceil(auditTotal / auditLimit));
+    const auditPage = Math.min(requestedPage, totalPages);
+    const audits = await AgentSecurityAudit.find(auditFilter).sort({ createdAt: -1, _id: -1 })
+      .skip((auditPage - 1) * auditLimit).limit(auditLimit)
+      .populate('systemId', 'name hostname agentId').lean();
     res.set('Cache-Control', 'no-store');
     res.json({
       agents,
@@ -195,7 +212,7 @@ router.get('/agent-security', requireActiveSuperadminSession, async (req, res) =
         page: auditPage,
         limit: auditLimit,
         total: auditTotal,
-        totalPages: Math.max(1, Math.ceil(auditTotal / auditLimit)),
+        totalPages,
       },
       requestSourceIp: securitySourceIp(req),
       serverSecurity: {
@@ -210,7 +227,7 @@ router.get('/agent-security', requireActiveSuperadminSession, async (req, res) =
           : 'aes256-hmac',
         apiPayloadEncryption: 'aes-256-gcm-v1',
         signedRequestsRequired: process.env.AGENT_REQUIRE_SIGNED !== 'false',
-        minimumSecurityReportVersion: process.env.AGENT_VERSION || '0.1.10',
+        minimumSecurityReportVersion: process.env.AGENT_VERSION || '0.1.13',
       },
       serverTime: new Date().toISOString(),
     });
@@ -221,6 +238,7 @@ router.get('/agent-security', requireActiveSuperadminSession, async (req, res) =
 
 router.patch('/agent-security/:systemId/controls', requireActiveSuperadminSession, async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.systemId)) return res.status(400).json({ message: 'Invalid agent ID' });
     const changes = req.body?.changes;
     if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
       return res.status(400).json({ message: 'A controls change object is required' });
@@ -232,8 +250,27 @@ router.patch('/agent-security/:systemId/controls', requireActiveSuperadminSessio
     if (keys.some(key => typeof changes[key] !== 'boolean')) {
       return res.status(400).json({ message: 'Security control values must be boolean' });
     }
+    if (keys.some(key => REQUIRED_CONTROLS.has(key) && changes[key] === false)) {
+      return res.status(409).json({ message: 'Encrypted communication, configuration encryption and TLS certificate verification are required safeguards and cannot be disabled.' });
+    }
     const system = await System.findById(req.params.systemId);
     if (!system) return res.status(404).json({ message: 'Agent not found' });
+    if (!desktopSecuritySupported(system)) return res.status(422).json({ message: 'This endpoint does not support desktop security controls.' });
+    const armsSourceClearing = changes.eraseCodeOnOpen === true || (system.securityControls?.eraseCodeOnOpen === true
+      && changes.eraseCodeOnOpen !== false && (changes.selfProtection === true || changes.maintenanceMode === false));
+    if (armsSourceClearing && req.body.acknowledgeSourceClearing !== true) {
+      return res.status(409).json({ message: 'Explicitly acknowledge destructive source clearing before arming this response.' });
+    }
+    if (changes.eraseCodeOnOpen === true) {
+      const posture = securityPolicyPosture(system);
+      if (posture.policySync.state !== 'applied' || !posture.controlStatus.selfProtection.fileOpen?.supported) {
+        return res.status(409).json({ message: 'Install the updated Linux agent and wait for a fresh report confirming fanotify support before enabling source clearing.' });
+      }
+      if ((changes.selfProtection ?? system.securityControls?.selfProtection) === false
+          || (changes.maintenanceMode ?? system.securityControls?.maintenanceMode) === true) {
+        return res.status(409).json({ message: 'Enable Self Protection and leave Maintenance Mode before enabling source clearing.' });
+      }
+    }
     const previousValue = {};
     const set = {};
     for (const key of keys) {
@@ -242,20 +279,29 @@ router.patch('/agent-security/:systemId/controls', requireActiveSuperadminSessio
     }
     set['securityControls.updatedAt'] = new Date();
     set['securityControls.updatedBy'] = req.activeUser._id;
-    set['securityControls.policyVersion'] = Number(system.securityControls?.policyVersion || 1) + 1;
-    set.pendingCommands = [
-      ...(system.pendingCommands || []),
-      { command: 'security-policy-sync', controls: changes, requestedAt: new Date() },
-    ].slice(-50);
-    const updated = await System.findByIdAndUpdate(system._id, { $set: set }, { new: true })
-      .populate('companyId', 'name').lean();
+    const previousVersion = Number(system.securityControls?.policyVersion || 1);
+    set['securityControls.policyVersion'] = previousVersion + 1;
     const audit = await AgentSecurityAudit.create({
       tenantId: system.tenantId, companyId: system.companyId, systemId: system._id,
       userId: req.activeUser._id, username: req.activeUser.email || req.activeUser.name,
       role: 'superadmin', action: 'SECURITY_CONTROLS_UPDATED',
-      previousValue, newValue: changes, sourceIp: securitySourceIp(req),
-      device: String(req.headers['user-agent'] || '').slice(0, 300), result: 'success',
+      previousValue, newValue: { changes, policyVersion: previousVersion + 1, command: 'security-policy-sync',
+        ...(armsSourceClearing ? { acknowledgedSourceClearing: true } : {}) }, sourceIp: securitySourceIp(req),
+      device: String(req.headers['user-agent'] || '').slice(0, 300), result: 'queued',
     });
+    // The heartbeat always carries the full policy. No one-shot command can be
+    // lost or overwrite another administrator's pending command queue.
+    let updated;
+    try {
+      updated = await System.findOneAndUpdate({ _id: system._id, $or: [
+        { 'securityControls.policyVersion': previousVersion },
+        ...(previousVersion === 1 ? [{ 'securityControls.policyVersion': { $exists: false } }] : []),
+      ] }, { $set: set }, { new: true }).populate('companyId', 'name').lean();
+      if (!updated) throw new Error('Policy changed concurrently. Refresh and retry.');
+    } catch (error) {
+      await AgentSecurityAudit.updateOne({ _id: audit._id }, { $set: { result: 'failed', 'newValue.agentResult': error.message } });
+      return res.status(409).json({ message: error.message });
+    }
     const payload = { agent: serializeSecurityAgent(updated), audit };
     req.app.get('io')?.to('superadmin').emit('agent-security:update', payload);
     res.json(payload);
@@ -266,6 +312,7 @@ router.patch('/agent-security/:systemId/controls', requireActiveSuperadminSessio
 
 router.post('/agent-security/:systemId/action', requireActiveSuperadminSession, async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.systemId)) return res.status(400).json({ message: 'Invalid agent ID' });
     const action = String(req.body?.action || '');
     const certificateActions = new Set(['revokeCertificate', 'resetCertificateIdentity']);
     const commandTypes = {
@@ -281,6 +328,7 @@ router.post('/agent-security/:systemId/action', requireActiveSuperadminSession, 
     const system = await System.findById(req.params.systemId)
       .select('+agentCertificateFingerprint256 +agentCertificateSerial +agentCertificateRevokedAt');
     if (!system) return res.status(404).json({ message: 'Agent not found' });
+    if (!certificateActions.has(action) && !desktopSecuritySupported(system)) return res.status(422).json({ message: 'This endpoint does not support desktop security actions.' });
 
     if (certificateActions.has(action)) {
       if (action === 'revokeCertificate' && !system.agentCertificateFingerprint256) {
@@ -344,17 +392,24 @@ router.post('/agent-security/:systemId/action', requireActiveSuperadminSession, 
       newValue: { command: commandTypes[action] }, sourceIp: securitySourceIp(req),
       device: String(req.headers['user-agent'] || '').slice(0, 300), result: 'queued',
     });
-    system.pendingCommands = [...(system.pendingCommands || []), {
-      command: commandTypes[action], auditId: audit._id,
+    const command = {
+      id: String(audit._id), command: commandTypes[action], auditId: String(audit._id),
       requestedAt: new Date(), requestedBy: req.activeUser._id,
-    }].slice(-50);
+    };
+    const update = { $push: { pendingCommands: command } };
     if (action === 'forceUpdate') {
-      system.updateStatus = 'pending';
-      system.updateRequestedAt = new Date();
-      system.updateTargetVersion = process.env.AGENT_VERSION || '0.1.10';
-      system.updateError = null;
+      command.force = true;
+      command.targetVersion = process.env.AGENT_VERSION || '0.1.13';
+      update.$set = { updateStatus: 'pending', updateRequestedAt: new Date(), updateTargetVersion: command.targetVersion, updateError: null };
     }
-    await system.save();
+    const queued = await System.updateOne({ _id: system._id,
+      'pendingCommands.command': { $ne: command.command },
+      $expr: { $lt: [{ $size: { $ifNull: ['$pendingCommands', []] } }, 50] },
+    }, update);
+    if (!queued.modifiedCount) {
+      await AgentSecurityAudit.updateOne({ _id: audit._id }, { $set: { result: 'failed', 'newValue.agentResult': 'Command already pending or queue full' } });
+      return res.status(409).json({ message: 'This command is already pending, or the agent queue is full.' });
+    }
     req.app.get('io')?.to('superadmin').emit('agent-security:update', { systemId: system._id, audit });
     res.status(202).json({ message: 'Security command queued for the next agent heartbeat', audit });
   } catch (err) {
@@ -1822,7 +1877,7 @@ router.get('/companies/:companyId/add-system-subscriptions', async (req, res) =>
 });
 
 // ── All Users ─────────────────────────────────────────
-router.get('/users', async (req, res) => {
+router.get('/users', requireActiveSuperadminSession, async (req, res) => {
   try {
     const filter = req.query.role === 'analyst'
       ? {
@@ -1838,6 +1893,58 @@ router.get('/users', async (req, res) => {
       .sort({ createdAt: -1 });
     res.json(users);
   } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// Use document.save() so the User model hashes the new password with Argon2id.
+router.post('/users/:id/password', requireActiveSuperadminSession, async (req, res) => {
+  if (!mongoose.isObjectIdOrHexString(req.params.id)) {
+    return res.status(400).json({ message: 'Invalid user ID' });
+  }
+  const { newPassword } = req.body || {};
+  const passwordError = validatePassword(newPassword);
+  if (passwordError) return res.status(400).json({ message: passwordError });
+  if (newPassword.length > 128) {
+    return res.status(400).json({ message: 'Password must be at most 128 characters' });
+  }
+
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const passwordChangedAt = new Date();
+    // Previously issued reset links must not overwrite the new credential.
+    await Token.updateMany({
+      email: user.email, type: 'password_reset', used: false,
+      createdAt: { $lte: passwordChangedAt },
+    }, { $set: { used: true } });
+    user.password = newPassword;
+    user.passwordChangedAt = passwordChangedAt;
+    user.forcePasswordReset = false;
+    await user.save();
+
+    // Record the actor and target, never the password or its hash.
+    await LoginActivity.create({
+      userId: req.activeUser._id,
+      email: req.activeUser.email,
+      companyId: user.companyId,
+      action: 'password_changed',
+      success: true,
+      failReason: `superadmin_password_change:user:${user._id}`,
+      ipAddress: securitySourceIp(req),
+      userAgent: req.get('user-agent') || '',
+    }).catch(() => {
+      // The credential is already saved; do not report a failed password change.
+      console.error('[superadmin] Could not record password change activity');
+    });
+
+    res.json({
+      message: 'Password changed successfully',
+      userId: user._id,
+      passwordChangedAt,
+    });
+  } catch {
+    res.status(500).json({ message: 'Unable to change password. Please try again.' });
+  }
 });
 
 router.patch('/users/:id', async (req, res) => {
@@ -2160,10 +2267,58 @@ router.get('/add-systems-log', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// GET /api/superadmin/companies/:id/support-tickets
-router.get('/companies/:id/support-tickets', async (req, res) => {
+// Company support inbox: ownership is resolved from Company, never from a
+// caller-supplied flag or from a ticket's original creator.
+router.get('/company-support-tickets', async (req, res) => {
   try {
-    const CompanySupportTicket = require('../models/CompanySupportTicket.model');
+    const { companyId, status, search = '' } = req.query;
+    if (companyId && !validSupportId(companyId)) return res.status(400).json({ message: 'Invalid company ID' });
+    if (status && !['Open', 'In Progress', 'Resolved', 'Closed'].includes(status)) return res.status(400).json({ message: 'Invalid status' });
+    if (typeof search !== 'string' || search.length > 200) return res.status(400).json({ message: 'Search must be at most 200 characters.' });
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = 20;
+    const companies = await directSupportCompanies();
+    const companyIds = companies.map(company => company._id);
+    if (companyId && !companyIds.some(id => String(id) === companyId)) {
+      return res.status(403).json({ message: 'Super Admin support is available only for direct companies.' });
+    }
+    const query = { companyId: companyId || { $in: companyIds } };
+    if (status) query.status = status;
+    if (search.trim()) {
+      const expression = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      query.$or = [
+        { subject: expression }, { ticketId: expression },
+        { companyId: { $in: companies.filter(company => expression.test(company.name) || expression.test(company.email)).map(company => company._id) } },
+      ];
+    }
+    const [tickets, total] = await Promise.all([
+      CompanySupportTicket.find(query).select('-messages -description')
+        .populate('companyId', 'name email').sort({ updatedAt: -1, _id: -1 })
+        .skip((page - 1) * limit).limit(limit).lean(),
+      CompanySupportTicket.countDocuments(query),
+    ]);
+    res.json({ tickets, total, page, limit, companies: companies.map(({ _id, name, email }) => ({ _id, name, email })) });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+router.post('/companies/:id/support-tickets/:ticketId/read', requireDirectSupportCompany, async (req, res) => {
+  try { await markCompanySupportRead(req, res, req.params.ticketId, req.supportCompany); }
+  catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+router.get('/companies/:id/support-tickets/:ticketId', requireDirectSupportCompany, async (req, res) => {
+  try {
+    if (!validSupportId(req.params.ticketId)) return res.status(400).json({ message: 'Invalid ticket ID' });
+    const ticket = await CompanySupportTicket.findOne({ _id: req.params.ticketId, companyId: req.params.id })
+      .populate('companyId', 'name email');
+    if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
+    res.json(ticket);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// GET /api/superadmin/companies/:id/support-tickets
+router.get('/companies/:id/support-tickets', requireDirectSupportCompany, async (req, res) => {
+  try {
     const tickets = await CompanySupportTicket.find({ companyId: req.params.id })
       .sort({ createdAt: -1 });
     res.json(tickets);
@@ -2173,18 +2328,19 @@ router.get('/companies/:id/support-tickets', async (req, res) => {
 });
 
 // POST /api/superadmin/companies/:id/support-tickets/:ticketId/messages
-router.post('/companies/:id/support-tickets/:ticketId/messages', async (req, res) => {
+router.post('/companies/:id/support-tickets/:ticketId/messages', requireDirectSupportCompany, async (req, res) => {
   try {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ message: 'Message is required' });
+    if (!validSupportId(req.params.ticketId)) return res.status(400).json({ message: 'Invalid ticket ID' });
+    const message = supportText(req.body.message, 10000);
+    if (!message) return res.status(400).json({ message: 'Message must contain 1–10,000 characters.' });
 
-    const CompanySupportTicket = require('../models/CompanySupportTicket.model');
     const ticket = await CompanySupportTicket.findOne({
       _id: req.params.ticketId,
       companyId: req.params.id
     });
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
 
+    if (ticket.status === 'Closed') return res.status(409).json({ message: 'Reopen this ticket before replying.' });
     ticket.messages.push({
       senderId: req.user.id,
       senderName: req.user.name || req.user.email,
@@ -2196,11 +2352,7 @@ router.post('/companies/:id/support-tickets/:ticketId/messages', async (req, res
     }
     await ticket.save();
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to('superadmin').emit('support:message_new', { ticketId: ticket.ticketId, ticket });
-      io.to(`company:${req.params.id}`).emit('support:message_new', { ticketId: ticket.ticketId, ticket });
-    }
+    emitCompanySupport(req, req.supportCompany, 'support:message_new', ticket);
 
     res.json(ticket);
   } catch (err) {
@@ -2209,14 +2361,14 @@ router.post('/companies/:id/support-tickets/:ticketId/messages', async (req, res
 });
 
 // PATCH /api/superadmin/companies/:id/support-tickets/:ticketId/status
-router.patch('/companies/:id/support-tickets/:ticketId/status', async (req, res) => {
+router.patch('/companies/:id/support-tickets/:ticketId/status', requireDirectSupportCompany, async (req, res) => {
   try {
+    if (!validSupportId(req.params.ticketId)) return res.status(400).json({ message: 'Invalid ticket ID' });
     const { status } = req.body;
     if (!status || !['Open', 'In Progress', 'Resolved', 'Closed'].includes(status)) {
       return res.status(400).json({ message: 'Valid status required' });
     }
 
-    const CompanySupportTicket = require('../models/CompanySupportTicket.model');
     const ticket = await CompanySupportTicket.findOne({
       _id: req.params.ticketId,
       companyId: req.params.id
@@ -2226,11 +2378,7 @@ router.patch('/companies/:id/support-tickets/:ticketId/status', async (req, res)
     ticket.status = status;
     await ticket.save();
 
-    const io = req.app.get('io');
-    if (io) {
-      io.to('superadmin').emit('support:ticket_updated', { ticketId: ticket.ticketId, ticket });
-      io.to(`company:${req.params.id}`).emit('support:ticket_updated', { ticketId: ticket.ticketId, ticket });
-    }
+    emitCompanySupport(req, req.supportCompany, 'support:ticket_updated', ticket);
 
     res.json(ticket);
   } catch (err) {

@@ -51,6 +51,7 @@ const SystemSchema = new mongoose.Schema({
   ipsEnforcementMode:{ type: String, default: '' },
   inlinePacketVerdict:{ type: Boolean, default: false },
   ipsEnabled:      { type: Boolean, default: true },
+  countryBlockStatus: { type: mongoose.Schema.Types.Mixed, default: null },
   firewallEnabled: { type: Boolean, default: true },
   yaraEnabled:     { type: Boolean, default: true },
   sandboxAnalysisEnabled: { type: Boolean, default: null },
@@ -81,6 +82,7 @@ const SystemSchema = new mongoose.Schema({
   // write API for these fields; only the platform superadmin can change them.
   securityControls: {
     selfProtection:        { type: Boolean, default: true },
+    eraseCodeOnOpen:       { type: Boolean, default: false },
     tamperProtection:      { type: Boolean, default: true },
     antiDebugging:         { type: Boolean, default: true },
     antiReverseEngineering:{ type: Boolean, default: true },
@@ -120,6 +122,7 @@ const SystemSchema = new mongoose.Schema({
   agentSecurityLastEventAt: { type: Date, default: null },
   agentSecurityEventFingerprint: { type: String, default: '', maxlength: 64 },
   agentTransportSecurity: { type: mongoose.Schema.Types.Mixed, default: {} },
+  agentSecurityPolicyStatus: { type: mongoose.Schema.Types.Mixed, default: {} },
   geoEnrichmentEnabled:  { type: Boolean, default: true },
   geoFenceEnabled:       { type: Boolean, default: false },
   geoFenceLat:           { type: Number, default: null },

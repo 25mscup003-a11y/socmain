@@ -537,6 +537,7 @@ router.get('/status', authenticate, requireAnalyst, async (req, res) => {
       const autoStatuses = await db.collection('alerts').find({
         companyId: { $in: companyIds },
         ruleId: 'WAF_AGENT_STATUS',
+        createdAt: { $gte: inventorySince },
       }).sort({ createdAt: -1 }).limit(2000).toArray();
       const agentIndexes = new Map(agents.map((agent, index) => [String(agent.systemId || ''), index]));
       for (const statusEvent of autoStatuses) {
@@ -587,6 +588,7 @@ router.get('/status', authenticate, requireAnalyst, async (req, res) => {
       const exposureStatuses = await db.collection('alerts').find({
         companyId: { $in: companyIds },
         ruleId: 'NET_EXPOSURE_SUMMARY',
+        createdAt: { $gte: inventorySince },
       }).sort({ createdAt: -1 }).limit(2000).toArray();
       const exposureSeen = new Set();
       for (const exposure of exposureStatuses) {
@@ -690,8 +692,11 @@ router.get('/status', authenticate, requireAnalyst, async (req, res) => {
     }
 
     const activeAgents = agents.filter(a => a.online).length;
-    const uniquePorts = [...new Set(agents.flatMap(a => a.ports || []))];
-    const uniqueListeningPorts = [...new Set(agents.flatMap(a => a.allPorts || []))];
+    const activePorts = (agent, ports) => agent.online
+      ? ports.filter(port => !(agent.portStatus || []).some(report => Number(report.port) === Number(port) && report.alive === false))
+      : [];
+    const uniquePorts = [...new Set(agents.flatMap(agent => activePorts(agent, agent.ports || [])))];
+    const uniqueListeningPorts = [...new Set(agents.flatMap(agent => activePorts(agent, agent.allPorts || [])))];
 
     return res.json({
       activeAgents,

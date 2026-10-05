@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import threading
@@ -129,6 +130,8 @@ def secure_request(config, method, url, **kwargs):
         raise RuntimeError('Refusing plaintext agent transport; HTTPS is required')
     if parsed.scheme.lower() not in ('https', 'http'):
         raise RuntimeError('Unsupported agent transport scheme')
+    if kwargs.get('verify') is False:
+        raise RuntimeError('TLS certificate verification cannot be disabled')
 
     # Protect all AJNAT API control-plane JSON independently of HTTP/TLS. TLS
     # remains required by default because it also hides URLs and headers.
@@ -153,9 +156,22 @@ def secure_request(config, method, url, **kwargs):
         headers[TRANSPORT_HEADER] = TRANSPORT_VERSION
         headers[SYSTEM_HEADER] = system_id
         kwargs['headers'] = headers
+        kwargs['allow_redirects'] = False
 
         response = _session(config).request(method=method, url=url, **kwargs)
-        if str(response.headers.get(TRANSPORT_HEADER, '')).lower() == TRANSPORT_VERSION:
+        encrypted_response = str(response.headers.get(TRANSPORT_HEADER, '')).lower() == TRANSPORT_VERSION
+        if response.ok:
+            digest = str(response.headers.get('X-AJNAT-Response-SHA256', ''))
+            signature = str(response.headers.get('X-AJNAT-Response-Signature', ''))
+            expected = hmac.new(agent_key.encode(), f"AJNAT-RESPONSE-V1.{headers['x-agent-nonce']}.{response.status_code}.{digest}".encode(), hashlib.sha256).hexdigest()
+            if len(digest) != 64 or not hmac.compare_digest(expected, signature):
+                raise RuntimeError('AJNAT response signature missing, invalid or replayed')
+            if encrypted_response:
+                if not hmac.compare_digest(hashlib.sha256(response.content).hexdigest(), digest):
+                    raise RuntimeError('AJNAT response digest mismatch')
+            elif not kwargs.get('stream') or response.headers.get('X-AJNAT-Artifact-SHA256') != digest:
+                raise RuntimeError('Refusing unauthenticated plaintext API response')
+        if encrypted_response:
             # Reading content here also safely supports callers that requested a
             # streamed response; encrypted JSON must authenticate before use.
             encrypted = json.loads(response.content.decode('utf-8'))

@@ -1,0 +1,33 @@
+.whitelist-import-dialog { position: fixed; top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%); margin: 0; width: min(760px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; border: 1px solid #24533f; border-radius: 14px; background: #0b192a; color: #e2e8f0; box-shadow: 0 24px 90px #0009; font: 13px system-ui, sans-serif; }
+.whitelist-import-dialog::backdrop { background: #020817bd; backdrop-filter: blur(3px); }
+.whitelist-import-dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
+.whitelist-import-dialog header, .whitelist-import-dialog footer { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 20px 24px; }
+.whitelist-import-dialog header { border-bottom: 1px solid #20394d; }
+.whitelist-import-dialog h2 { font-size: 19px; margin: 0 0 6px; }
+.whitelist-import-dialog p { margin: 0; color: #96aac1; line-height: 1.6; }
+.whitelist-import-body { padding: 20px 24px; overflow-y: auto; min-height: 0; }
+.whitelist-import-body label { display: block; margin-bottom: 8px; font-weight: 600; }
+.whitelist-import-body label span { color: #96aac1; font-weight: 400; }
+.whitelist-import-dialog input, .whitelist-import-dialog textarea { display: block; width: 100%; box-sizing: border-box; border: 1px solid #2a455e; border-radius: 7px; background: #06121f; color: #e2e8f0; padding: 10px 12px; font: inherit; }
+.whitelist-import-dialog textarea { resize: vertical; min-height: 130px; max-height: 240px; line-height: 1.6; }
+.whitelist-import-dialog #whitelist-import-help { margin: 8px 0 20px; font-size: 12px; }
+.whitelist-import-dialog button { padding: 9px 14px; border: 1px solid #2a455e; border-radius: 7px; background: #10253a; color: #d9e6f4; font: inherit; cursor: pointer; }
+.whitelist-import-dialog button.primary { background: #137647; border-color: #1a995e; color: #fff; font-weight: 600; }
+.whitelist-import-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.whitelist-import-dialog :is(input, textarea, button):focus-visible { outline: 2px solid #4ade80; outline-offset: 2px; }
+.whitelist-import-dialog .whitelist-import-error { color: #fda4af; margin-top: 14px; }
+.whitelist-import-summary { margin: 18px 0 10px; color: #c5e8d5; }
+.whitelist-import-preview { border: 1px solid #20394d; border-radius: 8px; overflow-x: auto; max-height: 260px; }
+.whitelist-import-preview table { width: 100%; border-collapse: collapse; text-align: left; table-layout: fixed; }
+.whitelist-import-preview th, .whitelist-import-preview td { padding: 10px 12px; border-bottom: 1px solid #20394d; overflow-wrap: anywhere; vertical-align: top; }
+.whitelist-import-preview th { background: #07121f; color: #93a9bf; position: sticky; top: 0; font-size: 11px; }
+.whitelist-import-preview th:nth-child(2) { width: 90px; }
+.whitelist-import-preview code { color: #bbf7d0; font-size: 12px; }
+.whitelist-import-status { color: #a0b4ca; font-size: 12px; }
+.whitelist-import-status.imported, .whitelist-import-status.ready { color: #86efac; }
+.whitelist-import-status.failed, .whitelist-import-status.invalid { color: #fda4af; }
+.whitelist-import-preview small { display: block; color: #fda4af; margin-top: 5px; line-height: 1.5; }
+.whitelist-import-dialog footer { border-top: 1px solid #20394d; }
+.whitelist-import-dialog footer > span { color: #96aac1; font-size: 12px; }
+.whitelist-import-dialog footer > div { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 600px) { .whitelist-import-dialog header, .whitelist-import-body, .whitelist-import-dialog footer { padding: 16px; } .whitelist-import-dialog footer { align-items: stretch; flex-direction: column; gap: 12px; } .whitelist-import-dialog footer > div { justify-content: flex-end; } .whitelist-import-preview th:nth-child(2) { width: 64px; } .whitelist-import-preview td, .whitelist-import-preview th { padding: 8px; } }

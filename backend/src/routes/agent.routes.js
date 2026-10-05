@@ -13,6 +13,7 @@ const MemoryDetectionRule = require('../models/MemoryDetectionRule.model');
 const GeolocationPolicy = require('../models/GeolocationPolicy.model');
 const Firewall = require('../models/Firewall.model');
 const IpsWhitelist = require('../models/IpsWhitelist.model');
+const CountryBlock = require('../services/countryBlock.service');
 const Alert = require('../models/Alert.model');
 const AgentSecurityAudit = require('../models/AgentSecurityAudit.model');
 const DnsSinkholeConfig = require('../models/DnsSinkholeConfig.model');
@@ -35,10 +36,11 @@ const { getSubscriptionEntitlement } = require('../utils/subscriptionEntitlement
 const { resolveIdsHeartbeat } = require('../utils/agentCapabilities');
 const { resolvePackageForSystem, defaultPackageForSystem } = require('../utils/agentPackageProfile');
 const { CAPABILITY_GROUPS, listAttackTypes } = require('../constants/idsIpsCapabilities');
+const { securityPolicySnapshot, sanitizeControlReport, securityPolicyMatchesReport } = require('../utils/agentSecurityPolicy');
 
 // Desktop and Android releases have independent version lines. A single global
 // value previously made a v3.x Windows install "update" to Android v0.x.
-const AGENT_VERSION = process.env.AGENT_VERSION || '0.1.10';
+const AGENT_VERSION = process.env.AGENT_VERSION || '0.1.13';
 const ANDROID_AGENT_VERSION = process.env.ANDROID_AGENT_VERSION || '0.1.4';
 const CREDENTIAL_SECURITY_RULE_IDS = Object.freeze([
   'CRED_DUMP_TOOL', 'CRED_LSASS_DUMP', 'CRED_SAM_SECRETS_DUMP', 'CRED_KERBEROS_ABUSE',
@@ -148,6 +150,10 @@ function sanitizeAgentSecurityReport(value, system, now) {
     file: String(item?.file || '').slice(0, 260),
     detail: String(item?.detail || '').slice(0, 300),
   })) : [];
+  if (integrityStatus === 'verified' && (!reportedHash || !manifestHash || !allowedHashes.length)) {
+    integrityStatus = 'unknown';
+    findings.push({ type: 'unverified_baseline', file: '', detail: 'A server package baseline and both reported hashes are required for verification' });
+  }
   if (allowedHashes.length && reportedHash && !allowedHashes.includes(reportedHash)) {
     integrityStatus = 'mismatch';
     if (!findings.some(item => item.type === 'server_hash_mismatch')) {
@@ -169,9 +175,10 @@ function sanitizeAgentSecurityReport(value, system, now) {
     : [];
   const debuggerDetected = value.debuggerDetected === true;
   const incidentActive = ['mismatch', 'missing', 'error'].includes(integrityStatus)
-    || debuggerDetected || analysisTools.length > 0;
+    || debuggerDetected || analysisTools.length > 0
+    || (system.agentSecurityIncidentActive === true && integrityStatus !== 'verified');
   const checkedAtValue = new Date(value.checkedAt || now);
-  const checkedAt = Number.isNaN(checkedAtValue.getTime()) ? now : checkedAtValue;
+  const checkedAt = Number.isNaN(checkedAtValue.getTime()) || checkedAtValue > now ? now : checkedAtValue;
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
     integrityStatus, reportedHash, debuggerDetected, analysisTools,
     findings: findings.map(item => [item.type, item.file, item.detail]),
@@ -607,6 +614,19 @@ router.post('/response-status', async (req, res) => {
   }
 });
 
+// Country datasets use the same signed agent identity as heartbeat.
+router.post('/country-block-policy', async (req, res) => {
+  try {
+    const auth = await verifySignedAgentRequest(req, { agentKey: req.body.agent_key });
+    if (!auth.ok) return res.status(auth.status).json({ message: auth.message });
+    const policy = await CountryBlock.enforcementPolicy(auth.system);
+    res.json(policy);
+  } catch (error) {
+    console.error('[country-block-policy]', error.message);
+    res.status(503).json({ message: 'Country IP ranges are temporarily unavailable. Existing blocks are retained.' });
+  }
+});
+
 // ── POST /api/agent/heartbeat — NO JWT, agent uses x-integration-secret ──────
 // MUST be defined BEFORE router.use(authenticate) so agent can reach it.
 router.post('/heartbeat', async (req, res) => {
@@ -692,6 +712,8 @@ router.post('/heartbeat', async (req, res) => {
       isActive: !shouldStop,
     };
     if (agent_version) heartbeatUpdate.agentVersion = agent_version;
+    const countryBlockReport = CountryBlock.sanitizeReport(req.body.countryBlockStatus);
+    if (countryBlockReport) heartbeatUpdate.countryBlockStatus = countryBlockReport;
     if (req.body.hostname) heartbeatUpdate.hostname = req.body.hostname;
     const currentIp = heartbeatIp(req);
     if (currentIp) heartbeatUpdate.ip = currentIp;
@@ -815,8 +837,30 @@ router.post('/heartbeat', async (req, res) => {
         });
       }
     }
+    const controlReport = sanitizeControlReport(req.body.agent_security, now);
+    if (controlReport) {
+      // Transport encryption is an observed property of this request.
+      if (controlReport.controls.secureCommunication && !req.agentEncryptedEnvelope) {
+        controlReport.controls.secureCommunication.state = 'error';
+        controlReport.controls.secureCommunication.detail = 'This heartbeat was not encrypted.';
+      }
+      heartbeatUpdate.agentSecurityPolicyStatus = controlReport;
+      const desired = securityPolicySnapshot(system);
+      const matches = securityPolicyMatchesReport(desired, controlReport);
+      if (matches) {
+        const result = controlReport.state === 'failed' ? 'failed' : 'success';
+        await AgentSecurityAudit.updateMany({ systemId: system._id, result: 'queued', action: 'SECURITY_CONTROLS_UPDATED',
+          'newValue.policyVersion': controlReport.version,
+        }, { $set: { result, 'newValue.agentResult': controlReport.error || 'Policy applied and reported by agent', 'newValue.completedAt': now } });
+        await AgentSecurityAudit.updateMany({ systemId: system._id, result: 'queued', action: 'SECURITY_CONTROLS_UPDATED',
+          'newValue.policyVersion': { $lt: controlReport.version },
+        }, { $set: { result: 'superseded', 'newValue.agentResult': 'A newer policy reached the agent first', 'newValue.completedAt': now } });
+        await System.updateOne({ _id: system._id }, { $pull: { pendingCommands: { command: 'security-policy-sync' } } });
+      }
+    }
     if (req.body.transport_security != null || req.agentEncryptedEnvelope) {
       const transportSecurity = sanitizeTransportSecurity(req.body.transport_security);
+      delete transportSecurity.api_payload_encryption;
       if (req.agentEncryptedEnvelope) {
         // This flag is observed by the server middleware, not trusted from the
         // agent's self-reported heartbeat fields.
@@ -832,19 +876,28 @@ router.post('/heartbeat', async (req, res) => {
       const { recordAgentCommandResult } = require('../services/ips.service');
       for (const result of req.body.security_action_results.slice(0, 20)) {
         if (mongoose.isValidObjectId(result?.auditId)) {
-          const status = result.ok === true ? 'success' : 'failed';
+          const command = (system.pendingCommands || []).find(item => String(item.auditId || '') === String(result.auditId));
+          const verified = command?.command !== 'verify-integrity' || agentSecurityReport?.integrityStatus === 'verified';
+          const status = result.ok === true && verified ? 'success' : 'failed';
           const audit = await AgentSecurityAudit.findOneAndUpdate(
-            { _id: result.auditId, systemId: system._id, result: 'queued' },
+            { _id: result.auditId, systemId: system._id, result: 'queued', 'newValue.command': { $nin: ['security-policy-sync', 'update'] } },
             {
               $set: {
                 result: status,
-                'newValue.agentResult': String(result.message || '').slice(0, 500),
+                'newValue.agentResult': verified ? String(result.message || '').slice(0, 500) : 'Agent report does not match the server package integrity baseline',
                 'newValue.completedAt': now,
               },
             },
             { new: true },
           ).lean();
           if (audit) req.app.get('io')?.to('superadmin').emit('agent-security:update', { systemId: system._id, audit });
+          // Audit-only legacy commands also need removal after acknowledgement;
+          // otherwise lockdown/recovery is executed on every heartbeat.
+          await System.updateOne({ _id: system._id }, { $pull: { pendingCommands: {
+            auditId: { $in: [String(result.auditId), new mongoose.Types.ObjectId(result.auditId)] },
+            command: { $nin: ['update', 'security-policy-sync'] },
+          } } });
+          continue;
         }
         if (result?.commandId && result?.command) {
           const command = String(result.command).toLowerCase();
@@ -944,6 +997,22 @@ router.post('/heartbeat', async (req, res) => {
         : { pendingCommands: { command: 'update' } };
     }
     await System.findByIdAndUpdate(system._id, heartbeatWrite);
+    if (pendingUpdateCommand?.auditId && (updateRequestConfirmed || failedUpdateRequestConfirmed)) {
+      await AgentSecurityAudit.updateOne({ _id: pendingUpdateCommand.auditId, systemId: system._id, result: 'queued' }, {
+        $set: { result: updateRequestConfirmed ? 'success' : 'failed', 'newValue.completedAt': now,
+          'newValue.agentResult': updateRequestConfirmed ? `Installed agent ${agent_version} confirmed after restart` : heartbeatUpdate.updateError },
+      });
+    }
+    // Recover completion after an old fallback heartbeat consumed the queue.
+    // The installed package still proves the exact request ID and version.
+    if (!pendingUpdateCommand && mongoose.isValidObjectId(reportedUpdateRequestId)
+      && reachedRecordedUpdateTarget && agentSecurityReport?.integrityStatus === 'verified'
+      && !['downloading', 'installing', 'failed'].includes(reportedStatus)) {
+      await AgentSecurityAudit.updateOne({ _id: reportedUpdateRequestId, systemId: system._id,
+        result: 'queued', 'newValue.command': 'update',
+      }, { $set: { result: 'success', 'newValue.completedAt': now,
+        'newValue.agentResult': `Installed agent ${agent_version} confirmed after restart (${reportedUpdateRequestId})` } });
+    }
 
     const nextUpdateStatus = heartbeatUpdate.updateStatus;
     if (nextUpdateStatus) {
@@ -1191,6 +1260,7 @@ router.post('/heartbeat', async (req, res) => {
     }).select('_id ruleName action direction conditions priority updatedAt').sort({ priority: 1 }).lean();
     const ipsWhitelist = await IpsWhitelist.find({ companyId: company._id })
       .select('value type updatedAt').sort({ value: 1 }).lean();
+    const countryBlockPolicy = await CountryBlock.getPolicy(system);
 
     res.json({
       active: true,
@@ -1203,23 +1273,9 @@ router.post('/heartbeat', async (req, res) => {
       heartbeat_interval_seconds: 60,
       // Server-authoritative protected policy. Agents must apply this snapshot
       // and must not accept local/company overrides for these core controls.
-      security_policy: {
-        self_protection: system.securityControls?.selfProtection !== false,
-        tamper_protection: system.securityControls?.tamperProtection !== false,
-        anti_debugging: system.securityControls?.antiDebugging !== false,
-        anti_reverse_engineering: system.securityControls?.antiReverseEngineering !== false,
-        anti_dump_protection: system.securityControls?.antiDumpProtection !== false,
-        integrity_verification: system.securityControls?.integrityVerification !== false,
-        secure_communication: system.securityControls?.secureCommunication !== false,
-        configuration_encryption: system.securityControls?.configurationEncryption !== false,
-        certificate_validation: system.securityControls?.certificateValidation !== false,
-        code_integrity_monitoring: system.securityControls?.codeIntegrityMonitoring !== false,
-        lockdown_mode: system.securityControls?.lockdownMode !== false,
-        maintenance_mode: system.securityControls?.maintenanceMode === true,
-        protection_level: system.securityControls?.protectionLevel || 'hardened',
-        policy_version: system.securityControls?.policyVersion || 1,
-      },
+      security_policy: securityPolicySnapshot(system),
       commands: pendingCommands,
+      country_blocks: countryBlockPolicy,
       firewall_rules: firewallRules.map(rule => ({
         ruleId: String(rule._id),
         ruleName: rule.ruleName,

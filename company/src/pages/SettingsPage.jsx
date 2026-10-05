@@ -10,6 +10,12 @@ import { openRazorpay } from '../utils/razorpay';
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const fmtInr = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const titleCase = (value) => String(value || '—').replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+const mergeSupportReadReceipts = (current, updated) => {
+  if (!current || current._id !== updated?._id) return current;
+  const receipts = new Map((updated.messages || []).filter(message => message.readAt).map(message => [message._id, message.readAt]));
+  if (!(current.messages || []).some(message => !message.readAt && receipts.has(message._id))) return current;
+  return { ...current, messages: current.messages.map(message => receipts.has(message._id) ? { ...message, readAt: message.readAt || receipts.get(message._id) } : message) };
+};
 const accountRoleLabel = role => ({
   company_admin: 'Company Admin',
   department_admin: 'Department Admin',
@@ -722,6 +728,43 @@ export default function SettingsPage() {
 
     return connectSocket(socket);
   }, [user?.role, company?._id, refreshCompany]);
+
+  useEffect(() => {
+    if (activeTab !== 'support' || user?.role === 'partner_admin' || !company?._id) return undefined;
+    const socket = io(SOCKET_URL, socketOptions);
+    socket.emit('join:company', company._id);
+    const onRead = event => {
+      setSupportTickets(current => current.map(item => mergeSupportReadReceipts(item, event?.ticket)));
+      setSelectedTicket(current => mergeSupportReadReceipts(current, event?.ticket));
+    };
+    socket.on('support:messages_read', onRead);
+    const disconnect = connectSocket(socket);
+    return () => { socket.off('support:messages_read', onRead); disconnect(); };
+  }, [activeTab, user?.role, company?._id]);
+
+  useEffect(() => {
+    if (activeTab !== 'support' || user?.role === 'partner_admin' || !selectedTicket) return undefined;
+    const messageIds = (selectedTicket.messages || []).filter(message => message._id && !message.readAt && ['superadmin', 'partner_admin'].includes(message.senderRole)).slice(0, 200).map(message => message._id);
+    if (!messageIds.length) return undefined;
+    const controller = new AbortController();
+    let pending = false;
+    const acknowledge = async () => {
+      if (document.visibilityState !== 'visible' || pending) return;
+      pending = true;
+      try {
+        const { data } = await api.post(`/company/support-tickets/${selectedTicket._id}/read`, { messageIds }, { signal: controller.signal });
+        if (!controller.signal.aborted) {
+          setSupportTickets(current => current.map(item => mergeSupportReadReceipts(item, data)));
+          setSelectedTicket(current => mergeSupportReadReceipts(current, data));
+        }
+      } catch { /* Keep unread until the server acknowledges a visible chat. */ }
+      finally { pending = false; }
+    };
+    acknowledge();
+    document.addEventListener('visibilitychange', acknowledge);
+    const timer = window.setInterval(acknowledge, 10000);
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', acknowledge); };
+  }, [activeTab, selectedTicket, user?.role]);
 
   // ── Change password ──
   const changePassword = async (e) => {
@@ -2465,7 +2508,12 @@ export default function SettingsPage() {
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 4, fontSize: 10, color: isMe ? '#bfdbfe' : '#94a3b8', fontWeight: 600 }}>
                         <span>{msg.senderName} ({msg.senderRole === 'superadmin' ? 'Super Admin' : msg.senderRole === 'partner_admin' ? 'Partner Admin' : 'Admin'})</span>
-                        <span>{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {isMe && <span aria-label={msg.readAt ? 'Read' : 'Sent'} title={msg.readAt ? `Read ${new Date(msg.readAt).toLocaleString()}` : 'Sent, not read yet'} style={{ display: 'inline-flex', color: msg.readAt ? '#38bdf8' : '#bfdbfe' }}>
+                            <svg width={msg.readAt ? 20 : 14} height="14" viewBox={msg.readAt ? '0 0 24 16' : '0 0 16 16'} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 8l4 4L14 3" />{msg.readAt && <path d="M10 8l4 4L22 3" />}</svg>
+                          </span>}
+                        </span>
                       </div>
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.message}</div>
                     </div>

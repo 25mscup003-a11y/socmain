@@ -1,0 +1,10 @@
+.sa-support-layout { height: 100vh; height: 100dvh; overflow: hidden; }
+.sa-support-layout > .sa-layout-header { flex-shrink: 0; }
+.sa-support-layout > main { display: flex; min-height: 0; }
+.sa-support-layout > main > div { flex: 1; width: 100%; min-height: 0; }
+
+@media (max-width: 768px) {
+  .sa-layout-header { flex-wrap: wrap; }
+  .sa-layout-header nav { order: 3; flex: 0 0 100%; }
+  .sa-layout-header .sa-layout-identity { display: none !important; }
+}

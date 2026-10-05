@@ -19,6 +19,39 @@ const { execFile } = require('child_process');
 // ── In-memory cache (tenant-scoped: "company:$id|$blockKey") ─────────────────
 const blocklistCache = new Map();
 const expiryTimers = new Map();
+const targetOperations = new Map();
+const MAX_TIMER_DELAY = 2 ** 31 - 1;
+
+// Shared host firewall rules need serialized updates, even across tenants.
+function withTargetLock(options, operation) {
+  const entry = options.rawBlockKey && blocklistCache.get(scopedKey(options.rawBlockKey, options.company));
+  const key = options.ip || entry?.ip || options.domain || entry?.domain || options.rawBlockKey || generateBlockKey(options);
+  const previous = targetOperations.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  targetOperations.set(key, current);
+  const cleanup = () => { if (targetOperations.get(key) === current) targetOperations.delete(key); };
+  current.then(cleanup, cleanup);
+  return current;
+}
+
+function ttlValue(value) {
+  if (!['number', 'string'].includes(typeof value) || String(value).trim() === '') {
+    throw new Error('ttlHours must be a finite, non-negative number');
+  }
+  const ttl = Number(value);
+  if (!Number.isFinite(ttl) || ttl < 0 || !Number.isFinite(new Date(Date.now() + ttl * 3600000).getTime())) {
+    throw new Error('ttlHours must be a finite, non-negative number');
+  }
+  return ttl;
+}
+
+function normalizeOptions(options) {
+  const normalized = { ...options };
+  if (net.isIP(normalized.ip) === 6 && !normalized.ip.includes('%')) {
+    normalized.ip = new URL(`http://[${normalized.ip}]/`).hostname.slice(1, -1);
+  }
+  return normalized;
+}
 const FIREWALL_MODE = String(process.env.IPS_FIREWALL_MODE || 'auto').toLowerCase();
 
 function _execFile(command, args = [], options = {}) {
@@ -45,10 +78,12 @@ async function _tryExec(command, args = [], options = {}) {
 
 // ── Direction helpers ─────────────────────────────────────────────────────────
 function normalizeDirection(dir = 'both') {
+  if (typeof dir !== 'string') throw new Error('Invalid direction');
   const d = (dir || 'both').toLowerCase().trim();
   if (d === 'inbound' || d === 'in') return 'inbound';
   if (d === 'outbound' || d === 'out') return 'outbound';
-  return 'both';
+  if (d === 'both') return 'both';
+  throw new Error('Invalid direction');
 }
 
 function scopedKey(blockKey, company) {
@@ -61,46 +96,42 @@ function _clearExpiry(cacheKey) {
   expiryTimers.delete(cacheKey);
 }
 
-function _scheduleExpiry(blockEntry) {
-  if (!blockEntry?.blockKey || !blockEntry?.expiresAt) return;
+function _scheduleExpiry(blockEntry, retryDelay = 0) {
+  if (!blockEntry?.blockKey) return;
   const cacheKey = scopedKey(blockEntry.blockKey, blockEntry.company);
   _clearExpiry(cacheKey);
-
+  if (!blockEntry.expiresAt) return;
   const delay = new Date(blockEntry.expiresAt).getTime() - Date.now();
   if (!Number.isFinite(delay)) return;
 
   const expire = async () => {
     expiryTimers.delete(cacheKey);
+    if (blocklistCache.get(cacheKey) !== blockEntry) return;
+    // Long TTLs are rearmed, never passed to setTimeout above its 32-bit limit.
+    if (!_isExpired(blockEntry)) return _scheduleExpiry(blockEntry);
     try {
-      await unblockTarget({
-        ip: blockEntry.ip,
-        port: blockEntry.port,
-        domain: blockEntry.domain,
-        application: blockEntry.application,
-        protocol: blockEntry.protocol,
-        direction: blockEntry.direction,
+      const result = await unblockTarget({
+        ...blockEntry,
+        port: blockEntry.portEnd ? `${blockEntry.port}-${blockEntry.portEnd}` : blockEntry.port,
         rawBlockKey: blockEntry.blockKey,
-        company: blockEntry.company,
+        expectedEntry: blockEntry,
       });
-      logger.info(`⏱️ TTL expired — automatically unblocked ${blockEntry.blockKey}`);
+      if (result.skipped) return;
+      logger.info(`TTL expired — automatically unblocked ${blockEntry.blockKey}`);
       if (typeof global.emitIPSEvent === 'function') {
         global.emitIPSEvent('unblock', {
-          action: 'unblock',
-          reason: 'Block TTL expired',
-          blockKey: blockEntry.blockKey,
-          ip: blockEntry.ip,
-          domain: blockEntry.domain,
-          company: blockEntry.company,
+          action: 'unblock', reason: 'Block TTL expired', blockKey: blockEntry.blockKey,
+          ip: blockEntry.ip, domain: blockEntry.domain, company: blockEntry.company,
           ts: new Date().toISOString(),
         });
       }
     } catch (err) {
       logger.error(`TTL auto-unblock failed for ${blockEntry.blockKey}: ${err.message}`);
+      if (blocklistCache.get(cacheKey) === blockEntry) _scheduleExpiry(blockEntry, 5 * 60 * 1000);
     }
   };
-
-  const timer = setTimeout(expire, Math.max(0, delay));
-  if (typeof timer.unref === 'function') timer.unref();
+  const timer = setTimeout(expire, Math.min(MAX_TIMER_DELAY, Math.max(0, delay, retryDelay)));
+  timer.unref?.();
   expiryTimers.set(cacheKey, timer);
 }
 
@@ -234,32 +265,48 @@ async function _ensureNftables() {
   if (typeof process.geteuid === 'function' && process.geteuid() !== 0) {
     return { success: false, error: 'nftables enforcement requires a root service; use endpoint-agent mode' };
   }
-  if (!(await _nftExists())) {
-    return { success: false, mode: 'log-only', error: 'nft command not available' };
+  if (!(await _nftExists())) return { success: false, error: 'nft command not available' };
+  const run = async (args, allowExisting = false) => {
+    const result = await _tryExec('nft', args);
+    if (result.error && !(allowExisting && /File exists/i.test(result.stderr))) {
+      throw new Error(result.stderr || result.error.message);
+    }
+    return result;
+  };
+  try {
+    await run(['add', 'table', 'inet', 'soc4'], true);
+    for (const [name, type] of [['blocked_ipv4', 'ipv4_addr;'], ['blocked_ipv6', 'ipv6_addr;']]) {
+      await run(['add', 'set', 'inet', 'soc4', name, '{', 'type', type, 'flags', 'interval;', '}'], true);
+    }
+    for (const [chain, address, suffix] of [['input', 'saddr', 'IN'], ['output', 'daddr', 'OUT']]) {
+      await run(['add', 'chain', 'inet', 'soc4', chain, '{', 'type', 'filter', 'hook', chain, 'priority', '-100;', 'policy', 'accept;', '}'], true);
+      const listed = await run(['list', 'chain', 'inet', 'soc4', chain]);
+      for (const [family, set, label] of [['ip', 'blocked_ipv4', 'IPV4'], ['ip6', 'blocked_ipv6', 'IPV6']]) {
+        if (!String(listed.stdout).includes(`@${set}`)) {
+          await run(['add', 'rule', 'inet', 'soc4', chain, family, address, `@${set}`, 'drop', 'comment', `SOC4_BLOCKLIST_${label}_${suffix}`]);
+        }
+      }
+    }
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
+}
 
-  await _tryExec('nft', ['add', 'table', 'inet', 'soc4']);
-  await _tryExec('nft', ['add', 'set', 'inet', 'soc4', 'blocked_ipv4', '{', 'type', 'ipv4_addr;', 'flags', 'interval;', '}']);
-  await _tryExec('nft', ['add', 'set', 'inet', 'soc4', 'blocked_ipv6', '{', 'type', 'ipv6_addr;', 'flags', 'interval;', '}']);
-  await _tryExec('nft', ['add', 'chain', 'inet', 'soc4', 'input', '{', 'type', 'filter', 'hook', 'input', 'priority', '-100;', 'policy', 'accept;', '}']);
-  await _tryExec('nft', ['add', 'chain', 'inet', 'soc4', 'output', '{', 'type', 'filter', 'hook', 'output', 'priority', '-100;', 'policy', 'accept;', '}']);
-
-  const input = await _tryExec('nft', ['list', 'chain', 'inet', 'soc4', 'input']);
-  const output = await _tryExec('nft', ['list', 'chain', 'inet', 'soc4', 'output']);
-  if (!String(input.stdout || '').includes('@blocked_ipv4')) {
-    await _tryExec('nft', ['add', 'rule', 'inet', 'soc4', 'input', 'ip', 'saddr', '@blocked_ipv4', 'drop', 'comment', 'SOC4_BLOCKLIST_IPV4_IN']);
-    await _tryExec('nft', ['add', 'rule', 'inet', 'soc4', 'input', 'ip6', 'saddr', '@blocked_ipv6', 'drop', 'comment', 'SOC4_BLOCKLIST_IPV6_IN']);
+function hostCriteriaError(criteria, bothDirectionsOnly = false) {
+  if (criteria.domain || criteria.application || criteria.port || (criteria.protocol && criteria.protocol !== 'all')
+      || (bothDirectionsOnly && criteria.direction !== 'both')) {
+    return 'This host firewall adapter supports IP-only blocks'
+      + (bothDirectionsOnly ? ' in both directions' : '')
+      + '; use endpoint-agent mode for port, protocol, domain, or application rules';
   }
-  if (!String(output.stdout || '').includes('@blocked_ipv4')) {
-    await _tryExec('nft', ['add', 'rule', 'inet', 'soc4', 'output', 'ip', 'daddr', '@blocked_ipv4', 'drop', 'comment', 'SOC4_BLOCKLIST_IPV4_OUT']);
-    await _tryExec('nft', ['add', 'rule', 'inet', 'soc4', 'output', 'ip6', 'daddr', '@blocked_ipv6', 'drop', 'comment', 'SOC4_BLOCKLIST_IPV6_OUT']);
-  }
-
-  return { success: true };
+  return null;
 }
 
 async function _applyNftablesBlock(criteria) {
   const { ip } = criteria;
+  const error = hostCriteriaError(criteria, true);
+  if (error) return { success: false, error };
   if (!ip || !net.isIP(ip)) return { success: false, error: 'nftables currently requires an IP target' };
   const ready = await _ensureNftables();
   if (!ready.success) return ready;
@@ -290,33 +337,46 @@ function _windowsRuleName(ip, direction) {
 
 async function _applyWindowsDefenderBlock(criteria) {
   const { ip, direction } = criteria;
+  const error = hostCriteriaError(criteria);
+  if (error) return { success: false, error };
   if (!ip || !net.isIP(ip)) return { success: false, error: 'Windows Defender Firewall requires an IP target' };
   const dirs = direction === 'outbound' ? ['Outbound'] : direction === 'inbound' ? ['Inbound'] : ['Inbound', 'Outbound'];
+  const created = [];
   for (const dir of dirs) {
     const displayName = _windowsRuleName(ip, dir);
-    await _tryExec('powershell.exe', [
-      '-NoProfile',
-      '-ExecutionPolicy', 'Bypass',
-      '-Command',
-      `if (-not (Get-NetFirewallRule -DisplayName '${displayName}' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName '${displayName}' -Direction ${dir} -Action Block -RemoteAddress '${ip}' -Profile Any | Out-Null }`,
+    const result = await _tryExec('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+      `$ErrorActionPreference = 'Stop'; if (-not (Get-NetFirewallRule -DisplayName '${displayName}' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName '${displayName}' -Direction ${dir} -Action Block -RemoteAddress '${ip}' -Profile Any | Out-Null; 'created' }`,
     ]);
+    if (result.error) {
+      for (const name of created) {
+        await _tryExec('powershell.exe', ['-NoProfile', '-Command', `Remove-NetFirewallRule -DisplayName '${name}' -ErrorAction Stop`]);
+      }
+      return { success: false, error: result.stderr || result.error.message };
+    }
+    if (String(result.stdout).trim() === 'created') created.push(displayName);
   }
   logger.block(`[Windows Defender Firewall] Block applied for ${ip}`);
   return { success: true, method: 'windows-defender' };
 }
 
-async function _removeWindowsDefenderBlock(entry) {
-  const { ip } = entry;
+async function _removeWindowsDefenderBlock(entry, resolvedKey) {
+  const { ip, direction } = entry;
   if (!ip || !net.isIP(ip)) return { success: false, error: 'Windows Defender Firewall unblock requires an IP target' };
-  const result = await _tryExec('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy', 'Bypass',
-    '-Command',
-    `Get-NetFirewallRule -DisplayName 'SOC4 Block * ${ip}' -ErrorAction SilentlyContinue | Remove-NetFirewallRule`,
-  ]);
-  if (result.error) return { success: false, error: result.stderr || result.error.message };
-  logger.info(`[Windows Defender Firewall] Block removed for ${ip}`);
-  return { success: true, method: 'windows-defender' };
+  const dirs = direction === 'outbound' ? ['Outbound'] : direction === 'inbound' ? ['Inbound'] : ['Inbound', 'Outbound'];
+  let sharedRuleRetained = false;
+  for (const dir of dirs) {
+    const shared = [...blocklistCache.entries()].some(([key, value]) => key !== resolvedKey
+      && value.ip === ip && value.method === 'windows-defender'
+      && (value.direction === 'both' || value.direction === dir.toLowerCase()));
+    if (shared) { sharedRuleRetained = true; continue; }
+    const name = _windowsRuleName(ip, dir);
+    const result = await _tryExec('powershell.exe', ['-NoProfile', '-Command',
+      `$ErrorActionPreference = 'Stop'; Get-NetFirewallRule -DisplayName '${name}' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction Stop`,
+    ]);
+    if (result.error) return { success: false, error: result.stderr || result.error.message };
+  }
+  return { success: true, method: 'windows-defender', sharedRuleRetained };
 }
 
 // ── Apply Block via pfSense ───────────────────────────────────────────────────
@@ -407,18 +467,31 @@ async function _removeOPNsenseBlock(entry) {
 
 // ── Parse port field ──────────────────────────────────────────────────────────
 function _parsePort(portField) {
-  if (!portField) return { port: null, portEnd: null };
-  const str = String(portField).trim();
-  if (str.includes('-')) {
-    const [p, e] = str.split('-').map(Number);
-    return { port: isNaN(p) ? null : p, portEnd: isNaN(e) ? null : e };
+  if (portField === undefined || portField === null || portField === '') return { port: null, portEnd: null };
+  if (!['string', 'number'].includes(typeof portField) || !/^\d+(?:-\d+)?$/.test(String(portField).trim())) {
+    throw new Error('Invalid port or port range');
   }
-  const p = parseInt(str, 10);
-  return { port: isNaN(p) ? null : p, portEnd: null };
+  const [port, portEnd = null] = String(portField).trim().split('-').map(Number);
+  if (!Number.isInteger(port) || port < 1 || port > 65535
+      || (portEnd !== null && (!Number.isInteger(portEnd) || portEnd < port || portEnd > 65535))) {
+    throw new Error('Invalid port or port range');
+  }
+  return { port, portEnd };
+}
+
+function validateProtocol(protocol) {
+  if (protocol != null && !['tcp', 'udp', 'icmp', 'icmpv6', 'all'].includes(protocol)) {
+    throw new Error('Invalid protocol');
+  }
 }
 
 // ── Public: Block Target ──────────────────────────────────────────────────────
-async function blockTarget(options = {}) {
+function blockTarget(options = {}) {
+  const normalized = normalizeOptions(options);
+  return withTargetLock(normalized, () => _blockTarget(normalized));
+}
+
+async function _blockTarget(options) {
   const {
     ip, domain, application,
     protocol, direction = 'both',
@@ -430,13 +503,18 @@ async function blockTarget(options = {}) {
 
   const { port, portEnd } = _parsePort(options.port);
   const dir = normalizeDirection(direction);
+  validateProtocol(protocol);
 
   if (!ip && !domain && !application && !port && (!protocol || protocol === 'all')) {
     throw new Error('At least one of: ip, domain, application, port, or protocol is required');
   }
   if (ip && !isValidIP(ip)) throw new Error(`Invalid IP address: ${ip}`);
+  if ((domain && typeof domain !== 'string') || (application && typeof application !== 'string')) {
+    throw new Error('Domain and application targets must be strings');
+  }
   if (port && (port < 1 || port > 65535)) throw new Error(`Invalid port: ${port}`);
 
+  const ttl = ttlValue(ttlHours);
   const blockKey = generateBlockKey({ ip, port, portEnd, domain, application, protocol, direction: dir });
   const cacheKey = scopedKey(blockKey, company);
 
@@ -455,7 +533,7 @@ async function blockTarget(options = {}) {
       agentName: agentName || existing.agentName,
       agentHostname: agentHostname || existing.agentHostname,
       agentIp: agentIp || existing.agentIp,
-      ttlHours: Math.max(0, Number(ttlHours) || Number(existing.ttlHours) || 0),
+      ttlHours: ttl,
       ts: now,
       updatedAt: now,
       status: 'blocked',
@@ -471,13 +549,14 @@ async function blockTarget(options = {}) {
       const db = getDB();
       if (db) {
         await db.collection('firewall_blocks').updateOne(
-          { blockKey, ...(company && { company }) },
+          { blockKey, company: company || null },
           { $set: refreshed },
           { upsert: true }
         );
       }
     } catch (err) {
       logger.error(`Failed to refresh existing block timestamp: ${err.message}`);
+      throw Object.assign(new Error('Block active, but persistence update failed; retry the block'), { statusCode: 503 });
     }
 
     logger.warn(`Target already blocked, timestamp refreshed: ${blockKey}`);
@@ -489,6 +568,11 @@ async function blockTarget(options = {}) {
       ts: refreshed.ts,
       expiresAt: refreshed.expiresAt,
       ttlHours: refreshed.ttlHours,
+      method: refreshed.method || 'log-only',
+      enforced: ['nftables', 'windows-defender'].includes(refreshed.method),
+      delegated: refreshed.method === 'endpoint-agent',
+      direction: refreshed.direction,
+      description: formatBlockDescription(refreshed),
     };
   }
 
@@ -533,9 +617,9 @@ async function blockTarget(options = {}) {
     agentName: agentName || undefined,
     agentHostname: agentHostname || undefined,
     agentIp: agentIp || undefined,
-    ttlHours: Math.max(0, Number(ttlHours) || 0),
-    expiresAt: Number(ttlHours) > 0
-      ? new Date(Date.now() + (Number(ttlHours) * 60 * 60 * 1000))
+    ttlHours: ttl,
+    expiresAt: ttl > 0
+      ? new Date(Date.now() + (ttl * 60 * 60 * 1000))
       : null,
     company: company || undefined,
     ruleId,
@@ -547,10 +631,11 @@ async function blockTarget(options = {}) {
   try {
     const db = getDB();
     if (db) {
-      await db.collection('firewall_blocks').updateOne({ blockKey, ...(company && { company }) }, { $set: blockEntry }, { upsert: true });
+      await db.collection('firewall_blocks').updateOne({ blockKey, company: company || null }, { $set: blockEntry }, { upsert: true });
     }
   } catch (err) {
     logger.error(`Failed to persist block: ${err.message}`);
+    throw Object.assign(new Error('Block active, but persistence failed; retry the block'), { statusCode: 503 });
   }
 
   return {
@@ -574,44 +659,45 @@ async function blockIP(ip, reason = 'Blocked via webhook') {
 }
 
 // ── Public: Unblock Target ────────────────────────────────────────────────────
-async function unblockTarget(options = {}) {
+function unblockTarget(options = {}) {
+  const normalized = normalizeOptions(options);
+  return withTargetLock(normalized, () => _unblockTarget(normalized));
+}
+
+async function _unblockTarget(options) {
   const { ip, domain, application, protocol, direction = 'both', rawBlockKey, company } = options;
   const { port, portEnd } = _parsePort(options.port);
   const dir = normalizeDirection(direction);
+  validateProtocol(protocol);
 
-  if (!ip && !domain && !application && !port && (!protocol || protocol === 'all')) {
+  if (!rawBlockKey && !ip && !domain && !application && !port && (!protocol || protocol === 'all')) {
     throw new Error('At least one of: ip, domain, application, port, or protocol is required');
   }
 
   const generatedKey = generateBlockKey({ ip, port, portEnd, domain, application, protocol, direction: dir });
   const cacheKey     = scopedKey(generatedKey, company);
-  let rawCacheKey    = rawBlockKey ? scopedKey(rawBlockKey, company) : null;
-
-  let entry     = blocklistCache.get(cacheKey);
-  let resolvedKey = cacheKey;
-
-  if (!entry && rawCacheKey) {
-    entry = blocklistCache.get(rawCacheKey);
-    if (entry) resolvedKey = rawCacheKey;
+  const rawCacheKey = rawBlockKey ? scopedKey(rawBlockKey, company) : null;
+  // A supplied key identifies one exact rule. Never fall back to another
+  // tenant or another port/direction just because the target IP is the same.
+  const resolvedKey = rawCacheKey || cacheKey;
+  const entry = blocklistCache.get(resolvedKey);
+  if (options.expectedEntry && entry !== options.expectedEntry) return { skipped: true };
+  if (!entry) {
+    return { action: 'unblock', blockKey: rawBlockKey || generatedKey, enforced: false, method: 'none', note: 'not blocked' };
   }
-
-  if (!entry && (ip || domain)) {
-    for (const [k, v] of blocklistCache.entries()) {
-      if ((ip && v.ip === ip) || (domain && v.domain === domain)) {
-        entry = v; resolvedKey = k; break;
-      }
-    }
-  }
-
-  const fallbackEntry = entry || { ip, port, portEnd, domain, application, protocol, direction: dir };
+  const fallbackEntry = entry;
 
   let enforcement;
   try {
-    const fwType = _getFirewallType();
+    const fwType = entry.method || _getFirewallType();
     if (fwType === 'nftables') {
-      enforcement = await _removeNftablesBlock(fallbackEntry);
+      const shared = [...blocklistCache.entries()].some(([key, value]) =>
+        key !== resolvedKey && value.ip === entry.ip && value.method === 'nftables');
+      enforcement = shared
+        ? { success: true, method: 'nftables', sharedRuleRetained: true }
+        : await _removeNftablesBlock(fallbackEntry);
     } else if (fwType === 'windows-defender') {
-      enforcement = await _removeWindowsDefenderBlock(fallbackEntry);
+      enforcement = await _removeWindowsDefenderBlock(fallbackEntry, resolvedKey);
     } else if (fwType === 'endpoint-agent') {
       logger.info(`[ENDPOINT-AGENT] Delegated unblock for ${resolvedKey}`);
       enforcement = { success: true, enforced: false, delegated: true, method: 'endpoint-agent' };
@@ -625,32 +711,25 @@ async function unblockTarget(options = {}) {
     throw new Error(`Firewall unblock failed for ${resolvedKey}: ${err.message}`);
   }
 
-  blocklistCache.delete(cacheKey);
-  _clearExpiry(cacheKey);
-  if (rawCacheKey && rawCacheKey !== cacheKey) blocklistCache.delete(rawCacheKey);
-  if (rawCacheKey && rawCacheKey !== cacheKey) _clearExpiry(rawCacheKey);
-  if (resolvedKey !== cacheKey && resolvedKey !== rawCacheKey) blocklistCache.delete(resolvedKey);
-  if (resolvedKey !== cacheKey && resolvedKey !== rawCacheKey) _clearExpiry(resolvedKey);
-
+  blocklistCache.delete(resolvedKey);
+  _clearExpiry(resolvedKey);
   try {
     const db = getDB();
     if (db) {
-      const orFilter = [{ blockKey: generatedKey }];
-      if (rawBlockKey) orFilter.push({ blockKey: rawBlockKey });
-      if (ip) orFilter.push({ ip });
-      if (domain) orFilter.push({ domain });
-      await db.collection('firewall_blocks').deleteMany({
-        $or: orFilter,
-        ...(company && { company }),
-      });
+      await db.collection('firewall_blocks').deleteOne({ blockKey: entry.blockKey, company: company || null });
     }
   } catch (err) {
     logger.error(`Failed to remove block from DB: ${err.message}`);
+    // Keep retryable state rather than resurrecting this rule on restart.
+    blocklistCache.set(resolvedKey, entry);
+    _scheduleExpiry(entry, 5 * 60 * 1000);
+    throw new Error('Firewall rule removed, but persistence cleanup failed; retry the unblock');
   }
 
   return {
     action: 'unblock',
-    blockKey: resolvedKey,
+    blockKey: entry.blockKey,
+    sharedRuleRetained: enforcement.sharedRuleRetained === true,
     enforced: enforcement.enforced !== false,
     method: enforcement.method || 'unknown',
     delegated: enforcement.delegated === true,
@@ -663,23 +742,8 @@ async function unblockIP(ip) { return unblockTarget({ ip }); }
 function getBlocklist(company) {
   const prefix = company ? `company:${company}|` : '';
   const list = [];
-  const now = Date.now();
   blocklistCache.forEach((value, key) => {
-    if (_isExpired(value, now)) {
-      blocklistCache.delete(key);
-      _clearExpiry(key);
-      unblockTarget({
-        ip: value.ip,
-        port: value.port,
-        domain: value.domain,
-        application: value.application,
-        protocol: value.protocol,
-        direction: value.direction,
-        rawBlockKey: value.blockKey,
-        company: value.company,
-      }).catch(err => logger.warn(`Expired block cleanup failed for ${value.blockKey || key}: ${err.message}`));
-      return;
-    }
+    // Expired rules remain visible until firewall cleanup actually succeeds.
     if (!company) {
       list.push({ blockKey: value.blockKey || key, ...value });
       return;
@@ -714,20 +778,14 @@ async function loadPersistedBlocks() {
       collection.createIndex({ company: 1, blockKey: 1 }),
       collection.createIndex({ expiresAt: 1 }),
     ]);
-    await sweepExpiredBlocks();
-    const blocks = await collection.find({
-      status: 'blocked',
-      $or: [
-        { expiresAt: { $exists: false } },
-        { expiresAt: null },
-        { expiresAt: { $gt: new Date() } },
-      ],
-    }).toArray();
+    const blocks = await collection.find({ status: 'blocked' }).toArray();
     for (const block of blocks) {
-      const key = scopedKey(block.blockKey, block.company);
-      blocklistCache.set(key, block);
-      _scheduleExpiry(block);
+      blocklistCache.set(scopedKey(block.blockKey, block.company), block);
     }
+    // Load every reference first: removing an expired shared host rule must
+    // not remove a different tenant's still-active rule for the same IP.
+    await sweepExpiredBlocks();
+    for (const block of blocklistCache.values()) _scheduleExpiry(block);
     logger.info(`✅ Loaded ${blocks.length} persisted firewall blocks from MongoDB`);
     return blocks.length;
   } catch (err) {
@@ -752,13 +810,18 @@ async function sweepExpiredBlocks() {
     }).toArray();
     if (!expired.length) return 0;
 
+    const active = await db.collection('firewall_blocks').find({ status: 'blocked' }).toArray();
+    for (const block of active) {
+      const key = scopedKey(block.blockKey, block.company);
+      if (!blocklistCache.has(key)) blocklistCache.set(key, block);
+    }
     let removed = 0;
     let failed = 0;
     for (const block of expired) {
       try {
         await unblockTarget({
         ip: block.ip,
-        port: block.port,
+        port: block.portEnd ? `${block.port}-${block.portEnd}` : block.port,
         domain: block.domain,
         application: block.application,
         protocol: block.protocol,
@@ -809,13 +872,11 @@ async function clearAllBlocks() {
 
 // ── Validators / Formatters ───────────────────────────────────────────────────
 function isValidIP(ip) {
-  const ipv4 = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
-  const ipv6 = /^([a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}$/i;
-  if (ipv4.test(ip)) {
-    const base = ip.split('/')[0];
-    return base.split('.').every(p => { const n = parseInt(p, 10); return n >= 0 && n <= 255; });
-  }
-  return ipv6.test(ip);
+  if (typeof ip !== 'string' || ip.includes('%')) return false;
+  const parts = ip.split('/');
+  const version = net.isIP(parts[0]);
+  if (!version || parts.length > 2) return false;
+  return parts.length === 1 || (/^\d+$/.test(parts[1]) && Number(parts[1]) <= (version === 4 ? 32 : 128));
 }
 
 function isNonRoutableIP(ip) {

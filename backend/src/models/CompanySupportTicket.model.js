@@ -13,6 +13,7 @@ const CompanySupportTicketSchema = new mongoose.Schema({
     senderName: { type: String, required: true },
     senderRole: { type: String, required: true },
     message: { type: String, required: true },
+    readAt: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now }
   }]
 }, { timestamps: true });

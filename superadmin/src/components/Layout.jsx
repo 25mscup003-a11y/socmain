@@ -1,8 +1,11 @@
+import { useEffect, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import './Layout.css';
 import {
   LayoutGrid,
   Building2,
+  MessageSquare,
   UserCheck,
   Users,
   CreditCard,
@@ -10,6 +13,7 @@ import {
   BarChart3,
   ShieldAlert,
   Lock,
+  KeyRound,
   LogOut,
   ShieldCheck,
   Activity,
@@ -20,10 +24,30 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isSupportPage = /^\/(superadmin\/)?support\/?$/.test(location.pathname);
+  const navigation = useRef(null);
+
+  useEffect(() => {
+    const nav = navigation.current;
+    if (!nav) return;
+    const revealActiveTab = () => {
+      const activeTab = nav.querySelector('[aria-current="page"]');
+      if (!activeTab) return;
+      const tabBounds = activeTab.getBoundingClientRect();
+      const navBounds = nav.getBoundingClientRect();
+      if (tabBounds.right > navBounds.right) nav.scrollLeft += tabBounds.right - navBounds.right;
+      else if (tabBounds.left < navBounds.left) nav.scrollLeft += tabBounds.left - navBounds.left;
+    };
+    revealActiveTab();
+    const observer = new ResizeObserver(revealActiveTab);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [location.pathname]);
 
   const navItems = [
     { to: '/superadmin/dashboard', Icon: LayoutGrid, label: 'SOC Dashboard' },
     { to: '/superadmin/companies', Icon: Building2, label: 'Companies' },
+    { to: '/superadmin/support', Icon: MessageSquare, label: 'Support' },
     { to: '/superadmin/soc-managers', Icon: UserCheck, label: 'SOC Managers' },
     { to: '/superadmin/users?role=analyst', Icon: Users, label: 'Analysts' },
     { to: '/superadmin/payment-management', Icon: CreditCard, label: 'Payment Control' },
@@ -32,12 +56,13 @@ export default function Layout() {
     { to: '/superadmin/partner-company', Icon: Building2, label: 'Partner Companies' },
     { to: '/superadmin/fraud-intelligence', Icon: ShieldAlert, label: 'Fraud Intel' },
     { to: '/superadmin/agent-security', Icon: Lock, label: 'AJNAT Security' },
+    { to: '/superadmin/user-passwords', Icon: KeyRound, label: 'User Passwords' },
   ];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#070b14', color: '#f1f5f9' }}>
+    <div className={isSupportPage ? 'sa-support-layout' : undefined} style={{ display: 'flex', flexDirection: 'column', minHeight: isSupportPage ? 0 : '100vh', background: '#070b14', color: '#f1f5f9' }}>
       {user?.role === 'superadmin' && (
-        <header style={{
+        <header className="sa-layout-header" style={{
           position: 'sticky', top: 0, zIndex: 50, padding: '10px 24px',
           borderBottom: '1px solid #1e2a42', background: 'rgba(7, 11, 20, 0.92)',
           backdropFilter: 'blur(16px)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
@@ -65,7 +90,7 @@ export default function Layout() {
           </div>
 
           {/* Navigation links */}
-          <nav aria-label="Superadmin primary navigation" style={{ display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', scrollbarWidth: 'none', padding: '2px 0' }}>
+          <nav ref={navigation} aria-label="Superadmin primary navigation" style={{ display: 'flex', gap: 5, alignItems: 'center', minWidth: 0, overflowX: 'auto', scrollbarWidth: 'thin', padding: '2px 0' }}>
             {navItems.map(({ to, Icon, label }) => {
               const path = to.split('?')[0];
               const active = location.pathname === path || (path === '/superadmin/dashboard' && (location.pathname === '/superadmin' || location.pathname === '/superadmin/'));
@@ -88,7 +113,7 @@ export default function Layout() {
 
           {/* User profile & logout */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
-            <div style={{
+            <div className="sa-layout-identity" style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px',
               borderRadius: 8, background: '#0e1726', border: '1px solid #1b2a42'
             }}>

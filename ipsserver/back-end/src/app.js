@@ -8,16 +8,21 @@ const logger = require('./utils/logger');
 const corsMiddleware = require('./middlewares/cors');
 const authMiddleware = require('./middlewares/auth');
 const { handleRoute } = require('./routes');
+const { sendError } = require('./utils/response');
 
 /**
  * The core request handler (middleware chain → router)
  */
-function requestHandler(req, res) {
-  corsMiddleware(req, res, () => {
-    authMiddleware(req, res, () => {
-      handleRoute(req, res);
+async function requestHandler(req, res) {
+  try {
+    await corsMiddleware(req, res, () => {
+      return authMiddleware(req, res, () => handleRoute(req, res));
     });
-  });
+  } catch (error) {
+    logger.error(`[HTTP] Request failed: ${error.message}`);
+    if (!res.headersSent && !res.destroyed) sendError(res, 'Internal server error', 500);
+    else if (!res.writableEnded) res.end();
+  }
 }
 
 /**
