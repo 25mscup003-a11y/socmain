@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import PartnerRegistrationPage from './pages/PartnerRegistrationPage';
 import RegisterPage from './pages/RegisterPage';
+import RegistrationPaymentGate from './components/RegistrationPaymentGate';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import AcceptInvitePage from './pages/AcceptInvitePage';
@@ -185,7 +186,7 @@ export default function App() {
   return (
     <>
       <Toaster position="top-right" />
-      <Routes>
+      <RegistrationPaymentGate><Routes>
         {/* Public */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/partner-registration" element={<PartnerRegistrationPage />} />
@@ -488,7 +489,7 @@ export default function App() {
         <Route path="/live-network-map" element={<Guard><LiveNetworkMapPage /></Guard>} />
         <Route path="/edr-dashboard-details/*" element={<EDRSubRoutes Guard={Guard} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      </Routes></RegistrationPaymentGate>
     </>
   );
 }

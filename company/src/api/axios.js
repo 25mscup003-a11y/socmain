@@ -137,6 +137,10 @@ api.interceptors.response.use(
     }
 
     const token = authStorage.getItem('co_token') || authStorage.getItem('sa_token') || authStorage.getItem('token');
+    if (err.response?.status === 402 && err.response?.data?.code === 'REGISTRATION_PAYMENT_REQUIRED'
+      && !/^\/register(?:\/|$)/.test(window.location.pathname) && window.location.pathname !== '/checkout') {
+      window.location.replace('/register');
+    }
     if (err.response?.status === 401 && token && !isPublicAuthRequest(err.config?.url)) {
       if (String(err.config?.url || '').includes('/auth/me')) {
         redirectToLogin();

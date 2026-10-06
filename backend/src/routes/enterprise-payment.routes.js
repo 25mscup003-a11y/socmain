@@ -3,6 +3,7 @@ const EnterpriseQuote = require('../models/EnterpriseQuote.model');
 const { companyForEnterprise, quoteView, saveEnterpriseQuote } = require('../services/enterpriseQuote.service');
 const { emitCompanyPartnerUpdate } = require('../utils/partnerRealtime');
 const { calculateAddition } = require('../services/enterpriseAddition.service');
+const { calculateRenewal } = require('../services/enterpriseRenewal.service');
 
 module.exports = function enterprisePaymentRouter(payments) {
   const router = require('express').Router();
@@ -24,6 +25,8 @@ module.exports = function enterprisePaymentRouter(payments) {
   router.post('/create-order', handle(req => payments.createOrder(req.enterpriseCompany, req.body)));
   router.post('/addition/calculate', handle(req => calculateAddition(req.enterpriseCompany, req.body)));
   router.post('/addition/create-order', handle(req => payments.createAdditionOrder(req.enterpriseCompany, req.body)));
+  router.post('/renewal/calculate', handle(req => calculateRenewal(req.enterpriseCompany, req.body)));
+  router.post('/renewal/create-order', handle(req => payments.createRenewalOrder(req.enterpriseCompany, req.body)));
   router.post('/confirm', handle(async req => {
     const result = await payments.confirm(req.enterpriseCompany, req.body);
     void emitCompanyPartnerUpdate(req.app?.get?.('io'), req.enterpriseCompany._id, 'company_payment');

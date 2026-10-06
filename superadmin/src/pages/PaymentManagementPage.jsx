@@ -3,6 +3,7 @@ import api from '../api/axios';
 import Swal from 'sweetalert2';
 import EnterpriseManagement from '../components/EnterpriseManagement';
 import { useSearchParams } from 'react-router-dom';
+import { subscriptionStatus } from '../utils/subscriptionStatus';
 
 const fmtInr  = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
@@ -114,6 +115,12 @@ export default function PaymentManagementPage() {
     if (tab==='autopay')       { loadSubs(); }
   }, [tab]);
 
+  useEffect(() => {
+    if (tab !== 'subscriptions') return;
+    window.addEventListener('focus', loadSubs);
+    return () => window.removeEventListener('focus', loadSubs);
+  }, [tab, loadSubs]);
+
   // ── When user type changes, load that type's prices into the form ──
   const handleUserTypeChange = (type) => {
     setUserType(type);
@@ -197,8 +204,8 @@ export default function PaymentManagementPage() {
   // Filtered subs
   const filtSubs = subs.filter(s => {
     const m = !subsQ || s.name?.toLowerCase().includes(subsQ.toLowerCase()) || s.email?.toLowerCase().includes(subsQ.toLowerCase());
-    if (subsFilt==='active')  return m && s.status==='active';
-    if (subsFilt==='pending') return m && s.status==='pending_payment';
+    if (subsFilt==='active')  return m && subscriptionStatus(s).active;
+    if (subsFilt==='pending') return m && subscriptionStatus(s).pending;
     if (subsFilt==='autopay') return m && s.plan?.autoPay;
     return m;
   });
@@ -450,8 +457,8 @@ export default function PaymentManagementPage() {
           {/* Stats */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:24 }}>
             <StatCard icon="🏢" label="Total Companies"   value={subs.length} color="#60a5fa" />
-            <StatCard icon="✅" label="Active Plans"       value={subs.filter(s=>s.status==='active').length} color="#10b981" />
-            <StatCard icon="⏳" label="Pending Payment"    value={subs.filter(s=>s.status==='pending_payment').length} color="#f59e0b" />
+            <StatCard icon="✅" label="Active Plans"       value={subs.filter(s=>subscriptionStatus(s).active).length} color="#10b981" />
+            <StatCard icon="⏳" label="Pending Payment"    value={subs.filter(s=>subscriptionStatus(s).pending).length} color="#f59e0b" />
             <StatCard icon="🔄" label="AutoPay ON"         value={subs.filter(s=>s.plan?.autoPay).length} color="#a78bfa" />
           </div>
 
@@ -482,8 +489,9 @@ export default function PaymentManagementPage() {
               {filtSubs.length===0 ? (
                 <div style={{ textAlign:'center', color:'#4b5563', padding:'40px 20px', fontSize:14 }}>No subscriptions found</div>
               ) : filtSubs.map((s,i) => {
-                const active = s.plan?.isActive && new Date()<new Date(s.plan.expiresAt||0);
-                const expiring = s.plan?.expiresAt && (new Date(s.plan.expiresAt)-Date.now()) < 7*24*60*60*1000;
+                const { active, pending, expiresAt } = subscriptionStatus(s);
+                const remaining = expiresAt ? new Date(expiresAt).getTime() - Date.now() : null;
+                const expiring = active && remaining > 0 && remaining < 7*24*60*60*1000;
                 return (
 	                  <div key={s._id} style={{ display:'grid', gridTemplateColumns:'2fr .8fr .8fr .8fr 1fr 1fr 1fr 1fr', gap:2, padding:'14px 20px', borderTop:'1px solid #1e2d45', alignItems:'center', background: i%2===0?'transparent':'rgba(255,255,255,0.01)' }}>
                     <div>
@@ -495,12 +503,12 @@ export default function PaymentManagementPage() {
 	                    <div style={{ fontWeight:800, color:'#2dd4bf', fontSize:15 }}>{s.plan?.phoneCount||0}</div>
                     <div style={{ fontSize:12, color:'#6b7280', textTransform:'capitalize' }}>{s.plan?.billingCycle||'—'}</div>
                     <div>
-                      <span style={CSS.badge(active?'#10b981':'#ef4444')}>
-                        {active ? '✅ Active' : s.status==='pending_payment'?'⏳ Pending':'❌ Inactive'}
+                      <span style={CSS.badge(active?'#10b981':pending?'#f59e0b':'#ef4444')}>
+                        {active ? '✅ Active' : pending?'⏳ Pending':'❌ Inactive'}
                       </span>
                     </div>
                     <div style={{ fontSize:12, color: expiring&&active?'#f59e0b':'#6b7280' }}>
-                      {expiring&&active && '⚠️ '}{fmtDate(s.plan?.expiresAt)}
+                      {expiring && '⚠️ '}{fmtDate(expiresAt)}
                     </div>
                     <div>
                       <button onClick={()=>toggleAutoPay(s._id,s.plan?.autoPay)} disabled={apBusy[s._id]} style={{

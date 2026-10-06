@@ -1,0 +1,64 @@
+.er-renewals {
+  container: enterprise-renewals / inline-size;
+  color: #e2e8f0;
+}
+.er-renewals > h3 { margin: 0 0 18px; color: #c7d2fe; font-size: 16px; font-weight: 650; }
+.er-renewals .er-plan {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.85fr);
+  overflow: hidden;
+  margin-bottom: 20px;
+  border: 1px solid #2b3c59;
+  border-radius: 16px;
+  background: #0c192c;
+}
+.er-renewals .er-details { min-width: 0; padding: 28px; }
+.er-renewals .er-plan-header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.er-renewals .er-plan-icon { display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 48px; border: 1px solid #3c4175; border-radius: 12px; background: #222346; font-size: 25px; }
+.er-renewals .er-plan-heading { flex: 1; min-width: 120px; }
+.er-renewals .er-plan-heading h4 { margin: 0; color: #f1f5f9; font-size: 20px; line-height: 1.4; font-weight: 700; }
+.er-renewals .er-plan-heading p { margin: 3px 0 0; font-size: 13px; color: #94a3b8; }
+.er-renewals .er-badge { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border: 1px solid; border-radius: 30px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.er-renewals .er-badge > span { font-size: 8px; }
+.er-renewals .er-active { color: #5ee0b4; background: #0d302e; border-color: #18564b; }
+.er-renewals .er-expired { color: #fca5a5; background: #341e2a; border-color: #743344; }
+.er-renewals .er-counts { margin: 24px 0; color: #c7d2e7; font-size: 15px; line-height: 1.6; }
+.er-renewals dl { margin: 0; }
+.er-renewals dt { color: #94a3b8; font-size: 12px; line-height: 1.5; font-weight: 400; }
+.er-renewals dd { margin: 5px 0 0; color: #e2e8f0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.er-renewals .er-plan-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; padding-bottom: 24px; }
+.er-renewals .er-due { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 18px; border: 1px solid #303f67; border-radius: 10px; background: #141f3c; }
+.er-renewals .er-label { display: block; color: #a7b3cd; font-size: 12px; font-weight: 500; line-height: 1.5; }
+.er-renewals .er-due strong { display: block; margin-top: 4px; color: #dce2ff; font-size: 17px; }
+.er-renewals .er-remaining { color: #b1bcf5; font-size: 12px; }
+.er-renewals .er-due-overdue { border-color: #743344; background: #301e2b; }
+.er-renewals .er-due-overdue strong, .er-renewals .er-due-overdue .er-remaining { color: #fca5a5; }
+.er-renewals .er-note { margin: 12px 0 0; color: #94a3b8; font-size: 12px; line-height: 1.6; }
+.er-renewals .er-checkout { min-width: 0; padding: 28px; border-left: 1px solid #2b3c59; background: linear-gradient(145deg, #171f3c, #101b30); }
+.er-renewals .er-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 7px 0 20px; }
+.er-renewals .er-total strong { font-size: 32px; font-weight: 750; letter-spacing: -0.8px; line-height: 1.25; color: #f1f3ff; overflow-wrap: anywhere; }
+.er-renewals .er-total > span { color: #94a3b8; font-size: 13px; }
+.er-renewals .er-price-lines { display: grid; gap: 10px; }
+.er-renewals .er-price-lines > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.er-renewals .er-price-lines dd { margin: 0; font-size: 13px; white-space: nowrap; }
+.er-renewals .er-period { margin: 20px 0; padding-top: 16px; border-top: 1px solid #303a56; }
+.er-renewals .er-period strong { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 13px; line-height: 1.6; font-weight: 500; color: #ccd5ee; }
+.er-renewals .er-period strong > span { color: #818cf8; }
+.er-renewals .er-renew-button { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 46px; padding: 12px 16px; border: 1px solid #7771f5; border-radius: 9px; background: #554be6; color: #fff; font-size: 14px; font-weight: 650; line-height: 1.5; cursor: pointer; transition: background 150ms, box-shadow 150ms; }
+.er-renewals .er-renew-button:hover:not(:disabled) { background: #655bed; box-shadow: 0 4px 16px #4338ca35; }
+.er-renewals button:focus-visible { outline: 2px solid #c7d2fe; outline-offset: 4px; }
+.er-renewals button:disabled { opacity: 0.5; cursor: not-allowed; }
+.er-renewals .er-loading, .er-renewals .er-empty { color: #94a3b8; padding: 20px 0; font-size: 14px; }
+.er-renewals .er-error { margin: 16px 0; padding: 12px; background: #341e2a; border: 1px solid #743344; border-radius: 8px; color: #fecaca; font-size: 13px; line-height: 1.6; }
+.er-renewals .er-error p { margin: 0 0 8px; }
+.er-renewals .er-error button { border: 1px solid #a15c6b; border-radius: 6px; padding: 5px 9px; background: transparent; color: #fecaca; cursor: pointer; }
+@container enterprise-renewals (max-width: 760px) {
+  .er-renewals .er-plan { grid-template-columns: 1fr; }
+  .er-renewals .er-checkout { border-left: 0; border-top: 1px solid #2b3c59; }
+}
+@container enterprise-renewals (max-width: 420px) {
+  .er-renewals .er-details, .er-renewals .er-checkout { padding: 20px; }
+  .er-renewals .er-plan-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .er-renewals .er-plan-heading h4 { font-size: 18px; }
+  .er-renewals .er-counts { font-size: 13px; }
+}

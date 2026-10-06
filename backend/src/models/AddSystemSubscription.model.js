@@ -57,6 +57,7 @@ const AddSystemSubscriptionSchema = new mongoose.Schema({
   // Renewal tracking
   renewedFromId: { type: mongoose.Schema.Types.ObjectId, ref: 'AddSystemSubscription', default: null },
   renewalCount:  { type: Number, default: 0 },   // how many times this batch has been renewed
+  lastEnterpriseRenewalOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'EnterpriseRenewalOrder' },
 
   // Payment verification
   paymentStatus: { type: String, enum: ['paid', 'unpaid', 'failed'], default: 'paid' },

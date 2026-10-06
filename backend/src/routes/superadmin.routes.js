@@ -15,6 +15,7 @@ const Alert = require('../models/Alert.model');
 const System = require('../models/System.model');
 const Department = require('../models/Department.model');
 const PaymentHistory = require('../models/PaymentHistory.model');
+const { withSubscriptionEntitlements } = require('../utils/subscriptionEntitlement');
 const { getPartnerCompanies, summarizePartnerCompanies, companyPaymentScope, getPartnerDirectoryRevenue } = require('../services/partnerDashboard.service');
 const LoginActivity = require('../models/LoginActivity.model');
 const SuperadminLoginAudit = require('../models/SuperadminLoginAudit.model');
@@ -2134,7 +2135,7 @@ router.get('/subscriptions', async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    res.json(companies);
+    res.json(await withSubscriptionEntitlements(companies));
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 

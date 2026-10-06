@@ -139,11 +139,12 @@ export function AuthProvider({ children }) {
   // Call this after payment confirmation to ensure plan is reflected immediately
   const refreshCompany = useCallback(async () => {
     try {
-      const { data } = await api.get('/payment/status');
+      const { data } = await api.get('/payment/status', { skipCache: true });
       if (data) {
         setCompany(data);
         authStorage.setItem('co_company', JSON.stringify(data));
       }
+      return data;
     } catch (err) {
       console.error('[AuthContext] refreshCompany failed:', err.message);
     }

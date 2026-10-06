@@ -27,8 +27,9 @@ const recalculateTotals = require('../services/recalculateLicenseTotals.service'
 const Company  = require('../models/Company.model');
 const Partner  = require('../models/Partner.model');
 const PaymentHistory = require('../models/PaymentHistory.model');
-const Pricing  = require('../models/Pricing.model');
+const { getEffectiveRenewalPriceSet } = require('../services/renewalPricing.service');
 const { authenticate, requireCompanyAdmin } = require('../middleware/auth.middleware');
+const { hasExpired } = require('../utils/renewalEligibility');
 router.use(require('../middleware/enterprisePaymentIsolation'));
 // Enterprise registrations add licenses through their server-priced checkout.
 router.post(['/create-order', '/confirm'], authenticate, requireCompanyAdmin, async (req, res, next) => {
@@ -52,77 +53,6 @@ function optionalAuthenticate(req, _res, next) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function getCurrentPricing() {
-  let p = await Pricing.findOne({ isActive: true }).sort({ updatedAt: -1 });
-  if (!p) {
-    p = await Pricing.create({
-	      newUser_pricePerSystemMonthly: 200, newUser_pricePerSystemYearly: 2000,
-	      newUser_pricePerPhoneMonthly: 200, newUser_pricePerPhoneYearly: 2000,
-	      newUser_pricePerServerMonthly: 500, newUser_pricePerServerYearly: 5000,
-	      renewal_pricePerSystemMonthly: 200, renewal_pricePerSystemYearly: 2000,
-	      renewal_pricePerPhoneMonthly: 200, renewal_pricePerPhoneYearly: 2000,
-	      renewal_pricePerServerMonthly: 500, renewal_pricePerServerYearly: 5000,
-	      pricePerSystemMonthly: 200, pricePerSystemYearly: 2000,
-	      pricePerPhoneMonthly: 200, pricePerPhoneYearly: 2000,
-	      pricePerServerMonthly: 500, pricePerServerYearly: 5000,
-    });
-  }
-  // Back-fill legacy
-  let dirty = false;
-	  if (!p.renewal_pricePerSystemMonthly) {
-	    p.renewal_pricePerSystemMonthly = p.pricePerSystemMonthly || 200;
-	    p.renewal_pricePerSystemYearly  = p.pricePerSystemYearly  || 2000;
-	    p.renewal_pricePerPhoneMonthly  = p.pricePerPhoneMonthly || p.pricePerSystemMonthly || 200;
-	    p.renewal_pricePerPhoneYearly   = p.pricePerPhoneYearly || p.pricePerSystemYearly || 2000;
-	    p.renewal_pricePerServerMonthly = p.pricePerServerMonthly || 500;
-	    p.renewal_pricePerServerYearly  = p.pricePerServerYearly  || 5000;
-	    dirty = true;
-	  }
-	  if (!p.renewal_pricePerPhoneMonthly) {
-	    p.renewal_pricePerPhoneMonthly = p.pricePerPhoneMonthly || p.renewal_pricePerSystemMonthly || 200;
-	    p.renewal_pricePerPhoneYearly  = p.pricePerPhoneYearly || p.renewal_pricePerSystemYearly || 2000;
-	    dirty = true;
-	  }
-  if (dirty) await p.save();
-  return p;
-}
-
-function getRenewalPriceSet(p) {
-  return {
-    pricePerSystemMonthly: p.renewal_pricePerSystemMonthly,
-    pricePerSystemYearly:  p.renewal_pricePerSystemYearly,
-    pricePerPhoneMonthly:  p.renewal_pricePerPhoneMonthly,
-    pricePerPhoneYearly:   p.renewal_pricePerPhoneYearly,
-    pricePerServerMonthly: p.renewal_pricePerServerMonthly,
-    pricePerServerYearly:  p.renewal_pricePerServerYearly,
-  };
-}
-
-const pricingKeys = [
-  'pricePerSystemMonthly',
-  'pricePerSystemYearly',
-  'pricePerPhoneMonthly',
-  'pricePerPhoneYearly',
-  'pricePerServerMonthly',
-  'pricePerServerYearly',
-];
-
-function hasPricingSet(set = {}) {
-  return pricingKeys.some(key => Number(set?.[key] || 0) > 0);
-}
-
-async function getEffectiveRenewalPriceSet(companyId) {
-  const pricing = await getCurrentPricing();
-  const globalSet = getRenewalPriceSet(pricing);
-  if (!companyId) return globalSet;
-  const company = await Company.findById(companyId).select('partnerId').lean();
-  if (!company?.partnerId) return globalSet;
-  const partner = await Partner.findById(company.partnerId).select('companyPricing').lean();
-  const partnerSet = partner?.companyPricing?.renewal;
-  if (!hasPricingSet(partnerSet)) return globalSet;
-  return pricingKeys.reduce((acc, key) => ({ ...acc, [key]: Number(partnerSet[key] || globalSet[key] || 0) }), {});
-}
 
 function calcTotal(priceSet, sysCount, srvCount, phoneCount, billingCycle) {
   if (billingCycle === 'yearly') {
@@ -537,7 +467,11 @@ router.post('/renew/:id', authenticate, requireCompanyAdmin, async (req, res) =>
       companyId: req.user.companyId,
     });
     if (!batch) return res.status(404).json({ message: 'Batch not found' });
-    if (batch.priceType?.startsWith('enterprise')) return res.status(409).json({ message: 'Use Enterprise to request your next plan quote.' });
+    if (batch.priceType === 'enterprise') return res.status(409).json({ message: 'Use Enterprise to renew your registration plan.' });
+    if (!['active', 'expired'].includes(batch.status) || (batch.paymentStatus != null && batch.paymentStatus !== 'paid')) {
+      return res.status(409).json({ message: 'A purchased, non-cancelled batch is required for renewal.' });
+    }
+    if (!hasExpired(batch.endDate)) return res.status(409).json({ message: 'Renewal is available after this batch expires.' });
 
     const priceSet = await getEffectiveRenewalPriceSet(req.user.companyId);
 	    const baseInr  = calcTotal(priceSet, batch.addedSystemCount, batch.addedServerCount, batch.addedPhoneCount || 0, billingCycle);
@@ -594,7 +528,7 @@ router.post('/renew-confirm/:id', authenticate, requireCompanyAdmin, async (req,
       companyId: req.user.companyId,
     });
     if (!oldBatch) return res.status(404).json({ message: 'Batch not found' });
-    if (oldBatch.priceType?.startsWith('enterprise')) return res.status(409).json({ message: 'Use Enterprise to request your next plan quote.' });
+    if (oldBatch.priceType === 'enterprise') return res.status(409).json({ message: 'Use Enterprise to renew your registration plan.' });
 
     const priceSet = await getEffectiveRenewalPriceSet(req.user.companyId);
 	    const baseAmountInr = calcTotal(priceSet, oldBatch.addedSystemCount, oldBatch.addedServerCount, oldBatch.addedPhoneCount || 0, billingCycle);

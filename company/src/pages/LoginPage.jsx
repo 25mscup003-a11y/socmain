@@ -7,6 +7,7 @@ import api from '../api/axios';
 import { validateEmail } from '../utils/validate';
 import { getTelemetryId } from '../utils/stytchFingerprint';
 import { captureBrowserLocation } from '../utils/browserLocation';
+import { requiresRegistrationPayment } from '../utils/registrationPayment';
 
 /**
  * Login flow:
@@ -60,7 +61,9 @@ export default function LoginPage() {
     Swal.fire({
       icon: 'success',
       title: '✅ Login Successful',
-      text: data.user?.role === 'company_admin' && data.redirectUrl?.includes('/company-admin/payments?tab=enterprise')
+      text: requiresRegistrationPayment(data.user, data.company)
+        ? 'Complete your plan payment to finish registration.'
+        : data.user?.role === 'company_admin' && data.redirectUrl?.includes('/company-admin/payments?tab=enterprise')
         ? 'Your Enterprise plan is ready. Opening payment…' : 'Redirecting to dashboard…',
       timer: 1400,
       showConfirmButton: false,

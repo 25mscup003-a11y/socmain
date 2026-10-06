@@ -6,7 +6,7 @@ import './EnterpriseManagement.css';
 const initial = { systemCount: 10, serverCount: 0, phoneCount: 0, billingCycle: 'monthly', notes: '' };
 const money = value => `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function EnterprisePurchase() {
+export default function EnterprisePurchase({ registration = false }) {
   const navigate = useNavigate();
   const [quote, setQuote] = useState(null);
   const [approver, setApprover] = useState('Admin');
@@ -66,7 +66,10 @@ export default function EnterprisePurchase() {
   const checkout = () => navigate('/checkout', { state: { checkout: {
     mode: 'enterprise', planName: 'Enterprise', description: 'Enterprise plan', quoteId: quote._id, revision: quote.revision,
     counts: { systemCount: quote.systemCount, serverCount: quote.serverCount, phoneCount: quote.phoneCount },
-    billingCycle: quote.billingCycle, amountInr: quote.amountInr, totals: quote.totals, returnTo: '/payments?tab=enterprise',
+    billingCycle: quote.billingCycle, amountInr: quote.amountInr, totals: quote.totals,
+    returnTo: registration ? '/' : '/payments?tab=enterprise',
+    cancelTo: registration ? '/register?plan=enterprise' : '/payments?tab=enterprise',
+    registration,
   } } });
   const payable = ['quoted', 'checkout'].includes(quote?.status);
   const paymentReady = payable && !editing;

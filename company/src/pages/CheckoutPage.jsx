@@ -4,6 +4,8 @@ import Swal from 'sweetalert2';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { openRazorpay } from '../utils/razorpay';
+import { authStorage } from '../api/authStorage';
+import { requiresRegistrationPayment } from '../utils/registrationPayment';
 
 const fmtInr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const durationOptions = [
@@ -23,7 +25,7 @@ const row = (label, value, strong = false) => (
 export default function CheckoutPage() {
   const navigate = useNavigate();
   const { state } = useLocation();
-  const { user, setCompany, refreshCompany } = useAuth();
+  const { user, company, setCompany, refreshCompany } = useAuth();
   const [terms, setTerms] = useState(false);
   const [privacy, setPrivacy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -35,7 +37,7 @@ export default function CheckoutPage() {
   const duration = durationOptions.find(option => option.value === selectedDuration) || durationOptions[0];
 
   const breakdown = useMemo(() => {
-    if (['enterprise', 'enterprise-addition'].includes(checkout?.mode) && checkout.totals) {
+    if (['enterprise', 'enterprise-addition', 'enterprise-renewal'].includes(checkout?.mode) && checkout.totals) {
       return { payable: checkout.totals.totalInr, base: checkout.totals.baseInr, gst: checkout.totals.gstInr, fees: checkout.totals.feeInr };
     }
     const base = Number(checkout?.amountInr || checkout?.calc?.totalInr || 0) * (isPartnerPlatform ? duration.multiplier : 1);
@@ -61,6 +63,8 @@ export default function CheckoutPage() {
   const planName = checkout.planName || 'Spartan Cyber Defense Center (SCDC)';
   const billingCycle = isPartnerPlatform ? selectedDuration : checkout.billingCycle || 'monthly';
   const returnTo = checkout.returnTo || '/payments';
+  const isRegistration = checkout.registration === true || requiresRegistrationPayment(user, company);
+  const cancelTo = checkout.cancelTo || (isRegistration ? '/register' : returnTo);
   const email = checkout.email || user?.email || '';
   const phone = checkout.phone || user?.phone || '';
   const apiBillingCycle = isPartnerPlatform ? (selectedDuration === 'one_year' ? 'yearly' : 'monthly') : checkout.billingCycle || 'monthly';
@@ -81,6 +85,7 @@ export default function CheckoutPage() {
   });
 
   const createOrder = async () => {
+    if (checkout.mode === 'enterprise-renewal') return api.post('/payment/enterprise/renewal/create-order', { batchId: checkout.batchId, priceKey: checkout.priceKey, expectedPaise: checkout.totals.totalPaise });
     if (checkout.mode === 'enterprise-addition') return api.post('/payment/enterprise/addition/create-order', { ...counts, purchaseKey: checkout.purchaseKey, expectedPaise: checkout.totals.totalPaise });
     if (checkout.mode === 'enterprise') {
       return api.post('/payment/enterprise/create-order', { quoteId: checkout.quoteId, revision: checkout.revision });
@@ -98,7 +103,7 @@ export default function CheckoutPage() {
   };
 
   const confirmPayment = async (response) => {
-    if (['enterprise', 'enterprise-addition'].includes(checkout.mode)) return api.post('/payment/enterprise/confirm', response);
+    if (['enterprise', 'enterprise-addition', 'enterprise-renewal'].includes(checkout.mode)) return api.post('/payment/enterprise/confirm', response);
     if (isPartnerPlatform) {
       return api.post('/payment/partner-confirm', { ...response, checkoutFees: true, durationMonths, autoPay: checkout.autoPay !== false }, { timeout: 60000 });
     }
@@ -125,10 +130,13 @@ export default function CheckoutPage() {
           try {
             const { data: confirmed } = await confirmPayment(response);
             if (confirmed.company) {
-              localStorage.setItem('co_company', JSON.stringify(confirmed.company));
+              authStorage.setItem('co_company', JSON.stringify(confirmed.company));
               setCompany(confirmed.company);
             }
-            if (!isPartnerPlatform) await refreshCompany();
+            const currentCompany = !isPartnerPlatform ? await refreshCompany() : null;
+            if (isRegistration && (currentCompany || confirmed.company)?.status !== 'active') {
+              throw new Error('Payment activation is still pending.');
+            }
             await Swal.fire({
               icon: 'success',
               title: isPartnerPlatform ? 'Platform Fee Paid' : 'Payment Successful',
@@ -138,8 +146,10 @@ export default function CheckoutPage() {
             });
             navigate(returnTo, { replace: true });
           } catch {
-            await Swal.fire({ icon: 'warning', title: 'Activation issue', text: 'Payment received but activation failed. Please check Payments page.', background: '#0c1a2e', color: '#e0f2fe' });
-            navigate(isPartnerPlatform ? '/' : '/payments', { replace: true });
+            await Swal.fire({ icon: 'warning', title: 'Payment verification pending', text: isRegistration
+              ? 'Payment could not be verified yet. Your registration remains on Configure plan until verification completes. If charged, wait for confirmation before paying again.'
+              : 'Payment could not be verified yet. Please check the Payments page.', background: '#0c1a2e', color: '#e0f2fe' });
+            navigate(isRegistration ? cancelTo : isPartnerPlatform ? '/' : '/payments', { replace: true });
           }
         },
         onFailure: (msg) => Swal.fire({ icon: 'error', title: 'Payment Failed', text: msg || 'Payment could not be processed.', background: '#0c1a2e', color: '#e0f2fe' }),
@@ -155,7 +165,7 @@ export default function CheckoutPage() {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #020617 0%, #071426 100%)', color: '#f8fafc', padding: 24, fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: 980, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 22 }}>
         <div style={{ border: '1px solid #1e3a5f', borderRadius: 12, background: '#08111f', padding: 26 }}>
-          <button onClick={() => navigate(returnTo)} style={{ background: 'transparent', border: 0, color: '#60a5fa', cursor: 'pointer', marginBottom: 18, fontWeight: 700 }}>← Back</button>
+          <button onClick={() => navigate(cancelTo)} style={{ background: 'transparent', border: 0, color: '#60a5fa', cursor: 'pointer', marginBottom: 18, fontWeight: 700 }}>← Back</button>
           <h1 style={{ fontSize: 28, margin: '0 0 6px' }}>Checkout</h1>
           <p style={{ color: '#64748b', margin: '0 0 24px' }}>{isPartnerPlatform ? 'Review your platform fee and accept policies before secure payment.' : 'Review license details and accept policies before secure payment.'}</p>
 
@@ -198,7 +208,8 @@ export default function CheckoutPage() {
             ))}
           </div>}
 
-          {checkout.periodEnd && <p style={{ color: '#a5b4fc' }}>Added to your account. A full {billingCycle === 'yearly' ? 'year' : 'month'} starts on the payment date. Next billing is one {billingCycle === 'yearly' ? 'year' : 'month'} after payment.</p>}
+          {checkout.mode === 'enterprise-renewal' ? <p style={{ color: '#a5b4fc' }}>Renews your expired Enterprise plan for one {billingCycle === 'yearly' ? 'year' : 'month'}, starting on the payment date.</p>
+            : checkout.periodEnd && <p style={{ color: '#a5b4fc' }}>Added to your account. A full {billingCycle === 'yearly' ? 'year' : 'month'} starts on the payment date. Next billing is one {billingCycle === 'yearly' ? 'year' : 'month'} after payment.</p>}
           <div style={{ border: '1px solid #1e3a5f', borderRadius: 10, padding: 18, background: '#07101d' }}>
             <div style={{ color: '#60a5fa', fontWeight: 800, marginBottom: 12 }}>Required Details</div>
             {row('Email', email || 'Not provided')}

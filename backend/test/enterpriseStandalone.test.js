@@ -125,9 +125,12 @@ test('Enterprise purchases work atomically on standalone MongoDB', { skip: proce
     payments.set(paymentId, { status: 'captured', order_id: order.id, amount: order.amount, currency: 'INR' });
     await Promise.all([service.fulfill(order.id, paymentId), service.fulfill(order.id, paymentId)]);
     const batch = await Batch.findOne({ paymentId });
-    assert.ok(+batch.endDate > +parent.endDate); assert.equal(batch.billingCycle, 'yearly');
-    assert.equal(+batch.endDate, +require('../src/utils/billingPeriod').getPeriodEnd('yearly', batch.startDate));
-    assert.equal(batch.amountPaid, 3456);
+    assert.ok(+batch.endDate < +parent.endDate); assert.equal(batch.billingCycle, 'monthly');
+    assert.equal(+batch.endDate, +require('../src/utils/billingPeriod').getPeriodEnd('monthly', batch.startDate));
+    assert.equal(batch.amountPaid, calc.totals.totalInr);
+    assert.equal(calc.pricingSource, 'dynamic');
+    assert.equal(calc.totals.baseInr, 2200);
+    assert.equal(batch.priceType, 'renewal');
     assert.equal(String(batch.parentBatchId), String(parent._id));
     updated = await Company.findById(company._id);
     assert.equal(updated.plan.systemCount, 15); assert.equal(updated.plan.serverCount, 2); assert.equal(updated.plan.phoneCount, 1);

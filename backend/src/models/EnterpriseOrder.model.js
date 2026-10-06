@@ -16,6 +16,7 @@ const schema = new mongoose.Schema({
   phoneCount: { type: Number, required: true },
   billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
   baseInr: Number,
+  pricingSource: { type: String, enum: ['enterprise', 'dynamic'], default: 'enterprise' },
   gstInr: Number,
   feeInr: Number,
   amountPaise: { type: Number, required: true },

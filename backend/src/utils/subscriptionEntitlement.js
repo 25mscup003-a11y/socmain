@@ -39,10 +39,15 @@ async function calculateSubscriptionEntitlement(company, oid, now) {
     { $set: { status: 'expired' } },
   );
 
-  const [batchTotals] = await AddSystemSubscription.aggregate([
+  const [batchTotals] = await AddSystemSubscription.aggregate(activeBatchPipeline(oid, now));
+  return summarizeEntitlement(company, batchTotals, now);
+}
+
+function activeBatchPipeline(companyId, now, groupId = null) {
+  return [
     {
       $match: {
-        companyId: oid,
+        companyId,
         status: 'active',
         endDate: { $gt: now },
         $or: [{ paymentStatus: 'paid' }, { paymentStatus: { $exists: false } }],
@@ -50,7 +55,7 @@ async function calculateSubscriptionEntitlement(company, oid, now) {
     },
     {
       $group: {
-        _id: null,
+        _id: groupId,
         batchCount: { $sum: 1 },
         systemCount: { $sum: '$addedSystemCount' },
         serverCount: { $sum: '$addedServerCount' },
@@ -58,8 +63,23 @@ async function calculateSubscriptionEntitlement(company, oid, now) {
         expiresAt: { $max: '$endDate' },
       },
     },
-  ]);
+  ];
+}
 
+// List pages need the same entitlement rules, without per-company queries or
+// changing subscription records just to display their current status.
+async function withSubscriptionEntitlements(companies, now = new Date()) {
+  if (!companies.length) return [];
+  const ids = companies.map(company => new mongoose.Types.ObjectId(String(company._id)));
+  const totals = await AddSystemSubscription.aggregate(activeBatchPipeline({ $in: ids }, now, '$companyId'));
+  const byCompany = new Map(totals.map(total => [String(total._id), total]));
+  return companies.map(company => ({
+    ...company,
+    entitlement: summarizeEntitlement(company, byCompany.get(String(company._id)), now),
+  }));
+}
+
+function summarizeEntitlement(company, batchTotals, now) {
   const baseActive = isBasePlanActive(company?.plan, now);
   const activeBatchCount = Number(batchTotals?.batchCount) || 0;
   const batchActive = activeBatchCount > 0;
@@ -87,4 +107,4 @@ function invalidateSubscriptionEntitlement(companyId) {
   entitlementInflight.delete(key);
 }
 
-module.exports = { getSubscriptionEntitlement, invalidateSubscriptionEntitlement, isBasePlanActive };
+module.exports = { getSubscriptionEntitlement, withSubscriptionEntitlements, invalidateSubscriptionEntitlement, isBasePlanActive };

@@ -18,6 +18,7 @@ const PaymentHistory = require('../models/PaymentHistory.model');
 const Pricing = require('../models/Pricing.model');
 const AddSystemSubscription = require('../models/AddSystemSubscription.model');
 const { getSubscriptionEntitlement } = require('../utils/subscriptionEntitlement');
+const { hasExpired } = require('../utils/renewalEligibility');
 const { authenticate, requireCompanyAdmin } = require('../middleware/auth.middleware');
 const jwt = require('jsonwebtoken');
 
@@ -932,6 +933,13 @@ router.post('/create-order', authenticate, requireCompanyAdmin, async (req, res)
   }
 
   try {
+    const company = await Company.findById(req.user.companyId).select('plan').lean();
+    if (!company) return res.status(404).json({ message: 'Company not found' });
+    // Initial activation stays available. Existing base plans can be renewed
+    // only after expiry, even if the client omits the renewal flag.
+    if ((isUpgrade || company.plan?.paymentStatus === 'paid') && !hasExpired(company.plan?.expiresAt)) {
+      return res.status(409).json({ message: 'Renewal is available after your base plan expires.' });
+    }
     const priceSet = await getEffectiveCompanyPricing(req.user.companyId, isUpgrade); // partner-scoped when applicable
     const baseInr = calcTotal(priceSet, sysCount, srvCount, phnCount, billingCycle);
     const totals = withCheckoutFees(baseInr, checkoutFees);
@@ -1237,6 +1245,11 @@ router.get('/status', authenticate, requireCompanyAdmin, async (req, res) => {
     const stock = await getPartnerLicenseStock(targetCompanyId);
     const data = company.toObject();
     data.entitlement = await getSubscriptionEntitlement(company);
+    data.primaryEnterpriseSubscription = company.enterpriseSubscriptionId
+      ? await AddSystemSubscription.findOne({ _id: company.enterpriseSubscriptionId, companyId: company._id })
+        .select('addedSystemCount addedServerCount addedPhoneCount billingCycle amountPaid paymentStatus status startDate endDate paymentId priceType')
+        .lean()
+      : null;
     data.partnerLicenseStock = stock.limited ? {
       limited: true,
       activeStock: stock.activeStock || 0,

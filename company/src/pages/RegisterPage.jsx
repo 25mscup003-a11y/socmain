@@ -1,9 +1,11 @@
 import { authStorage } from '../api/authStorage';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link, useParams, useSearchParams } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import api from '../api/axios';
 import EnterprisePurchase from '../components/EnterprisePurchase';
+import { useAuth } from '../context/AuthContext';
+import { requiresRegistrationPayment } from '../utils/registrationPayment';
 import {
   validateCompanyName, validateEmail, validatePassword,
   validatePhone, firstError,
@@ -32,6 +34,8 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const { referralSlug } = useParams();
   const [searchParams] = useSearchParams();
+  const { user, company, loading, loadFromStorage, refreshCompany } = useAuth();
+  const resumedAccount = useRef(null);
 
   // Pre-fill from partner invite link
   const prefillCompany  = searchParams.get('company')   || '';
@@ -57,7 +61,7 @@ export default function RegisterPage() {
   const [otpTimer, setOtpTimer] = useState(0);
 
   // Plan config (dynamic)
-  const [planType, setPlanType] = useState('dynamic');
+  const [planType, setPlanType] = useState(searchParams.get('plan') === 'enterprise' ? 'enterprise' : 'dynamic');
   const [pricing, setPricing] = useState(null);
   const [pricingLoading, setPricingLoading] = useState(false);
   const [systemCount, setSystemCount] = useState(10);
@@ -67,6 +71,29 @@ export default function RegisterPage() {
   const [calcResult, setCalcResult] = useState(null);
   const [calcLoading, setCalcLoading] = useState(false);
   const [referralInfo, setReferralInfo] = useState(null);
+
+  // Resume from server-backed account status after refresh, login, or checkout.
+  useEffect(() => {
+    if (loading || !user || !company || user.role !== 'company_admin') return;
+    if (!requiresRegistrationPayment(user, company)) {
+      navigate('/', { replace: true });
+      return;
+    }
+    const accountId = user._id || user.id;
+    if (resumedAccount.current === accountId) return;
+    resumedAccount.current = accountId;
+    setForm(previous => ({ ...previous, companyName: company.name || '', email: user.email || company.email || '', phone: user.phone || company.phone || '', password: '' }));
+    setStep(3);
+  }, [loading, user, company, navigate]);
+
+  // A verified webhook or payment in another tab can finish registration too.
+  useEffect(() => {
+    if (!requiresRegistrationPayment(user, company)) return;
+    const refresh = () => { if (document.visibilityState !== 'hidden') refreshCompany(); };
+    const timer = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [user, company?.status, refreshCompany]);
 
   useEffect(() => {
     if (!referralSlug) {
@@ -222,15 +249,12 @@ export default function RegisterPage() {
 
       await Swal.fire({
         icon: 'success', title: '✅ Email Verified!',
-        html: `<p><strong>Registration complete!</strong></p>
-               <p style="font-size:13px;color:#666;margin-top:8px">Now configure your subscription plan.</p>`,
+        html: `<p><strong>Your email is verified.</strong></p>
+               <p style="font-size:13px;color:#666;margin-top:8px">Configure your plan and complete payment to finish registration.</p>`,
         confirmButtonText: '📋 Configure Plan', allowOutsideClick: false, background: '#fff',
       });
-      if (data.redirectUrl && data.redirectUrl.startsWith('http') && !data.redirectUrl.includes(window.location.host)) {
-        window.location.href = data.redirectUrl;
-      } else {
-        setStep(3);
-      }
+      loadFromStorage();
+      setStep(3);
     } catch (err) {
       const message = err.response?.data?.message || 'OTP verification failed';
       if (message.includes('expired')) {
@@ -281,7 +305,7 @@ export default function RegisterPage() {
       state: {
         checkout: {
           mode: 'base',
-          planName: 'Premium',
+          planName: 'Dynamic Pricing',
           description: `${systemCount} Systems + ${serverCount} Server(s) + ${phoneCount} Phone(s)`,
           counts: {
             systemCount: Number(systemCount),
@@ -296,6 +320,8 @@ export default function RegisterPage() {
           email: form.email,
           phone: form.phone,
           returnTo: '/',
+          cancelTo: '/register',
+          registration: true,
         },
       },
     });
@@ -458,11 +484,14 @@ export default function RegisterPage() {
 	            <p style={{ fontSize: 12, color: '#475569', marginBottom: 20 }}>
 	              Choose how many systems, phones, and servers you need. Pricing is dynamic.
 	            </p>
+            <p role="status" style={{ color: '#fbbf24', fontSize: 12, marginBottom: 20 }}>
+              Complete your payment to finish registration. Dashboard access opens only after payment is verified.
+            </p>
 
             <div style={{ display: 'flex', gap: 10, marginBottom: 20 }} role="tablist" aria-label="Plan type">
               {[['dynamic', '💵 Dynamic Pricing'], ['enterprise', '🏢 Enterprise']].map(([id, label]) => <button type="button" role="tab" aria-selected={planType === id} key={id} onClick={() => setPlanType(id)} style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #2563eb', background: planType === id ? '#1e3a5f' : '#060e1a', color: '#e0f2fe', cursor: 'pointer' }}>{label}</button>)}
             </div>
-            {planType === 'enterprise' ? <EnterprisePurchase /> : pricingLoading ? (
+            {planType === 'enterprise' ? <EnterprisePurchase registration /> : pricingLoading ? (
               <div style={{ textAlign: 'center', color: '#60a5fa', padding: 20, fontSize: 13 }}>Loading pricing…</div>
             ) : pricing ? (
               <>

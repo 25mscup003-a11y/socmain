@@ -6,7 +6,9 @@ const Partner = require('../models/Partner.model');
 const EnterpriseQuote = require('../models/EnterpriseQuote.model');
 const EnterpriseOrder = require('../models/EnterpriseOrder.model');
 const EnterpriseAdditionOrder = require('../models/EnterpriseAdditionOrder.model');
+const EnterpriseRenewalOrder = require('../models/EnterpriseRenewalOrder.model');
 const { calculateAddition } = require('./enterpriseAddition.service');
+const { calculateRenewal } = require('./enterpriseRenewal.service');
 const PaymentHistory = require('../models/PaymentHistory.model');
 const AddSystemSubscription = require('../models/AddSystemSubscription.model');
 const { invalidateSubscriptionEntitlement } = require('../utils/subscriptionEntitlement');
@@ -23,7 +25,7 @@ module.exports = function enterprisePayments({
   allocateEnterpriseLicenses = require('./enterpriseLicenseAllocation.service'),
   recalculateTotals = require('./recalculateLicenseTotals.service'),
 }) {
-  const isEnterpriseOrder = async orderId => orderId && (await EnterpriseOrder.exists({ razorpayOrderId: orderId }) || await EnterpriseAdditionOrder.exists({ razorpayOrderId: orderId }));
+  const isEnterpriseOrder = async orderId => orderId && (await EnterpriseOrder.exists({ razorpayOrderId: orderId }) || await EnterpriseAdditionOrder.exists({ razorpayOrderId: orderId }) || await EnterpriseRenewalOrder.exists({ razorpayOrderId: orderId }));
 
   async function createOrder(company, body) {
     if (!mongoose.isObjectIdOrHexString(body.quoteId) || !Number.isSafeInteger(Number(body.revision))) throw failure('Refresh your Enterprise quote before checkout.');
@@ -57,7 +59,7 @@ module.exports = function enterprisePayments({
   async function prepareGatewayOrder(company, saved, OrderModel) {
     const gateway = getGateway();
     if (saved.razorpayOrderId) return { order: await gateway.orders.fetch(saved.razorpayOrderId) };
-    await ensurePartnerLicenseStock(company._id, saved.systemCount + saved.serverCount + saved.phoneCount);
+    if (saved.kind !== 'renewal') await ensurePartnerLicenseStock(company._id, saved.systemCount + saved.serverCount + saved.phoneCount);
     const lease = crypto.randomUUID();
     const reserved = await OrderModel.findOneAndUpdate({
       _id: saved._id, razorpayOrderId: null,
@@ -103,6 +105,35 @@ module.exports = function enterprisePayments({
     return prepareGatewayOrder(company, saved, EnterpriseAdditionOrder);
   }
 
+  async function createRenewalOrder(company, body) {
+    const calculation = await calculateRenewal(company, body);
+    if (!calculation.renewalAvailable) throw failure('Renewal will be available after your Enterprise plan expires.', 409);
+    if (calculation.totals.totalPaise < 100) throw failure('Minimum renewal is ₹1. Contact your administrator to check pricing.');
+    if (body.priceKey !== calculation.priceKey || body.expectedPaise !== calculation.totals.totalPaise) {
+      throw failure('Your Enterprise renewal price or expiry changed. Refresh the renewal details before checkout.', 409);
+    }
+    const filter = { companyId: company._id, renewalBatchId: calculation.batchId, renewFrom: calculation.renewFrom };
+    let saved = await EnterpriseRenewalOrder.findOne(filter);
+    if (!saved) {
+      const partner = company.partnerId ? await Partner.findById(company.partnerId).select('name').lean() : null;
+      try {
+        saved = await EnterpriseRenewalOrder.create({
+          ...filter, ...calculation, kind: 'renewal', partnerId: company.partnerId || null,
+          companyName: company.name, partnerName: partner?.name || '',
+          baseInr: calculation.totals.baseInr, gstInr: calculation.totals.gstInr,
+          feeInr: calculation.totals.feeInr, amountPaise: calculation.totals.totalPaise,
+        });
+      } catch (error) {
+        if (error.code !== 11000) throw error;
+        saved = await EnterpriseRenewalOrder.findOne(filter);
+      }
+    }
+    if (saved.priceKey !== calculation.priceKey || !same(saved.partnerId, company.partnerId)) {
+      throw failure('An earlier renewal checkout is pending. Contact your administrator to reconcile its price.', 409);
+    }
+    return prepareGatewayOrder(company, saved, EnterpriseRenewalOrder);
+  }
+
   async function settle(saved) {
     if (!saved.partnerId) return;
     // Claim the transfer before contacting Razorpay. Concurrent confirmations
@@ -123,6 +154,7 @@ module.exports = function enterprisePayments({
     let OrderModel = EnterpriseOrder;
     let saved = await OrderModel.findOne({ razorpayOrderId: orderId });
     if (!saved) { OrderModel = EnterpriseAdditionOrder; saved = await OrderModel.findOne({ razorpayOrderId: orderId }); }
+    if (!saved) { OrderModel = EnterpriseRenewalOrder; saved = await OrderModel.findOne({ razorpayOrderId: orderId }); }
     if (!saved || (expectedCompanyId && !same(saved.companyId, expectedCompanyId))) throw failure('Enterprise payment does not belong to this company.', 403);
     if (saved.status === 'paid') {
       if (saved.paymentId !== paymentId) throw failure('This Enterprise order has already been paid.', 409);
@@ -138,24 +170,41 @@ module.exports = function enterprisePayments({
     }
     const paymentTime = Number(payment.captured_at || payment.created_at) * 1000;
     const paidAt = Number.isFinite(paymentTime) && paymentTime > 0 && paymentTime <= Date.now() + 300000 ? new Date(paymentTime) : new Date();
-    const periodEnd = getPeriodEnd(saved.billingCycle, paidAt);
+    const periodStart = saved.kind === 'renewal' ? new Date(Math.max(+new Date(saved.renewFrom), +paidAt)) : paidAt;
+    const periodEnd = getPeriodEnd(saved.billingCycle, periodStart);
     // Bind the first verified payment and period once, before resumable work.
     saved = await OrderModel.findOneAndUpdate({ _id: saved._id, paymentId: null },
-      { $set: { paymentId, paidAt, periodStart: paidAt, periodEnd } }, { new: true })
+      { $set: { paymentId, paidAt, periodStart, periodEnd } }, { new: true })
       || await OrderModel.findById(saved._id);
     if (saved.paymentId !== paymentId) throw failure('This Enterprise order has already been paid.', 409);
     const company = await Company.findById(saved.companyId);
     if (!company || !same(company.partnerId, saved.partnerId)) throw failure('Company ownership changed. Contact your administrator to reconcile this payment.', 409);
-    await allocateEnterpriseLicenses(company, saved);
+    if (saved.kind !== 'renewal') await allocateEnterpriseLicenses(company, saved);
     // A unique batch adds licenses without replacing the existing base plan,
     // its expiry, or any other purchase. Upserts make interrupted work resumable.
     let batch;
+    if (saved.kind === 'renewal') {
+      // Compare the purchased expiry, then mark the order in the same write.
+      // Confirmation/webhook retries cannot extend or count the renewal twice.
+      batch = await AddSystemSubscription.findOneAndUpdate({
+        _id: saved.renewalBatchId, companyId: company._id, endDate: saved.renewFrom,
+        status: { $in: ['active', 'expired'] }, paymentStatus: 'paid',
+        lastEnterpriseRenewalOrderId: { $ne: saved._id },
+      }, { $set: {
+        endDate: saved.periodEnd, status: 'active', paymentStatus: 'paid',
+        orderId, paymentId, amountPaid: saved.amountPaise / 100, amountPaise: saved.amountPaise,
+        lastEnterpriseRenewalOrderId: saved._id,
+        ...(+saved.renewFrom <= +saved.paidAt ? { startDate: saved.periodStart } : {}),
+      }, $inc: { renewalCount: 1 } }, { new: true, runValidators: true });
+      if (!batch) batch = await AddSystemSubscription.findOne({ _id: saved.renewalBatchId, companyId: company._id, lastEnterpriseRenewalOrderId: saved._id });
+      if (!batch) throw failure('The Enterprise subscription changed. Contact your administrator to reconcile this payment.', 409);
+    } else {
     try {
       batch = await AddSystemSubscription.findOneAndUpdate({ enterpriseOrderId: saved._id }, { $setOnInsert: {
         enterpriseOrderId: saved._id, parentBatchId: saved.parentBatchId, companyId: company._id, companyName: saved.companyName,
         orderId, paymentId, addedSystemCount: saved.systemCount, addedServerCount: saved.serverCount, addedPhoneCount: saved.phoneCount,
-        serverDetails: 'Enterprise plan', billingCycle: saved.billingCycle, amountPaid: saved.amountPaise / 100, amountPaise: saved.amountPaise,
-        priceType: saved.kind === 'addition' ? 'enterprise_addition' : 'enterprise', addedDate: saved.paidAt, startDate: saved.periodStart, endDate: saved.periodEnd,
+        serverDetails: saved.kind === 'addition' ? 'Add Systems' : 'Enterprise plan', billingCycle: saved.billingCycle, amountPaid: saved.amountPaise / 100, amountPaise: saved.amountPaise,
+        priceType: saved.kind === 'addition' ? (saved.pricingSource === 'dynamic' ? 'renewal' : 'enterprise_addition') : 'enterprise', addedDate: saved.paidAt, startDate: saved.periodStart, endDate: saved.periodEnd,
         autoPay: false, paymentStatus: 'paid', status: 'active',
       } }, { upsert: true, new: true, runValidators: true });
     } catch (error) {
@@ -163,13 +212,14 @@ module.exports = function enterprisePayments({
       batch = await AddSystemSubscription.findOne({ enterpriseOrderId: saved._id, paymentId });
       if (!batch) throw error;
     }
+    }
     await PaymentHistory.updateOne({ paymentId }, { $setOnInsert: {
       companyId: company._id, tenantId: company.tenantId, partnerId: saved.partnerId,
       companyName: saved.companyName, partnerName: saved.partnerName, orderId, paymentId,
-      planType: saved.kind === 'addition' ? 'enterprise_addition' : 'enterprise', systemCount: saved.systemCount, serverCount: saved.serverCount, phoneCount: saved.phoneCount,
-      isUpgrade: true, addedSystems: saved.systemCount, addedServers: saved.serverCount, addedPhones: saved.phoneCount,
+      planType: saved.kind === 'renewal' ? 'enterprise_renewal' : saved.kind === 'addition' ? (saved.pricingSource === 'dynamic' ? 'add_system' : 'enterprise_addition') : 'enterprise', systemCount: saved.systemCount, serverCount: saved.serverCount, phoneCount: saved.phoneCount,
+      isUpgrade: saved.kind !== 'renewal', addedSystems: saved.kind === 'renewal' ? 0 : saved.systemCount, addedServers: saved.kind === 'renewal' ? 0 : saved.serverCount, addedPhones: saved.kind === 'renewal' ? 0 : saved.phoneCount,
       billingCycle: saved.billingCycle, amountPaise: saved.amountPaise, amountInr: saved.amountPaise / 100,
-      currency: 'INR', status: 'captured', paidAt: saved.paidAt, periodStart: saved.periodStart, periodEnd: saved.periodEnd, source: 'checkout',
+      currency: 'INR', status: 'captured', paidAt: saved.paidAt, periodStart: saved.periodStart, periodEnd: saved.periodEnd, source: saved.kind === 'renewal' ? 'renewal' : 'checkout',
       companyType: saved.partnerId ? 'PARTNER_MANAGED' : 'DIRECT', paymentReceiver: 'superadmin_razorpay',
       payoutStatus: saved.partnerId ? 'pending' : 'not_applicable',
       notes: { batchId: batch._id, enterpriseOrderId: saved._id, quoteId: saved.quoteId, revision: saved.revision, baseInr: saved.baseInr, gstInr: saved.gstInr, feeInr: saved.feeInr },
@@ -179,7 +229,7 @@ module.exports = function enterprisePayments({
       await Company.updateOne({ _id: company._id }, { $set: { enterpriseSubscriptionId: batch._id } });
     }
     const resultCompany = await recalculateTotals(company._id);
-    if (saved.kind !== 'addition') await EnterpriseQuote.updateOne({ _id: saved.quoteId, revision: saved.revision, status: 'checkout' }, { $set: { status: 'paid' } });
+    if (!saved.kind || saved.kind === 'plan') await EnterpriseQuote.updateOne({ _id: saved.quoteId, revision: saved.revision, status: 'checkout' }, { $set: { status: 'paid' } });
     await OrderModel.updateOne({ _id: saved._id, paymentId }, { $set: { status: 'paid' } });
     invalidateSubscriptionEntitlement(saved.companyId);
     await settle(saved);
@@ -195,5 +245,5 @@ module.exports = function enterprisePayments({
     return fulfill(orderId, paymentId, company._id);
   }
 
-  return { createOrder, createAdditionOrder, confirm, fulfill, isEnterpriseOrder };
+  return { createOrder, createAdditionOrder, createRenewalOrder, confirm, fulfill, isEnterpriseOrder };
 };

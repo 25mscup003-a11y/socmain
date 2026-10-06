@@ -10,6 +10,9 @@ const Company = require('../src/models/Company.model');
 const Quote = require('../src/models/EnterpriseQuote.model');
 const Order = require('../src/models/EnterpriseOrder.model');
 const Addition = require('../src/models/EnterpriseAdditionOrder.model');
+const Pricing = require('../src/models/Pricing.model');
+const Renewal = require('../src/models/EnterpriseRenewalOrder.model');
+const { calculateRenewal } = require('../src/services/enterpriseRenewal.service');
 const PaymentHistory = require('../src/models/PaymentHistory.model');
 const AddSystem = require('../src/models/AddSystemSubscription.model');
 const { authenticate, requireSuperAdmin } = require('../src/middleware/auth.middleware');
@@ -69,8 +72,10 @@ function setup(t) {
       { _id: PA, role: 'partner_admin', partnerId: P, name: 'Partner admin', email: 'partner@example.test', isActive: true, accountStatus: 'active' },
       { _id: SA, role: 'superadmin', isActive: true, accountStatus: 'active' },
     ],
-    quotes: [], orders: [], histories: [], allocations: [], stockChecks: [], settlements: [], gatewayOrders: new Map(), gatewayPayments: new Map(), batches: [], additionOrders: [],
+    quotes: [], orders: [], histories: [], allocations: [], stockChecks: [], settlements: [], gatewayOrders: new Map(), gatewayPayments: new Map(), batches: [], additionOrders: [], renewalOrders: [],
+    pricing: new Pricing().toObject(),
   };
+  t.mock.method(Pricing, 'findOne', () => query(state.pricing));
   t.mock.method(User, 'findById', key => query(state.users.find(row => same(row._id, key))));
   t.mock.method(User, 'findOne', filter => query(state.users.find(row => matches(row, filter))));
   t.mock.method(Partner, 'findById', key => query(same(key, P) ? { _id: P, name: 'Partner', status: 'active' } : null));
@@ -86,7 +91,7 @@ function setup(t) {
     const row = state.quotes.find(row => matches(row, filter)); if (row) update(row, changes);
     return { modifiedCount: row ? 1 : 0 };
   });
-  for (const [Model, rows] of [[Order, state.orders], [Addition, state.additionOrders], [AddSystem, state.batches], [PaymentHistory, state.histories]]) {
+  for (const [Model, rows] of [[Order, state.orders], [Addition, state.additionOrders], [Renewal, state.renewalOrders], [AddSystem, state.batches], [PaymentHistory, state.histories]]) {
     t.mock.method(Model, 'findOne', filter => query(rows.find(row => matches(row, filter))));
     t.mock.method(Model, 'findById', key => query(rows.find(row => same(row._id, key))));
     t.mock.method(Model, 'exists', async filter => rows.some(row => matches(row, filter)));
@@ -261,7 +266,7 @@ test('Enterprise registration uses a separate primary subscription and resumes i
   assert.equal(f.state.histories.length, 1); assert.equal(f.state.settlements.length, 1);
 });
 
-test('later Enterprise additions keep the plan cycle and full price but start on their purchase date', async t => {
+test('monthly Add Systems on an Enterprise registration uses Dynamic Pricing and its own chosen cycle', async t => {
   const f = setup(t); await f.approve(); const { body } = await f.checkout();
   const firstResponse = f.capture(body.order);
   f.state.gatewayPayments.get(firstResponse.razorpay_payment_id).created_at = Math.floor(Date.now() / 1000) - 15 * 86400;
@@ -271,12 +276,13 @@ test('later Enterprise additions keep the plan cycle and full price but start on
   const { calculateAddition } = require('../src/services/enterpriseAddition.service');
   const counts = { systemCount: 16, serverCount: 0, phoneCount: 0, billingCycle: 'monthly' };
   const calc = await calculateAddition(company, counts);
-  assert.equal(calc.billingCycle, 'yearly'); assert.ok(+calc.periodEnd > +parent.endDate);
-  assert.equal(calc.totals.baseInr, 2500);
+  assert.equal(calc.billingCycle, 'monthly'); assert.ok(+calc.periodEnd < +parent.endDate);
+  assert.equal(calc.totals.baseInr, 3200);
+  assert.equal(calc.pricingSource, 'dynamic');
   const halfway = new Date((+parent.startDate + +parent.endDate) / 2);
   const later = await calculateAddition(company, counts, halfway);
-  assert.equal(later.totalInr, 2500);
-  assert.equal(+later.periodEnd, +getPeriodEnd('yearly', halfway));
+  assert.equal(later.totalInr, 3200);
+  assert.equal(+later.periodEnd, +getPeriodEnd('monthly', halfway));
   const payload = { ...counts, purchaseKey: crypto.randomUUID(), expectedPaise: calc.totals.totalPaise };
   const addition = await f.service.createAdditionOrder(company, payload);
   assert.equal((await f.service.createAdditionOrder(company, payload)).order.id, addition.order.id);
@@ -285,18 +291,20 @@ test('later Enterprise additions keep the plan cycle and full price but start on
   await f.call('company', '/confirm', response);
   assert.equal(company.plan.systemCount, 26);
   assert.equal(f.state.batches.length, 2);
-  assert.equal(+f.state.batches[1].endDate, +getPeriodEnd('yearly', f.state.batches[1].startDate));
-  assert.ok(+f.state.batches[1].endDate > +parent.endDate);
-  assert.equal(f.state.batches[1].billingCycle, 'yearly');
+  assert.equal(+f.state.batches[1].endDate, +getPeriodEnd('monthly', f.state.batches[1].startDate));
+  assert.ok(+f.state.batches[1].endDate < +parent.endDate);
+  assert.equal(f.state.batches[1].billingCycle, 'monthly');
+  assert.equal(f.state.batches[1].priceType, 'renewal');
+  assert.equal(parent.addedSystemCount, 10); assert.equal(parent.billingCycle, 'yearly');
   assert.equal(String(f.state.batches[1].parentBatchId), String(parent._id));
-  assert.equal(f.state.histories[1].planType, 'enterprise_addition');
+  assert.equal(f.state.histories[1].planType, 'add_system');
   assert.equal(f.state.allocations.length, 2);
   const afterExpiry = await calculateAddition(company, counts, new Date(+parent.endDate + 1));
-  assert.equal(afterExpiry.totalInr, 2500);
+  assert.equal(afterExpiry.totalInr, 3200);
 });
 
 
-test('monthly Add Systems starts on gateway payment date, not checkout preparation or original renewal date', async t => {
+test('yearly Add Systems starts on gateway payment date independently of a monthly registration', async t => {
   const f = setup(t); f.quoteBody.billingCycle = 'monthly';
   await f.approve(); const { body } = await f.checkout();
   const first = f.capture(body.order);
@@ -307,7 +315,7 @@ test('monthly Add Systems starts on gateway payment date, not checkout preparati
   const { getPeriodEnd } = require('../src/utils/billingPeriod');
   const counts = { systemCount: 8, serverCount: 0, phoneCount: 0, billingCycle: 'yearly' };
   const calc = await calculateAddition(company, counts);
-  assert.equal(calc.billingCycle, 'monthly'); assert.equal(calc.totalInr, 1250);
+  assert.equal(calc.billingCycle, 'yearly'); assert.equal(calc.totalInr, 16000);
   const { order } = await f.service.createAdditionOrder(company, { ...counts, purchaseKey: crypto.randomUUID(), expectedPaise: calc.totals.totalPaise });
   const response = f.capture(order);
   const paymentTime = Math.floor(Date.now() / 1000) - 86400;
@@ -315,10 +323,214 @@ test('monthly Add Systems starts on gateway payment date, not checkout preparati
   await f.call('company', '/confirm', response);
   const added = f.state.batches[1];
   assert.equal(+added.startDate, paymentTime * 1000);
-  assert.equal(+added.endDate, +getPeriodEnd('monthly', added.startDate));
+  assert.equal(+added.endDate, +getPeriodEnd('yearly', added.startDate));
   assert.ok(+added.endDate > +parent.endDate);
   assert.equal(company.plan.systemCount, 18);
-  assert.equal(added.amountPaid, 1500);
+  assert.equal(added.amountPaid, 19200);
   await f.service.fulfill(order.id, response.razorpay_payment_id);
   assert.equal(f.state.batches.length, 2); assert.equal(+added.startDate, paymentTime * 1000);
+});
+
+async function purchasedEnterprise(t) {
+  const f = setup(t);
+  await f.approve();
+  const { body } = await f.checkout();
+  assert.equal((await f.call('company', '/confirm', f.capture(body.order))).status, 200);
+  f.company = f.state.companies[0]; f.batch = f.state.batches[0];
+  f.renewalPayload = async () => {
+    const calculation = await calculateRenewal(f.company, { batchId: f.batch._id });
+    return { batchId: f.batch._id, priceKey: calculation.priceKey, expectedPaise: calculation.totals.totalPaise };
+  };
+  return f;
+}
+
+test('Enterprise renewal remains unavailable until the exact expiry, including direct checkout requests', async t => {
+  const f = await purchasedEnterprise(t);
+  const expiry = new Date(f.batch.endDate);
+  assert.equal((await calculateRenewal(f.company, { batchId: f.batch._id }, new Date(+expiry - 1))).renewalAvailable, false);
+  assert.equal((await calculateRenewal(f.company, { batchId: f.batch._id }, expiry)).renewalAvailable, true);
+  assert.equal((await calculateRenewal(f.company, { batchId: f.batch._id }, new Date(+expiry + 1))).renewalAvailable, true);
+  const payload = await f.renewalPayload();
+  assert.equal((await f.call('company', '/renewal/create-order', payload)).status, 409);
+  f.batch.status = 'expired'; // The date, rather than a stale status, controls availability.
+  await assert.rejects(f.service.createRenewalOrder(f.company, payload), /after your Enterprise plan expires/);
+  assert.equal(f.state.renewalOrders.length, 0); assert.equal(f.state.gatewayOrders.size, 1);
+});
+
+test('expired Enterprise renewal uses admin pricing and existing quantities without adding licenses', async t => {
+  const f = await purchasedEnterprise(t);
+  f.batch.endDate = new Date(Date.now() - 86400000);
+  const payload = await f.renewalPayload();
+  f.state.noStock = true; // Renewing already-owned licenses must not consume more stock.
+  const { order } = await f.service.createRenewalOrder(f.company, { ...payload, amountInr: 1, systemCount: 99999, billingCycle: 'monthly' });
+  assert.equal(order.amount, 300000);
+  assert.equal((await f.service.createRenewalOrder(f.company, payload)).order.id, order.id);
+  assert.equal(await f.service.isEnterpriseOrder(order.id), true);
+  const response = f.capture(order);
+  const paymentTime = Math.floor(Date.now() / 1000) * 1000;
+  f.state.gatewayPayments.get(response.razorpay_payment_id).captured_at = paymentTime / 1000;
+  assert.equal((await f.call('company', '/confirm', response)).status, 200);
+  assert.equal(+f.batch.endDate, +require('../src/utils/billingPeriod').getPeriodEnd('yearly', new Date(paymentTime)));
+  assert.equal(+f.batch.startDate, paymentTime);
+  assert.equal(f.batch.renewalCount, 1);
+  assert.equal(f.state.batches.length, 1);
+  assert.equal(f.company.plan.systemCount, 10);
+  assert.equal(String(f.company.enterpriseSubscriptionId), String(f.batch._id));
+  assert.equal(f.state.stockChecks.length, 1); assert.equal(f.state.allocations.length, 1);
+  const history = f.state.histories[1];
+  assert.equal(history.planType, 'enterprise_renewal'); assert.equal(history.source, 'renewal');
+  assert.equal(history.isUpgrade, false); assert.equal(history.addedSystems, 0);
+  assert.equal(history.systemCount, 10); assert.equal(+history.periodStart, paymentTime);
+  await f.service.fulfill(order.id, response.razorpay_payment_id);
+  assert.equal((await f.call('company', '/confirm', response)).status, 200);
+  assert.equal(f.batch.renewalCount, 1); assert.equal(f.state.histories.length, 2);
+  assert.equal(f.state.settlements.length, 2);
+});
+
+test('Enterprise renewal rejects changed preview pricing and then uses the matching new admin amount', async t => {
+  const f = await purchasedEnterprise(t);
+  f.batch.endDate = new Date(Date.now() - 86400000);
+  const stale = await f.renewalPayload();
+  assert.equal((await f.call('partner', `/${C}`, { ...f.quoteBody, revision: 1, amountInr: 4000 })).status, 200);
+  await assert.rejects(f.service.createRenewalOrder(f.company, stale), error => error.status === 409);
+  const fresh = await f.renewalPayload();
+  assert.equal(fresh.expectedPaise, 480000);
+  const { order } = await f.service.createRenewalOrder(f.company, fresh);
+  assert.equal(order.amount, 480000);
+  // In-flight checkout retains the displayed agreement if another quote follows.
+  assert.equal((await f.call('partner', `/${C}`, { ...f.quoteBody, revision: 2, amountInr: 5000 })).status, 200);
+  const locked = await f.renewalPayload();
+  assert.equal(locked.expectedPaise, 480000);
+  assert.equal((await f.service.createRenewalOrder(f.company, locked)).order.id, order.id);
+});
+
+test('new package requests do not change existing Enterprise renewal terms', async t => {
+  const f = await purchasedEnterprise(t);
+  await f.call('partner', `/${C}`, { ...f.quoteBody, revision: 1, systemCount: 100, amountInr: 10000 });
+  let calculation = await calculateRenewal(f.company, { batchId: f.batch._id });
+  assert.equal(calculation.totals.baseInr, 2500); assert.equal(calculation.systemCount, 10);
+  await f.call('company', '/request', { ...f.quoteBody, revision: 2 });
+  calculation = await calculateRenewal(f.company, { batchId: f.batch._id });
+  assert.equal(calculation.totals.baseInr, 2500);
+});
+
+test('expired Enterprise renewal starts from verified payment time and resumes without duplicate extension', async t => {
+  const f = await purchasedEnterprise(t);
+  f.batch.endDate = new Date(Date.now() - 86400000 * 40); f.batch.status = 'expired';
+  f.batch.billingCycle = 'monthly';
+  const { order } = await f.service.createRenewalOrder(f.company, await f.renewalPayload());
+  const response = f.capture(order);
+  const paymentTime = Math.floor(Date.now() / 1000) - 120;
+  f.state.gatewayPayments.get(response.razorpay_payment_id).captured_at = paymentTime;
+  f.state.failHistory = true;
+  assert.equal((await f.call('company', '/confirm', response)).status, 503);
+  const expiry = +f.batch.endDate;
+  await assert.rejects(f.renewalPayload(), error => error.status === 409);
+  assert.equal((await f.call('company', '/confirm', response)).status, 200);
+  assert.equal(+f.batch.startDate, paymentTime * 1000);
+  assert.equal(+f.batch.endDate, +require('../src/utils/billingPeriod').getPeriodEnd('monthly', new Date(paymentTime * 1000)));
+  assert.equal(+f.batch.endDate, expiry); assert.equal(f.batch.renewalCount, 1);
+  assert.equal(f.batch.status, 'active'); assert.equal(f.state.histories.length, 2);
+  assert.equal(f.state.allocations.length, 1);
+});
+
+test('Enterprise renewal rejects foreign, cancelled, unpaid and ordinary subscriptions', async t => {
+  const f = await purchasedEnterprise(t);
+  assert.equal((await f.call('company', '/renewal/calculate', { batchId: f.batch._id }, { method: 'POST' })).status, 200);
+  await assert.rejects(calculateRenewal(f.company, { batchId: 'bad-id' }), error => error.status === 400);
+  for (const change of [{ companyId: OTHER }, { status: 'cancelled' }, { paymentStatus: 'unpaid' }, { priceType: 'renewal', enterpriseOrderId: undefined }]) {
+    const before = { ...f.batch };
+    Object.assign(f.batch, change);
+    await assert.rejects(f.renewalPayload(), error => error.status === 409);
+    Object.assign(f.batch, before);
+  }
+  f.company.partnerId = id(99);
+  await assert.rejects(f.renewalPayload(), error => error.status === 409);
+});
+
+test('Enterprise renewal payment rejects forged amounts, non-captured payments and legacy confirmation routes', async t => {
+  const f = await purchasedEnterprise(t);
+  f.batch.endDate = new Date(Date.now() - 86400000);
+  const created = await f.call('company', '/renewal/create-order', await f.renewalPayload());
+  assert.equal(created.status, 200);
+  const order = created.body.order, response = f.capture(order), oldExpiry = +f.batch.endDate;
+  const isolation = require('../src/middleware/enterprisePaymentIsolation');
+  let rejected = false;
+  await isolation({ method: 'POST', body: response }, { status(code) { assert.equal(code, 400); return this; }, json() { rejected = true; } }, () => assert.fail('Renewal payment escaped Enterprise verification'));
+  assert.equal(rejected, true);
+  assert.equal((await f.call('company', '/confirm', { ...response, razorpay_signature: '0'.repeat(64) })).status, 400);
+  const payment = f.state.gatewayPayments.get(response.razorpay_payment_id);
+  payment.status = 'authorized'; assert.equal((await f.call('company', '/confirm', response)).status, 409);
+  payment.status = 'captured'; payment.amount = 100; assert.equal((await f.call('company', '/confirm', response)).status, 409);
+  payment.amount = order.amount;
+  f.state.users[0].companyId = OTHER;
+  assert.equal((await f.call('company', '/confirm', response)).status, 403);
+  assert.equal(+f.batch.endDate, oldExpiry); assert.equal(f.batch.renewalCount, 0);
+});
+
+test('renewing an Enterprise addition preserves the primary plan and all license counts', async t => {
+  const f = await purchasedEnterprise(t);
+  const { calculateAddition } = require('../src/services/enterpriseAddition.service');
+  const counts = { systemCount: 16, serverCount: 0, phoneCount: 0, billingCycle: 'yearly' };
+  const calc = await calculateAddition(f.company, counts);
+  const { order } = await f.service.createAdditionOrder(f.company, { ...counts, purchaseKey: crypto.randomUUID(), expectedPaise: calc.totals.totalPaise });
+  await f.call('company', '/confirm', f.capture(order));
+  const primary = f.batch, primaryExpiry = +primary.endDate;
+  f.batch = f.state.batches[1];
+  f.batch.endDate = new Date(Date.now() - 86400000);
+  const renewed = await f.service.createRenewalOrder(f.company, await f.renewalPayload());
+  assert.equal(renewed.order.amount, order.amount);
+  assert.equal((await f.call('company', '/confirm', f.capture(renewed.order))).status, 200);
+  assert.equal(+primary.endDate, primaryExpiry); assert.equal(f.company.plan.systemCount, 26);
+  assert.equal(f.state.batches.length, 2); assert.equal(f.batch.priceType, 'renewal');
+  assert.equal(String(f.company.enterpriseSubscriptionId), String(primary._id));
+  assert.equal(f.state.allocations.length, 2);
+});
+
+test('direct companies use the same Dynamic Pricing for ordinary and Enterprise Add Systems', async t => {
+  const f = setup(t);
+  f.state.users[0].companyId = DIRECT;
+  assert.equal((await f.call('superadmin', `/${DIRECT}`, f.quoteBody)).status, 200);
+  const initial = await f.checkout();
+  assert.equal((await f.call('company', '/confirm', f.capture(initial.body.order))).status, 200);
+  const company = f.state.companies[2];
+  const { calculateAddition } = require('../src/services/enterpriseAddition.service');
+  const router = require('../src/routes/add-system.routes');
+  const handler = router.stack.find(layer => layer.route?.path === '/calculate').route.stack.at(-1).handle;
+  const counts = { systemCount: 3, serverCount: 2, phoneCount: 4, billingCycle: 'yearly' };
+  Object.assign(f.state.pricing, { renewal_pricePerSystemYearly: 123, renewal_pricePerServerYearly: 456, renewal_pricePerPhoneYearly: 789, newUser_pricePerSystemYearly: 99999 });
+  const ordinary = { status(code) { assert.equal(code, 200); return this; }, json(value) { this.body = value; } };
+  await handler({ user: { companyId: DIRECT }, body: counts }, ordinary);
+  const enterprise = await calculateAddition(company, counts);
+  assert.equal(enterprise.totalInr, 4437);
+  assert.equal(enterprise.totalInr, ordinary.body.totalInr);
+  assert.equal(enterprise.subtotalSystems, ordinary.body.subtotalSystems);
+  assert.equal(enterprise.subtotalServers, ordinary.body.subtotalServers);
+  assert.equal(enterprise.subtotalPhones, ordinary.body.subtotalPhones);
+  assert.equal(enterprise.pricingSource, 'dynamic');
+  assert.equal((await calculateRenewal(company, { batchId: company.enterpriseSubscriptionId })).totals.baseInr, 2500);
+
+  const purchaseKey = crypto.randomUUID();
+  f.state.pricing.renewal_pricePerSystemYearly = 200;
+  await assert.rejects(f.service.createAdditionOrder(company, { ...counts, purchaseKey, expectedPaise: enterprise.totals.totalPaise }), error => error.status === 409);
+  const latest = await calculateAddition(company, counts);
+  assert.equal(latest.totalInr, 4668);
+  const { order } = await f.service.createAdditionOrder(company, { ...counts, purchaseKey, expectedPaise: latest.totals.totalPaise, amountInr: 1 });
+  assert.equal(order.amount, latest.totals.totalPaise);
+  assert.equal(f.state.additionOrders[0].pricingSource, 'dynamic');
+  assert.equal((await f.call('company', '/confirm', f.capture(order))).status, 200);
+
+  const added = f.state.batches[1]; added.endDate = new Date(Date.now() - 1);
+  const oldRenewal = await calculateRenewal(company, { batchId: added._id });
+  assert.equal(oldRenewal.pricingSource, 'dynamic');
+  f.state.pricing.renewal_pricePerPhoneYearly = 100;
+  const updatedRenewal = await calculateRenewal(company, { batchId: added._id });
+  assert.equal(updatedRenewal.totals.baseInr, 1912);
+  assert.notEqual(updatedRenewal.priceKey, oldRenewal.priceKey);
+  await assert.rejects(f.service.createRenewalOrder(company, { batchId: added._id, priceKey: oldRenewal.priceKey, expectedPaise: oldRenewal.totals.totalPaise }), error => error.status === 409);
+  const renewed = await f.service.createRenewalOrder(company, { batchId: added._id, priceKey: updatedRenewal.priceKey, expectedPaise: updatedRenewal.totals.totalPaise });
+  assert.equal(renewed.order.amount, updatedRenewal.totals.totalPaise);
+  assert.equal(f.state.renewalOrders[0].pricingSource, 'dynamic');
+  const mainRenewal = await calculateRenewal(company, { batchId: company.enterpriseSubscriptionId });
+  assert.equal(mainRenewal.totals.baseInr, 2500); assert.equal(mainRenewal.pricingSource, 'enterprise');
 });

@@ -220,7 +220,7 @@ async function authPayload(user, authContext = {}) {
   }
   if (!tenant && user.role === 'superadmin') tenant = await getOrCreateMainTenant(user._id);
   const dashboardUrl = buildDashboardUrl(user, tenant);
-  const redirectUrl = await require('../services/enterpriseLogin.service').enterpriseLoginDestination(user, dashboardUrl);
+  const redirectUrl = await require('../services/enterpriseLogin.service').enterpriseLoginDestination(user, dashboardUrl, company);
 
   return {
     token: sign(user, authContext),
@@ -423,7 +423,9 @@ router.post('/verify-otp', async (req, res) => {
       user: updatedUser,
       company,
       tenant,
-      redirectUrl: buildDashboardUrl(updatedUser, tenant),
+      redirectUrl: company?.status === 'pending_payment'
+        ? new URL('/register', buildDashboardUrl(updatedUser, tenant)).href
+        : buildDashboardUrl(updatedUser, tenant),
     });
   } catch (err) {
     return res.status(500).json({ message: err.message });

@@ -239,13 +239,15 @@ export default function Layout() {
       }),
   })).filter(section => section.items.length > 0);
 
-  // \u2705 FIX: Check BOTH isActive flag AND expiry date (same logic as PaymentsPage)
-  // Previously only checked isActive — plan could be "active" but expired
+  // Enterprise plans and Add-System purchases are paid subscription batches.
+  // Include those entitlements when deciding whether payment needs attention.
   const _now = new Date();
-  const _exp = new Date(company?.plan?.expiresAt || 0);
-  const planActive = company?.plan?.isActive && _now < _exp;
+  const planActive = company?.plan?.isActive === true
+    && (!company.plan.expiresAt || _now < new Date(company.plan.expiresAt));
   const hasSystemLicense = Number(company?.plan?.systemCount || company?.plan?.systemLimit || 0) > 0;
-  const addSystemBatchActive = company?.entitlement?.batchActive === true;
+  const addSystemBatchActive = company?.entitlement?.batchActive === true
+    && (!company.entitlement.batchExpiresAt || _now < new Date(company.entitlement.batchExpiresAt));
+  const paymentNeedsAttention = Boolean(company) && !planActive && !addSystemBatchActive;
   const licenseActive = planActive || addSystemBatchActive || hasSystemLicense;
   const planLabel = planActive ? 'Active' : addSystemBatchActive ? 'Add-System Active' : hasSystemLicense ? 'License Active' : 'Unpaid';
 
@@ -364,8 +366,8 @@ export default function Layout() {
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                     {label.split(' ').slice(1).join(' ')}
                   </span>
-                  {label.includes('Payments') && !planActive && (
-                    <span style={{ marginLeft: 6, fontSize: 10, color: '#f59e0b', fontWeight: 700 }}>!</span>
+                  {label.includes('Payments') && paymentNeedsAttention && (
+                    <span title="No active paid subscription. Open Payments to activate or renew." aria-label="Payment required" style={{ marginLeft: 6, fontSize: 10, color: '#f59e0b', fontWeight: 700 }}>!</span>
                   )}
                 </NavLink>
               ))}

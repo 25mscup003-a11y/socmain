@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { requireRegistrationPayment } = require('./registrationPayment');
 
 const authenticate = async (req, res, next) => {
   const header = req.headers.authorization;
@@ -18,7 +19,7 @@ const authenticate = async (req, res, next) => {
     if (targetCompanyId && ['superadmin', 'partner_admin'].includes(req.user.role)) {
       req.user.companyId = targetCompanyId;
     }
-    next();
+    return requireRegistrationPayment(req, res, next);
   } catch {
     return res.status(401).json({ message: 'Invalid or expired token' });
   }
