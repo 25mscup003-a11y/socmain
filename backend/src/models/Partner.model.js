@@ -84,6 +84,13 @@ const PartnerSchema = new mongoose.Schema({
     inactiveLicenses:  { type: Number, default: 0 },
     lastExpiryAt:      { type: Date, default: null },
   },
+  enterpriseLegacyConsumed: { type: Number, default: 0 },
+  enterpriseAllocations: [{
+    _id: false,
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'EnterpriseOrder' },
+    quantity: Number,
+    allocatedAt: Date,
+  }],
   agentLicenseAutoPay: {
     enabled:     { type: Boolean, default: false },
     paymentId:   { type: String, default: '' },

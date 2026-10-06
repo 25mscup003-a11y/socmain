@@ -4304,7 +4304,7 @@ function ProfileSectionPanel({ section, live, profile, setProfile, saveLocal, fi
         } else if (type.includes('company') || title.includes('company') || msg.includes('company')) {
           target = '/partner/companies';
         } else if (type.includes('user') || type.includes('manager') || title.includes('user') || msg.includes('user')) {
-          target = '/partner/users';
+          target = '/partner/analyst';
         } else if (type.includes('security') || title.includes('security') || msg.includes('security')) {
           target = 'security';
         } else if (type.includes('alert') || type.includes('ticket') || type.includes('incident') || title.includes('alert')) {

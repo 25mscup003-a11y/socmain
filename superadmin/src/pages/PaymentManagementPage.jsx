@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '../api/axios';
 import Swal from 'sweetalert2';
+import EnterpriseManagement from '../components/EnterpriseManagement';
+import { useSearchParams } from 'react-router-dom';
 
 const fmtInr  = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
@@ -36,7 +38,9 @@ const StatCard = ({ icon, label, value, color, sub }) => (
 );
 
 export default function PaymentManagementPage() {
-  const [tab, setTab] = useState('pricing');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get('tab') === 'enterprise' ? 'enterprise' : 'pricing');
+  useEffect(() => { if (searchParams.get('tab') === 'enterprise') setTab('enterprise'); }, [searchParams]);
 
   // Pricing — two sets stored separately
   const [pricing,      setPricing]      = useState(null); // { newUser:{...}, renewal:{...} }
@@ -201,6 +205,7 @@ export default function PaymentManagementPage() {
 
   const tabs = [
     { id:'pricing',       icon:'💵', label:'Dynamic Pricing' },
+    { id:'enterprise',    icon:'🏢', label:'Enterprise' },
     { id:'subscriptions', icon:'📋', label:'Subscriptions' },
     { id:'payments',      icon:'💰', label:'Payments' },
     { id:'autopay',       icon:'🔄', label:'AutoPay Control' },
@@ -266,6 +271,7 @@ export default function PaymentManagementPage() {
       </div>
 
       {/* ══════════════ PRICING TAB ══════════════ */}
+      {tab === 'enterprise' && <EnterpriseManagement baseUrl="/superadmin/enterprise-plans" initialCompanyId={searchParams.get('companyId')} />}
       {tab==='pricing' && (
         <div>
           {pLoading ? (

@@ -23,12 +23,21 @@ const mongoose = require('mongoose');   // ✅ FIX: needed for ObjectId conversi
 const jwt      = require('jsonwebtoken');
 const Razorpay = require('razorpay');
 const AddSystemSubscription = require('../models/AddSystemSubscription.model');
-const { isBasePlanActive } = require('../utils/subscriptionEntitlement');
+const recalculateTotals = require('../services/recalculateLicenseTotals.service');
 const Company  = require('../models/Company.model');
 const Partner  = require('../models/Partner.model');
 const PaymentHistory = require('../models/PaymentHistory.model');
 const Pricing  = require('../models/Pricing.model');
 const { authenticate, requireCompanyAdmin } = require('../middleware/auth.middleware');
+router.use(require('../middleware/enterprisePaymentIsolation'));
+// Enterprise registrations add licenses through their server-priced checkout.
+router.post(['/create-order', '/confirm'], authenticate, requireCompanyAdmin, async (req, res, next) => {
+  try {
+    const company = await require('../services/enterpriseQuote.service').companyForEnterprise(req.user);
+    if (company.enterpriseSubscriptionId) return res.status(409).json({ message: 'Use Enterprise Add Systems for your company pricing and billing cycle.' });
+    next();
+  } catch (error) { res.status(error.status || 503).json({ message: error.status ? error.message : 'Unable to verify company billing.' }); }
+});
 
 function optionalAuthenticate(req, _res, next) {
   const header = req.headers.authorization;
@@ -139,12 +148,7 @@ function withCheckoutFees(baseInr, includeFees = false) {
   };
 }
 
-function getPeriodEnd(billingCycle, from = new Date()) {
-  const d = new Date(from);
-  if (billingCycle === 'yearly') d.setFullYear(d.getFullYear() + 1);
-  else d.setMonth(d.getMonth() + 1);
-  return d;
-}
+const { getPeriodEnd } = require('../utils/billingPeriod');
 
 function getRazorpay() {
   const keyId     = process.env.RAZORPAY_KEY_ID;
@@ -241,7 +245,7 @@ async function getPartnerLicenseStock(companyId) {
   ]);
   const activeStock = Number(partner.agentLicenseSummary?.activeLicenses || 0);
   const allocated = 0;
-  const legacyCredit = Number(legacyAllocation?.allocated || 0);
+  const legacyCredit = Math.max(Number(legacyAllocation?.allocated || 0) - Number(partner.enterpriseLegacyConsumed || 0), 0);
   return { limited: true, company, partner, activeStock, allocated, available: Math.max(activeStock + legacyCredit, 0) };
 }
 
@@ -290,98 +294,6 @@ async function markExpiredBatches(companyId) {
 }
 
 // ── KEY HELPER: Recalculate total system/server count and update Company ────────
-async function recalculateTotals(companyId) {
-  // ✅ Convert to ObjectId FIRST — critical for aggregate $match
-  const oid = new mongoose.Types.ObjectId(companyId.toString());
-  const now = new Date();
-
-  // Expire stale batches using ObjectId
-  await AddSystemSubscription.updateMany(
-    { companyId: oid, status: 'active', endDate: { $lt: now } },
-    { $set: { status: 'expired' } }
-  );
-
-  // Sum all still-active add-system batches
-  const result = await AddSystemSubscription.aggregate([
-    { $match: { companyId: oid, status: 'active' } },   // ✅ ObjectId, not string
-    { $group: {
-	      _id: null,
-	      totalSys: { $sum: '$addedSystemCount' },
-	      totalSrv: { $sum: '$addedServerCount' },
-	      totalPhn: { $sum: '$addedPhoneCount' },
-	    }},
-	  ]);
-	  const addedSys = result[0]?.totalSys || 0;
-	  const addedSrv = result[0]?.totalSrv || 0;
-	  const addedPhn = result[0]?.totalPhn || 0;
-
-	  console.log(`[recalc] aggregate result: addedSys=${addedSys}, addedSrv=${addedSrv}, addedPhn=${addedPhn}`);
-
-  // Load current company to get baseSystemCount
-  const company = await Company.findById(oid);
-  if (!company) return null;
-
-  const hasPaidBasePlan = isBasePlanActive(company.plan, now);
-	  let storedBaseSys = Number(company.plan?.baseSystemCount) || 0;
-	  let storedBaseSrv = Number(company.plan?.baseServerCount) || 0;
-	  let storedBasePhn = Number(company.plan?.basePhoneCount) || 0;
-	  const currentTotalSys = Number(company.plan?.systemCount) || 0;
-	  const currentTotalSrv = Number(company.plan?.serverCount) || 0;
-	  const currentTotalPhn = Number(company.plan?.phoneCount) || 0;
-
-  // Older recalculations could erase expired base counts. Recover the original
-  // registration quantities from payment history, then preserve them forever.
-  if (storedBaseSys + storedBaseSrv + storedBasePhn === 0) {
-    const originalBasePayment = await PaymentHistory.findOne({
-      companyId: oid,
-      status: 'captured',
-      isUpgrade: false,
-      planType: { $ne: 'add_system' },
-    }).sort({ paidAt: -1, createdAt: -1 }).lean();
-    storedBaseSys = Number(originalBasePayment?.systemCount) || 0;
-    storedBaseSrv = Number(originalBasePayment?.serverCount) || 0;
-    storedBasePhn = Number(originalBasePayment?.phoneCount) || 0;
-  }
-
-  // Base registration plan is independent from add-system batches.
-  // If the base plan is unpaid/inactive, active add-system batches still count,
-  // but its stored quantities remain available for display and renewal.
-  const configuredBaseSys = storedBaseSys > 0 ? storedBaseSys : Math.max(0, currentTotalSys - addedSys);
-  const configuredBaseSrv = storedBaseSrv > 0 ? storedBaseSrv : Math.max(0, currentTotalSrv - addedSrv);
-  const configuredBasePhn = storedBasePhn > 0 ? storedBasePhn : Math.max(0, currentTotalPhn - addedPhn);
-  const baseSys = hasPaidBasePlan
-    ? configuredBaseSys
-    : 0;
-	  const baseSrv = hasPaidBasePlan
-	    ? configuredBaseSrv
-	    : 0;
-	  const basePhn = hasPaidBasePlan
-	    ? configuredBasePhn
-	    : 0;
-
-	  const totalSys = baseSys + addedSys;
-	  const totalSrv = baseSrv + addedSrv;
-	  const totalPhn = basePhn + addedPhn;
-
-  // ✅ Update plan.systemCount = total (what every page reads)
-  const updated = await Company.findByIdAndUpdate(
-    oid,
-    {
-	      'plan.baseSystemCount': configuredBaseSys,
-	      'plan.baseServerCount': configuredBaseSrv,
-	      'plan.basePhoneCount':  configuredBasePhn,
-	      'plan.systemCount':     totalSys,
-	      'plan.serverCount':     totalSrv,
-	      'plan.phoneCount':      totalPhn,
-	      'plan.systemLimit':     totalSys + totalSrv + totalPhn,   // legacy compat
-    },
-    { new: true }
-  );
-
-	  console.log(`[recalc] ✅ activeBase=${baseSys}+${baseSrv}+${basePhn} | storedBase=${configuredBaseSys}+${configuredBaseSrv}+${configuredBasePhn} | added=${addedSys}+${addedSrv}+${addedPhn} | total=${totalSys}+${totalSrv}+${totalPhn}`);
-  return updated;
-}
-
 // ── POST /api/add-system/create-order ─────────────────────────────────────────
 router.post('/create-order', authenticate, requireCompanyAdmin, async (req, res) => {
 	  const {
@@ -625,6 +537,7 @@ router.post('/renew/:id', authenticate, requireCompanyAdmin, async (req, res) =>
       companyId: req.user.companyId,
     });
     if (!batch) return res.status(404).json({ message: 'Batch not found' });
+    if (batch.priceType?.startsWith('enterprise')) return res.status(409).json({ message: 'Use Enterprise to request your next plan quote.' });
 
     const priceSet = await getEffectiveRenewalPriceSet(req.user.companyId);
 	    const baseInr  = calcTotal(priceSet, batch.addedSystemCount, batch.addedServerCount, batch.addedPhoneCount || 0, billingCycle);
@@ -681,6 +594,7 @@ router.post('/renew-confirm/:id', authenticate, requireCompanyAdmin, async (req,
       companyId: req.user.companyId,
     });
     if (!oldBatch) return res.status(404).json({ message: 'Batch not found' });
+    if (oldBatch.priceType?.startsWith('enterprise')) return res.status(409).json({ message: 'Use Enterprise to request your next plan quote.' });
 
     const priceSet = await getEffectiveRenewalPriceSet(req.user.companyId);
 	    const baseAmountInr = calcTotal(priceSet, oldBatch.addedSystemCount, oldBatch.addedServerCount, oldBatch.addedPhoneCount || 0, billingCycle);
@@ -781,6 +695,7 @@ router.post('/autopay/:id', authenticate, requireCompanyAdmin, async (req, res) 
   try {
     const batch = await AddSystemSubscription.findOne({ _id: req.params.id, companyId: req.user.companyId });
     if (!batch) return res.status(404).json({ message: 'Batch not found' });
+    if (batch.priceType?.startsWith('enterprise')) return res.status(409).json({ message: 'Use Enterprise to request your next plan quote.' });
     await Company.findByIdAndUpdate(req.user.companyId, {
       'plan.autoPay': false,
       'plan.autoPayMethod': '',
@@ -804,6 +719,7 @@ router.post('/autopay-order/:id', authenticate, requireCompanyAdmin, async (req,
       companyId: req.user.companyId,
     });
     if (!batch) return res.status(404).json({ message: 'Batch not found' });
+    if (batch.priceType?.startsWith('enterprise')) return res.status(409).json({ message: 'Use Enterprise to request your next plan quote.' });
 
     const razorpay = getRazorpay();
     const amountInr = Number(batch.amountPaid || 0);
@@ -841,6 +757,7 @@ router.post('/autopay-confirm/:id', authenticate, requireCompanyAdmin, async (re
   try {
     const batch = await AddSystemSubscription.findOne({ _id: req.params.id, companyId: req.user.companyId });
     if (!batch) return res.status(404).json({ message: 'Batch not found' });
+    if (batch.priceType?.startsWith('enterprise')) return res.status(409).json({ message: 'Use Enterprise to request your next plan quote.' });
 
     const now = new Date();
     await Company.findByIdAndUpdate(req.user.companyId, {

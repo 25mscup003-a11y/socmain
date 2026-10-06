@@ -3,6 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { validateEmail } from '../utils/validate';
+import PaginationControls from '../components/PaginationControls';
+import './UsersPage.css';
+
+const PAGE_SIZE = 6;
 
 const ROLE_STYLE = {
   company_admin:    { bg:'rgba(46, 16, 101, 0.7)', color:'#c4b5fd', border:'#7c3aed', label:'Company Admin' },
@@ -23,6 +27,15 @@ const ANALYST_INVITE_ROLES = [
   ['l3_analyst', 'L3 Analyst (Threat Hunting & Forensics)'],
   ['l4_analyst', 'L4 Analyst (Threat Intelligence Incidents Only)'],
 ];
+
+const ANALYST_ROLES = ['analyst', ...ANALYST_INVITE_ROLES.map(([role]) => role)];
+const PARTNER_STAFF_ROLES = ['soc_manager', ...ANALYST_ROLES];
+const staffStatus = user => {
+  if (['suspended', 'invited', 'expired'].includes(user.accountStatus)) {
+    return user.accountStatus.charAt(0).toUpperCase() + user.accountStatus.slice(1);
+  }
+  return user.isActive === false || user.accountStatus === 'disabled' ? 'Disabled' : 'Active';
+};
 
 const ANALYST_ACCESS = [
   { icon:'📊', label:'SOC Operations Command',  desc:'Real-time alert monitoring & workforce metrics' },
@@ -45,6 +58,8 @@ export default function UsersPage() {
   const [users,   setUsers]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [apiErr,  setApiErr]  = useState('');
+  const [updatingId, setUpdatingId] = useState(null);
+  const [page, setPage] = useState(1);
   const [companies, setCompanies] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState('');
@@ -63,11 +78,17 @@ export default function UsersPage() {
   const invitePanelRef = useRef(null);
 
   useEffect(() => {
-    api.get(autoOpenInvite || isSocManager ? '/soc/staff' : '/users')
-      .then(r => setUsers(r.data || []))
-      .catch(err => setApiErr(err.response?.data?.message || 'Failed to load users'))
-      .finally(() => setLoading(false));
-  }, [autoOpenInvite, isSocManager]);
+    let cancelled = false;
+    setLoading(true);
+    setUsers([]);
+    setApiErr('');
+    setPage(1);
+    api.get(isPartnerAdmin ? '/partner/staff' : autoOpenInvite || isSocManager ? '/soc/staff' : '/users', { skipCache: true })
+      .then(({ data }) => { if (!cancelled) setUsers(Array.isArray(data) ? data : []); })
+      .catch(err => { if (!cancelled) setApiErr(err.response?.data?.message || 'Failed to load staff'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [autoOpenInvite, isSocManager, isPartnerAdmin, me?.partnerId]);
 
   const loadInvites = () => {
     setInvitesLoading(true);
@@ -132,20 +153,28 @@ export default function UsersPage() {
   };
 
   const toggleActive = async (u) => {
+    setUpdatingId(u._id);
+    const isActive = staffStatus(u) === 'Active';
     try {
       if (['soc_manager','l1_analyst','l2_analyst','l3_analyst','l4_analyst'].includes(u.role)) {
-        const { data } = await api.patch(`/soc/staff/${u._id}/status`, { status:u.isActive ? 'disabled' : 'active' });
+        const { data } = await api.patch(`/soc/staff/${u._id}/status`, { status:isActive ? 'disabled' : 'active' });
         setUsers(prev => prev.map(x => x._id === u._id ? { ...x, ...data.user } : x));
       } else {
-        const { data } = await api.patch(`/users/${u._id}`, { isActive: !u.isActive });
+        const { data } = await api.patch(`/users/${u._id}`, { isActive: !isActive, accountStatus: isActive ? 'disabled' : 'active' });
         setUsers(prev => prev.map(x => x._id === data._id ? data : x));
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Update failed');
+    } finally {
+      setUpdatingId(null);
     }
   };
 
-  const testers = autoOpenInvite
+  const partnerStaff = users.filter(u => PARTNER_STAFF_ROLES.includes(u.role));
+  const totalPages = Math.max(1, Math.ceil(partnerStaff.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedStaff = partnerStaff.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const testers = isPartnerAdmin ? partnerStaff : autoOpenInvite
     ? users.filter(u => ['soc_manager'].includes(u.role))
     : users.filter(u => ['partner_admin', 'company_admin', 'department_admin', 'soc_manager'].includes(u.role));
   const activeTesters = testers.filter(u => u.isActive !== false);
@@ -155,16 +184,18 @@ export default function UsersPage() {
     return 0;
   });
 
-  const socManagerCount = users.filter(u => u.role === 'soc_manager').length;
-  const analystCount = users.filter(u => ['l1_analyst','l2_analyst','l3_analyst','l4_analyst'].includes(u.role)).length;
+  const workforce = isPartnerAdmin ? partnerStaff : users;
+  const socManagerCount = workforce.filter(u => u.role === 'soc_manager').length;
+  const analystCount = workforce.filter(u => ANALYST_ROLES.includes(u.role)).length;
+  const activeStaffCount = workforce.filter(u => staffStatus(u) === 'Active').length;
 
   return (
     <div>
       {/* ── Page Header ── */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20, flexWrap:'wrap', gap:12 }}>
         <div>
-          <h2 style={{ fontSize:24, color:'#f8fafc', margin:0, fontWeight:900, letterSpacing:-0.5 }}>👥 Team & SOC Workforce Command</h2>
-          <div style={{ color:'#38bdf8', fontSize:13, marginTop:3 }}>Superadmin & Partner level account management, invitations, and role delegation</div>
+          <h2 style={{ fontSize:24, color:'#f8fafc', margin:0, fontWeight:900, letterSpacing:-0.5 }}>👥 {isPartnerAdmin ? 'Analyst' : 'Team & SOC Workforce Command'}</h2>
+          <div style={{ color:'#38bdf8', fontSize:13, marginTop:3 }}>{isPartnerAdmin ? 'SOC Managers and Analysts belonging to your partner account' : 'Superadmin & Partner level account management, invitations, and role delegation'}</div>
         </div>
       </div>
 
@@ -172,22 +203,22 @@ export default function UsersPage() {
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:14, marginBottom:22 }}>
         <div style={{ ...panel, padding:14 }}>
           <small style={{ color:'#64748b', fontSize:10, fontWeight:800, textTransform:'uppercase' }}>Total Workforce</small>
-          <div style={{ color:'#67e8f9', fontSize:22, fontWeight:900, marginTop:4 }}>{users.length} Users</div>
+          <div style={{ color:'#67e8f9', fontSize:22, fontWeight:900, marginTop:4 }}>{loading || apiErr ? '—' : workforce.length} {isPartnerAdmin ? 'Members' : 'Users'}</div>
         </div>
 
         <div style={{ ...panel, padding:14 }}>
           <small style={{ color:'#64748b', fontSize:10, fontWeight:800, textTransform:'uppercase' }}>SOC Managers</small>
-          <div style={{ color:'#38bdf8', fontSize:22, fontWeight:900, marginTop:4 }}>{socManagerCount} Managers</div>
+          <div style={{ color:'#38bdf8', fontSize:22, fontWeight:900, marginTop:4 }}>{loading || apiErr ? '—' : socManagerCount} Managers</div>
         </div>
 
         <div style={{ ...panel, padding:14 }}>
-          <small style={{ color:'#64748b', fontSize:10, fontWeight:800, textTransform:'uppercase' }}>Tiered Analysts</small>
-          <div style={{ color:'#c4b5fd', fontSize:22, fontWeight:900, marginTop:4 }}>{analystCount} Analysts</div>
+          <small style={{ color:'#64748b', fontSize:10, fontWeight:800, textTransform:'uppercase' }}>Analysts</small>
+          <div style={{ color:'#c4b5fd', fontSize:22, fontWeight:900, marginTop:4 }}>{loading || apiErr ? '—' : analystCount} Analysts</div>
         </div>
 
         <div style={{ ...panel, padding:14 }}>
-          <small style={{ color:'#64748b', fontSize:10, fontWeight:800, textTransform:'uppercase' }}>Pending Invites</small>
-          <div style={{ color:'#facc15', fontSize:22, fontWeight:900, marginTop:4 }}>{invites.length} Sent</div>
+          <small style={{ color:'#64748b', fontSize:10, fontWeight:800, textTransform:'uppercase' }}>{isPartnerAdmin ? 'Active Members' : 'Pending Invites'}</small>
+          <div style={{ color:'#facc15', fontSize:22, fontWeight:900, marginTop:4 }}>{isPartnerAdmin ? `${loading || apiErr ? '—' : activeStaffCount} Active` : `${invites.length} Sent`}</div>
         </div>
       </div>
 
@@ -345,10 +376,65 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Team Users List / Cards */}
+      {isPartnerAdmin ? (
+        <section className="partner-staff-panel" aria-labelledby="partner-staff-title">
+          <div className="partner-staff-heading">
+            <h3 id="partner-staff-title">SOC Managers &amp; Analysts</h3>
+            {!loading && !apiErr && <span>{partnerStaff.length} members</span>}
+          </div>
+          <div className="partner-staff-scroll" role="region" aria-label="Partner staff table" tabIndex={0}>
+            <table className="partner-staff-table" aria-labelledby="partner-staff-title" aria-busy={loading}>
+              <thead>
+                <tr>
+                  {['Name', 'Email', 'Role', 'Status', 'Action'].map(label => <th key={label} scope="col">{label}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={5} className="partner-staff-empty">Loading SOC Managers and Analysts…</td></tr>
+                ) : apiErr ? (
+                  <tr><td colSpan={5} className="partner-staff-empty">Staff list is unavailable. Please reload to retry.</td></tr>
+                ) : partnerStaff.length === 0 ? (
+                  <tr><td colSpan={5} className="partner-staff-empty">No SOC Managers or Analysts found for your partner account.</td></tr>
+                ) : pagedStaff.map(member => {
+                  const status = staffStatus(member);
+                  const roleStyle = ROLE_STYLE[member.role];
+                  const busy = updatingId === member._id;
+                  return (
+                    <tr key={member._id}>
+                      <th scope="row">{member.name || '—'}</th>
+                      <td className="partner-staff-email">{member.email || '—'}</td>
+                      <td><span className="partner-staff-badge" style={{ background:roleStyle.bg, color:roleStyle.color, borderColor:roleStyle.border }}>{roleStyle.label}</span></td>
+                      <td><span className={`partner-staff-badge partner-staff-status-${status.toLowerCase()}`}>{status}</span></td>
+                      <td>
+                        {['Active', 'Disabled', 'Suspended'].includes(status) ? (
+                          <button
+                            type="button"
+                            className={`partner-staff-action${status === 'Active' ? ' partner-staff-action-disable' : ''}`}
+                            disabled={updatingId !== null}
+                            aria-label={`${status === 'Active' ? 'Disable' : 'Enable'} ${member.name || member.email}`}
+                            onClick={() => toggleActive(member)}
+                          >
+                            {busy ? 'Updating…' : status === 'Active' ? 'Disable' : 'Enable'}
+                          </button>
+                        ) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {!loading && !apiErr && partnerStaff.length > 0 && (
+            <div className="partner-staff-pagination">
+              <PaginationControls page={currentPage} total={partnerStaff.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+            </div>
+          )}
+        </section>
+      ) : (
       <div style={panel}>
         <h3 style={{ margin:'0 0 18px', color:'#f8fafc', fontSize:16, fontWeight:900 }}>
-          {isPartnerAdmin ? 'Partner Admin Account & Active Team Members' : 'Active Team Members'}
+          Active Team Members
         </h3>
         {loading ? (
           <div style={{ color:'#94a3b8', padding:24, fontSize:13 }}>Loading team members…</div>
@@ -393,6 +479,7 @@ export default function UsersPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

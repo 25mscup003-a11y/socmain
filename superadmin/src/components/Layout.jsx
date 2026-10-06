@@ -57,6 +57,7 @@ export default function Layout() {
     { to: '/superadmin/agent-security', Icon: Lock, label: 'AJNAT Security' },
     { to: '/superadmin/user-passwords', Icon: KeyRound, label: 'User Passwords' },
     { to: '/superadmin/audit', Icon: ClipboardList, label: 'Audit' },
+    { to: '/superadmin/partner-access-accounts', Icon: Handshake, label: 'Partner Access Account' },
   ];
 
   return (

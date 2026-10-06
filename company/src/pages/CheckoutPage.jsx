@@ -35,6 +35,9 @@ export default function CheckoutPage() {
   const duration = durationOptions.find(option => option.value === selectedDuration) || durationOptions[0];
 
   const breakdown = useMemo(() => {
+    if (['enterprise', 'enterprise-addition'].includes(checkout?.mode) && checkout.totals) {
+      return { payable: checkout.totals.totalInr, base: checkout.totals.baseInr, gst: checkout.totals.gstInr, fees: checkout.totals.feeInr };
+    }
     const base = Number(checkout?.amountInr || checkout?.calc?.totalInr || 0) * (isPartnerPlatform ? duration.multiplier : 1);
     const gst = base * 0.18;
     const fees = base * 0.02;
@@ -78,6 +81,10 @@ export default function CheckoutPage() {
   });
 
   const createOrder = async () => {
+    if (checkout.mode === 'enterprise-addition') return api.post('/payment/enterprise/addition/create-order', { ...counts, purchaseKey: checkout.purchaseKey, expectedPaise: checkout.totals.totalPaise });
+    if (checkout.mode === 'enterprise') {
+      return api.post('/payment/enterprise/create-order', { quoteId: checkout.quoteId, revision: checkout.revision });
+    }
     if (isPartnerPlatform) {
       return api.post('/payment/partner-create-order', { checkoutFees: true, durationMonths, autoPay: checkout.autoPay !== false }, { timeout: 60000 });
     }
@@ -91,6 +98,7 @@ export default function CheckoutPage() {
   };
 
   const confirmPayment = async (response) => {
+    if (['enterprise', 'enterprise-addition'].includes(checkout.mode)) return api.post('/payment/enterprise/confirm', response);
     if (isPartnerPlatform) {
       return api.post('/payment/partner-confirm', { ...response, checkoutFees: true, durationMonths, autoPay: checkout.autoPay !== false }, { timeout: 60000 });
     }
@@ -190,6 +198,7 @@ export default function CheckoutPage() {
             ))}
           </div>}
 
+          {checkout.periodEnd && <p style={{ color: '#a5b4fc' }}>Added to your account. A full {billingCycle === 'yearly' ? 'year' : 'month'} starts on the payment date. Next billing is one {billingCycle === 'yearly' ? 'year' : 'month'} after payment.</p>}
           <div style={{ border: '1px solid #1e3a5f', borderRadius: 10, padding: 18, background: '#07101d' }}>
             <div style={{ color: '#60a5fa', fontWeight: 800, marginBottom: 12 }}>Required Details</div>
             {row('Email', email || 'Not provided')}

@@ -183,6 +183,8 @@ function createScalableReadCache(options = {}) {
     if (!rule) return next();
     const claims = verifiedClaims(req);
     if (!claims) return next();
+    // Support sessions must reach live actor/scope validation on every request.
+    if (claims.impersonatedByRole === 'partner_admin') return next();
     req.user = claims;
     const key = requestCacheKey(req, claims, rule);
 

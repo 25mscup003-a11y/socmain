@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useSearchParams, useParams, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useSearchParams, useParams, useNavigate, Link, Navigate } from 'react-router-dom';
 import api from '../api/axios';
 import { SOCKET_URL, connectSocket, socketOptions, io } from '../api/config';
 import { useAuth } from '../context/AuthContext';
 import Swal from 'sweetalert2';
 import PartnerCompaniesSummary from '../components/PartnerCompaniesSummary';
+import EnterpriseManagement from '../components/EnterpriseManagement';
 
 const emptyRequest = {
   numberOfCompanies: '',
@@ -252,11 +253,11 @@ export default function PartnerDashboardPage({ embedded = false, viewOverride = 
           {view === 'dashboard' && (embedded
             ? <div style={embeddedDashboardShell}><DashboardView embedded partner={partner} companies={companies} summary={summary} setMessage={setMessage} /></div>
             : <PartnerCompaniesSummary partner={partner} companies={companies} companiesLoaded={companiesLoaded} loading={loading} error={summaryError} companiesError={companiesError} onRefresh={() => load(null, true)} />)}
-          {view === 'revenue' && <RevenueView partner={partner} summary={summary} companies={companies} />}
+          {view === 'revenue' && <RevenueView key={user?.partnerId} partnerId={user?.partnerId} companies={companies} companiesLoaded={companiesLoaded} companiesError={companiesError} onRefresh={() => load(null, true)} />}
           {view === 'payment-control' && <PaymentControlView partner={partner} summary={summary} companies={companies} onRefresh={load} setMessage={setMessage} />}
           {view === 'companies' && <CompaniesView companies={companies} partner={partner} summary={summary} />}
           {view === 'subscription' && <SubscriptionView embedded={embedded} partner={partner} summary={summary} requestRows={requestRows} onRefresh={load} />}
-          {view === 'tenant-support' && <PartnerCompanySupportPanel partner={partner} user={user} />}
+          {view === 'tenant-support' && <PartnerCompanySupportView partner={partner} user={user} />}
           {view === 'requests' && (
             <RequestsView
               embedded={embedded}
@@ -1400,17 +1401,26 @@ function DashboardView({ embedded, partner, companies, summary, setMessage }) {
   return null;
 }
 
-function RevenueView({ partner, summary, companies = [] }) {
+function RevenueView({ partnerId, companies = [], companiesLoaded = false, companiesError = '', onRefresh }) {
   const [revenueTab, setRevenueTab] = useState('overview');
   const [allHistoryRows, setAllHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   useEffect(() => {
     let mounted = true;
-    api.get('/partner/revenue/history')
+    setAllHistoryRows([]);
+    setHistoryError('');
+    if (!companiesLoaded || !companies.length) {
+      setHistoryLoading(false);
+      return () => { mounted = false; };
+    }
+    setHistoryLoading(true);
+    api.get('/partner/revenue/history', { skipCache: true })
       .then(({ data }) => { if (mounted) setAllHistoryRows(Array.isArray(data) ? data : []); })
-      .catch(() => { if (mounted) setAllHistoryRows([]); });
+      .catch(() => { if (mounted) setHistoryError('Payment history could not be loaded. Please retry.'); })
+      .finally(() => { if (mounted) setHistoryLoading(false); });
     return () => { mounted = false; };
-  }, []);
-  const summaryCollection = Number(summary.totalCollection || summary.paidRevenue || 0);
+  }, [partnerId, companiesLoaded, companies]);
   const companyRows = companies.map(company => {
     const systemLicenses = Number(company.plan?.systemCount || company.systemCount || 0);
     const serverLicenses = Number(company.plan?.serverCount || company.serverCount || 0);
@@ -1442,67 +1452,19 @@ function RevenueView({ partner, summary, companies = [] }) {
       joined: company.createdAt,
     };
   });
-  const companyCollection = companyRows.reduce((sum, row) => sum + Number(row.collected || 0), 0);
-  const collected = companyCollection || summaryCollection;
-  const paidCompanies = companyRows.filter(row => row.status === 'paid').length;
-  const pendingTotal = companyRows.reduce((sum, row) => sum + Number(row.pending || 0), 0) || Number(summary.pendingRevenue || 0);
-  const rows = companyRows.length ? companyRows : [{
-    id: partner._id || 'partner',
-    name: partner.name || 'Partner',
-    email: partner.ownerUserId?.email || '',
-    plan: 'custom',
-    systems: 0,
-    licenseText: formatLicenseBreakdown(summary.systemCount || summary.totalAgents || 0, summary.serverCount || 0, summary.phoneCount || 0),
-    monthlyRevenue: 0,
-    agents: summary.totalAgents || 0,
-    collected,
-    pending: summary.pendingRevenue || 0,
-    status: collected > 0 ? 'paid' : 'unpaid',
-    subscription: summary.activePlans > 0 ? 'active' : 'pending',
-    lastPaidAt: null,
-    joined: partner.createdAt,
-  }];
-  const fallbackHistoryRows = companies
-    .map(company => ({
-      id: company.latestPayment?._id || company.latestPayment?.paymentId || company._id,
-      company: company.name || 'Company',
-      paymentId: company.latestPayment?.paymentId || company.latestPayment?.orderId || company.razorpay?.paymentId || '-',
-      amount: Number(company.latestPayment?.amountInr || company.revenue || company.plan?.amountPaid || 0),
-      status: company.latestPayment?.status || company.paymentStatus || company.plan?.paymentStatus || 'unpaid',
-      date: company.latestPayment?.paidAt || company.lastPaidAt || company.razorpay?.paidAt || company.plan?.startDate,
-      cycle: company.latestPayment?.billingCycle || company.plan?.billingCycle || 'monthly',
-    }))
-    .filter(row => row.amount > 0 || row.paymentId !== '-');
-  const historyRows = allHistoryRows.length ? allHistoryRows : fallbackHistoryRows;
-  const useFullHistoryOverview = allHistoryRows.length > 0;
-  const paidHistoryRows = historyRows.filter(row => ['captured', 'paid'].includes(String(row.status || '').toLowerCase()));
-  const pendingHistoryRows = historyRows.filter(row => ['created', 'pending', 'unpaid'].includes(String(row.status || '').toLowerCase()));
-  const historyCollection = paidHistoryRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const historyPendingTotal = pendingHistoryRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const overviewCollected = useFullHistoryOverview ? historyCollection : collected;
-  const overviewPendingTotal = useFullHistoryOverview ? historyPendingTotal : pendingTotal;
-  const overviewPaidCompanies = useFullHistoryOverview
-    ? new Set(paidHistoryRows.map(row => row.company).filter(Boolean)).size
-    : paidCompanies;
-  const chartRows = (rows.length ? rows : [])
+  const rows = companyRows;
+  const companyIds = new Set(companies.map(company => String(company._id)));
+  const historyRows = allHistoryRows.filter(row => row.companyId && companyIds.has(String(row.companyId)));
+  const overviewCollected = rows.reduce((sum, row) => sum + row.collected, 0);
+  const overviewPendingTotal = rows.reduce((sum, row) => sum + row.pending, 0);
+  const overviewPaidCompanies = rows.filter(row => row.collected > 0 || ['paid', 'captured'].includes(row.status)).length;
+  const overviewChartRows = rows
     .map(row => ({ ...row, chartValue: Number(row.collected || 0) }))
     .sort((a, b) => b.chartValue - a.chartValue)
     .slice(0, 8);
-  const historyChartRows = Array.from(paidHistoryRows.reduce((map, row) => {
-    const name = row.company || 'Company';
-    map.set(name, (map.get(name) || 0) + Number(row.amount || 0));
-    return map;
-  }, new Map()).entries())
-    .map(([name, chartValue]) => ({ id: name, name, chartValue }))
-    .sort((a, b) => b.chartValue - a.chartValue)
-    .slice(0, 8);
-  const overviewChartRows = useFullHistoryOverview ? historyChartRows : chartRows;
   const maxChartValue = Math.max(...overviewChartRows.map(row => row.chartValue), 1);
   return (
     <div style={dashboardShell}>
-      <header style={dashboardHeader}>
-        <h1 style={dashboardTitle}>Revenue</h1>
-      </header>
       <section style={dashboardCard}>
         <div style={revenueTabHeader}>
           {[
@@ -1513,13 +1475,18 @@ function RevenueView({ partner, summary, companies = [] }) {
             <button key={id} type="button" onClick={() => setRevenueTab(id)} style={revenueTab === id ? revenueTabActive : revenueTabButton}>{label}</button>
           ))}
         </div>
+        {companiesError && <div style={liveNotice} role="alert">{companiesError.replace('Use Sync to retry.', 'Reload to retry.')}</div>}
+        {!companiesLoaded ? (
+          <div style={revenueChartEmpty} role="status">{companiesError ? 'Company revenue is unavailable. Reload to retry.' : 'Loading company revenue…'}</div>
+        ) : (
+        <>
         {revenueTab === 'overview' && (
           <>
             <div style={paymentStatusGrid}>
               <DashboardMetric icon="▣" tone="#16a34a" title="Total Collection" value={fmtInr(overviewCollected)} sub="All time collection" />
               <DashboardMetric icon="▥" tone="#60a5fa" title="Paid Companies" value={overviewPaidCompanies} sub="Payment completed" />
               <DashboardMetric icon="□" tone="#f59e0b" title="Pending Collection" value={fmtInr(overviewPendingTotal)} sub="Awaiting payment" />
-              <DashboardMetric icon="▥" tone="#f59e0b" title="Total Companies" value={summary.totalCompanies || 0} sub="Registered companies" />
+              <DashboardMetric icon="▥" tone="#f59e0b" title="Total Companies" value={rows.length} sub="Registered companies" />
             </div>
             <div style={revenueChartGrid}>
               <section style={revenueChartPanel}>
@@ -1543,7 +1510,7 @@ function RevenueView({ partner, summary, companies = [] }) {
               <section style={revenueChartPanel}>
                 <div style={revenueChartHead}>
                   <h2 style={dashboardCardTitle}>Collection Split</h2>
-                  <span style={revenueChartBadge}>{overviewPaidCompanies}/{summary.totalCompanies || rows.length} paid</span>
+                  <span style={revenueChartBadge}>{overviewPaidCompanies}/{rows.length} paid</span>
                 </div>
                 <div style={revenueSplitWrap}>
                   <div style={revenueDonut(overviewCollected, overviewPendingTotal)}>
@@ -1555,7 +1522,7 @@ function RevenueView({ partner, summary, companies = [] }) {
                   <div style={dashboardLegend}>
                     <Legend color="#22c55e" text={`Collected ${fmtInr(overviewCollected)}`} />
                     <Legend color="#f59e0b" text={`Pending ${fmtInr(overviewPendingTotal)}`} />
-                    <Legend color="#60a5fa" text={`Companies ${summary.totalCompanies || rows.length}`} />
+                    <Legend color="#60a5fa" text={`Companies ${rows.length}`} />
                   </div>
                 </div>
               </section>
@@ -1569,7 +1536,9 @@ function RevenueView({ partner, summary, companies = [] }) {
               <>
                 <thead><tr>{['Company', 'Payment ID', 'Amount', 'Status', 'Billing', 'Date'].map(header => <th key={header} style={revenueTableTh}>{header}</th>)}</tr></thead>
                 <tbody>
-                  {historyRows.length ? historyRows.map(row => (
+                  {historyLoading ? <tr><td style={revenueTableTd} colSpan="6" role="status">Loading payment history…</td></tr>
+                    : historyError ? <tr><td style={revenueTableTd} colSpan="6" role="alert">{historyError} <button type="button" onClick={onRefresh}>Retry</button></td></tr>
+                    : historyRows.length ? historyRows.map(row => (
                     <tr key={row.id || `${row.company}-${row.paymentId}`}>
                       <td style={revenueTableTd}>{row.company}</td>
                       <td style={revenueTableTd}>{row.paymentId}</td>
@@ -1598,11 +1567,14 @@ function RevenueView({ partner, summary, companies = [] }) {
                       <td style={revenueTableTd}>{fmtDate(row.joined)}</td>
                     </tr>
                   ))}
+                  {!rows.length && <tr><td style={{ ...revenueTableTd, textAlign:'center', color:'#64748b' }} colSpan="6">No companies found for your partner account.</td></tr>}
                 </tbody>
               </>
             )}
           </table>
           </div>
+        )}
+        </>
         )}
       </section>
     </div>
@@ -1610,7 +1582,9 @@ function RevenueView({ partner, summary, companies = [] }) {
 }
 
 function PaymentControlView({ partner, summary, companies = [], onRefresh, setMessage }) {
-  const [activeTab, setActiveTab] = useState('pricing');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') === 'enterprise' ? 'enterprise' : 'pricing');
+  useEffect(() => { if (searchParams.get('tab') === 'enterprise') setActiveTab('enterprise'); }, [searchParams]);
   const [selectedType, setSelectedType] = useState('new');
   const [livePricing, setLivePricing] = useState(null);
   const [editablePricing, setEditablePricing] = useState({ newUser: null, renewal: null });
@@ -1787,6 +1761,7 @@ function PaymentControlView({ partner, summary, companies = [], onRefresh, setMe
       <div style={paymentControlTabs}>
         {[
           ['pricing', '💵 Dynamic Pricing'],
+          ['enterprise', '🏢 Enterprise'],
           ['subscriptions', '📋 Subscriptions'],
           ['payments', '💰 Payments'],
           ['autopay', '🔄 AutoPay Control'],
@@ -1795,6 +1770,7 @@ function PaymentControlView({ partner, summary, companies = [], onRefresh, setMe
         ))}
       </div>
 
+      {activeTab === 'enterprise' && <EnterpriseManagement baseUrl="/partner/enterprise-plans" initialCompanyId={searchParams.get('companyId')} />}
       {activeTab === 'pricing' && (
         <div style={paymentControlGrid}>
           <div style={paymentControlLeftColumn}>
@@ -2805,6 +2781,14 @@ function InviteField({ label, value, onChange, placeholder, type = 'text' }) {
       />
     </label>
   );
+}
+
+function PartnerCompanySupportView({ partner, user }) {
+  const [searchParams] = useSearchParams();
+  if (searchParams.get('tab') === 'user-passwords') {
+    return <Navigate to="/partner/user-passwords" replace />;
+  }
+  return <PartnerCompanySupportPanel partner={partner} user={user} />;
 }
 
 function PartnerCompanySupportPanel({ partner, user }) {

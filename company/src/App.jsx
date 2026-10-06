@@ -15,6 +15,7 @@ import AcceptInvitePage from './pages/AcceptInvitePage';
 // Company admin / dept admin pages
 import DashboardPage from './pages/DashboardPage';
 import PartnerDashboardPage from './pages/PartnerDashboardPage';
+import PartnerAuditPage from './pages/PartnerAuditPage';
 import PartnerPaymentPage from './pages/PartnerPaymentPage';
 import AlertsPage from './pages/AlertsPage';
 import DepartmentsPage from './pages/DepartmentsPage';
@@ -46,6 +47,7 @@ import AnalystReports from './pages/analyst/AnalystReports';
 import AnalystSettings from './pages/analyst/AnalystSettings';
 
 import Layout from './components/Layout';
+import PartnerUserPasswords from './components/PartnerUserPasswords';
 import AnalystLayout from './components/AnalystLayout';
 import SocDashboardLayout, { DASHBOARD as SOC_DASHBOARD } from './components/SocDashboardLayout';
 import LogMonitorDashboard from './pages/LogMonitorDashboard';
@@ -172,6 +174,11 @@ function PartnerPortalGate() {
       <Layout />
     </PartnerPlanContext.Provider>
   );
+}
+
+function PartnerUsersRedirect() {
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: '/partner/analyst', search, hash }} replace />;
 }
 
 export default function App() {
@@ -400,12 +407,15 @@ export default function App() {
           <Route path="partner/dashboard" element={<PartnerOnly><PartnerDashboardPage viewOverride="dashboard" /></PartnerOnly>} />
           <Route path="partner/companies" element={<PartnerOnly><PartnerDashboardPage viewOverride="companies" /></PartnerOnly>} />
           <Route path="partner/companies/:companyId" element={<PartnerOnly><PartnerDashboardPage /></PartnerOnly>} />
-          <Route path="partner/users" element={<PartnerOrAdminOnly><UsersPage /></PartnerOrAdminOnly>} />
+          <Route path="partner/analyst" element={<PartnerOrAdminOnly><UsersPage /></PartnerOrAdminOnly>} />
+          <Route path="partner/users" element={<PartnerOrAdminOnly><PartnerUsersRedirect /></PartnerOrAdminOnly>} />
           <Route path="partner/soc-managers" element={<PartnerOnly><PartnerSocManagerPage /></PartnerOnly>} />
           <Route path="partner/revenue" element={<PartnerOnly><PartnerDashboardPage viewOverride="revenue" /></PartnerOnly>} />
           <Route path="partner/payment-control" element={<PartnerOnly><PartnerDashboardPage viewOverride="payment-control" /></PartnerOnly>} />
           <Route path="partner/fraud-intelligence" element={<SuperOrPartnerOnly><FraudDashboardPage /></SuperOrPartnerOnly>} />
           <Route path="partner/company-support" element={<PartnerOnly><PartnerDashboardPage viewOverride="tenant-support" /></PartnerOnly>} />
+          <Route path="partner/user-passwords" element={<PartnerOnly><PartnerUserPasswords /></PartnerOnly>} />
+          <Route path="partner/audit" element={<PartnerOnly><PartnerAuditPage /></PartnerOnly>} />
           <Route path="partner/support" element={<PartnerOnly><PartnerDashboardPage viewOverride="tenant-support" /></PartnerOnly>} />
           <Route path="partner/resources" element={<PartnerOnly><PartnerDashboardPage viewOverride="requests" /></PartnerOnly>} />
           <Route path="partner/subscription" element={<PartnerOnly><PartnerDashboardPage viewOverride="subscription" /></PartnerOnly>} />

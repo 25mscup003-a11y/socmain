@@ -60,16 +60,18 @@ export default function LoginPage() {
     Swal.fire({
       icon: 'success',
       title: '✅ Login Successful',
-      text: 'Redirecting to dashboard…',
+      text: data.user?.role === 'company_admin' && data.redirectUrl?.includes('/company-admin/payments?tab=enterprise')
+        ? 'Your Enterprise plan is ready. Opening payment…' : 'Redirecting to dashboard…',
       timer: 1400,
       showConfirmButton: false,
       background: '#fff',
     }).then(() => {
       loadFromStorage();
-      if (data.redirectUrl && data.redirectUrl.startsWith('http') && !data.redirectUrl.includes(window.location.host)) {
-        window.location.href = data.redirectUrl;
+      const destination = new URL(data.redirectUrl || '/', window.location.origin);
+      if (destination.origin !== window.location.origin) {
+        window.location.href = destination.href;
       } else {
-        setTimeout(() => navigate('/'), 50);
+        setTimeout(() => navigate(destination.pathname + destination.search + destination.hash, { replace: true }), 50);
       }
     });
   };

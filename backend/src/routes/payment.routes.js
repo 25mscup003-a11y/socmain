@@ -80,7 +80,7 @@ async function getPartnerLicenseStock(companyId) {
   ]);
   const activeStock = Number(partner.agentLicenseSummary?.activeLicenses || 0);
   const allocated = 0;
-  const legacyCredit = Number(legacyAllocation?.allocated || 0);
+  const legacyCredit = Math.max(Number(legacyAllocation?.allocated || 0) - Number(partner.enterpriseLegacyConsumed || 0), 0);
   return {
     limited: true,
     company,
@@ -378,6 +378,10 @@ async function createPartnerRouteTransfer({ razorpay_payment_id, amountInr, part
   return settlement;
 }
 
+
+const enterprisePayments = require('../services/enterprisePayment.service')({ ensurePartnerLicenseStock, createPartnerRouteTransfer });
+router.use('/enterprise', require('./enterprise-payment.routes')(enterprisePayments));
+router.use(require('../middleware/enterprisePaymentIsolation'));
 
 // ── GET /api/payment/pricing — returns newUser prices (public, used by register) ─
 router.get('/pricing', async (_req, res) => {
@@ -1180,6 +1184,14 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
 
   if (event.event === 'payment.captured') {
+    const payment = event.payload.payment.entity;
+    try {
+      if (await enterprisePayments.isEnterpriseOrder(payment.order_id)) {
+        const result = await enterprisePayments.fulfill(payment.order_id, payment.id);
+        void emitCompanyPartnerUpdate(req.app?.get?.('io'), result.company?._id, 'company_payment');
+        return res.json({ received: true });
+      }
+    } catch (error) { return res.status(503).json({ message: 'Enterprise payment activation will be retried.' }); }
     const notes = event.payload.payment.entity.notes || {};
     const companyId = notes.companyId;
     const systemCount = parseInt(notes.systemCount || '0');
@@ -1220,7 +1232,7 @@ router.get('/status', authenticate, requireCompanyAdmin, async (req, res) => {
   try {
     const targetCompanyId = req.headers['x-company-id'] || req.query.companyId || req.user.companyId;
     const company = await Company.findById(targetCompanyId)
-      .select('plan razorpay status name phone partnerId company_type source agentLicenseAllocation');
+      .select('plan razorpay status name phone partnerId company_type source agentLicenseAllocation enterpriseSubscriptionId');
     if (!company) return res.status(404).json({ message: 'Company not found' });
     const stock = await getPartnerLicenseStock(targetCompanyId);
     const data = company.toObject();

@@ -27,7 +27,7 @@ export function AuthProvider({ children }) {
       authStorage.setItem('co_token', impersonationToken);
       authStorage.setItem('co_impersonation', JSON.stringify({
         active: true,
-        banner: 'You are logged in via Super Admin',
+        banner: 'You are logged in through a support session',
       }));
       api.defaults.headers.common['Authorization'] = `Bearer ${impersonationToken}`;
       api.get('/auth/me')
@@ -279,7 +279,7 @@ export function AuthProvider({ children }) {
     }}>
       {impersonation?.active && user && (
         <div role="status" style={{ padding: '10px 18px', background: '#7f1d1d', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
-          <span>{impersonation.banner || `Logged in as ${user.email} via Super Admin`}</span>
+          <span>{impersonation.banner || `Logged in as ${user.email} through a support session`}</span>
           <button type="button" onClick={async () => { await logout(); window.close(); window.location.replace('/login'); }}
             style={{ padding: '7px 12px', border: '1px solid #fca5a5', borderRadius: 6, background: 'transparent', color: '#fff', cursor: 'pointer' }}>
             End user session

@@ -34,6 +34,7 @@ import SoarPage from './pages/SoarPage';
 import AgentSecurityPage from './pages/AgentSecurityPage';
 import UserPasswordsPage from './pages/UserPasswordsPage';
 import AuditPage from './pages/AuditPage';
+import PartnerAccessAccountsPage from './pages/PartnerAccessAccountsPage';
 import CorrelationPage from './pages/CorrelationPage';
 import ForensicsPage from './pages/ForensicsPage';
 
@@ -107,6 +108,7 @@ export default function App() {
         <Route path="agent-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="user-passwords" element={<RoleOnly roles={['superadmin']}><UserPasswordsPage /></RoleOnly>} />
         <Route path="audit" element={<RoleOnly roles={['superadmin']}><AuditPage /></RoleOnly>} />
+        <Route path="partner-access-accounts" element={<RoleOnly roles={['superadmin']}><PartnerAccessAccountsPage /></RoleOnly>} />
         <Route path="agentsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
       </Route>
 
@@ -154,6 +156,7 @@ export default function App() {
         <Route path="agent-security" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
         <Route path="user-passwords" element={<RoleOnly roles={['superadmin']}><UserPasswordsPage /></RoleOnly>} />
         <Route path="audit" element={<RoleOnly roles={['superadmin']}><AuditPage /></RoleOnly>} />
+        <Route path="partner-access-accounts" element={<RoleOnly roles={['superadmin']}><PartnerAccessAccountsPage /></RoleOnly>} />
         <Route path="agentsecurity" element={<RoleOnly roles={['superadmin']}><AgentSecurityPage /></RoleOnly>} />
       </Route>
 

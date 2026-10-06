@@ -278,6 +278,9 @@ io.use(async (socket, next) => {
     const token = auth.token || (authorization.startsWith('Bearer ') ? authorization.slice(7) : '');
     if (token) {
       const payload = jwt.verify(token, process.env.JWT_SECRET);
+      if (payload.impersonatedByRole === 'partner_admin') {
+        await require('./services/partnerUserAccess.service').validatePartnerSupportSession(payload);
+      }
       socket.principal = { kind: 'user', ...payload };
       return next();
     }
@@ -457,18 +460,26 @@ app.use((req, res, next) => {
     const isDelete = req.method === 'DELETE';
 
     if (isDangerousPayment || isPasswordChange || isDelete) {
+      const isPartnerSupport = payload.impersonatedByRole === 'partner_admin';
       const LoginActivity = require('./models/LoginActivity.model');
       LoginActivity.create({
         userId: payload.impersonatedBy,
         companyId: null,
         email: payload.impersonatedByEmail || `superadmin:${payload.impersonatedBy}`,
-        action: 'superadmin_impersonation_blocked',
+        action: isPartnerSupport ? 'partner_impersonation_blocked' : 'superadmin_impersonation_blocked',
+        ...(isPartnerSupport ? {
+          companyId: payload.companyId, sessionId: payload.sessionId,
+          partnerAccess: {
+            partnerId: payload.impersonatorPartnerId, actorName: payload.impersonatedByName,
+            targetUserId: payload.id, targetName: payload.name, targetEmail: payload.email, targetRole: payload.role,
+          },
+        } : {}),
         success: false,
         failReason: `user:${payload.id};${req.method} ${req.originalUrl}`,
         ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
         userAgent: req.get('user-agent') || '',
       }).catch(err => console.error('[impersonation-block-audit]', err.message));
-      return res.status(403).json({ message: 'This action is disabled during Super Admin user login.' });
+      return res.status(403).json({ message: `This action is disabled during ${isPartnerSupport ? 'Partner Admin' : 'Super Admin'} user login.` });
     }
   } catch {
     return next();
@@ -882,6 +893,7 @@ if (CLUSTER_MODE && isMaster) {
 
     // Background tasks function
     const startBackgroundSchedulers = () => {
+      require('./services/enterpriseNotification.service').startScheduler();
       require('./services/dailyReport.service').scheduleDailyReports();
       require('./services/correlation.service').scheduleCorrelation(io);
       ipsService.startExpirySweeper();

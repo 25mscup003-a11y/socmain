@@ -1,11 +1,19 @@
 const jwt = require('jsonwebtoken');
 
-const authenticate = (req, res, next) => {
+const authenticate = async (req, res, next) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer '))
     return res.status(401).json({ message: 'No token provided' });
   try {
     req.user = jwt.verify(header.split(' ')[1], process.env.JWT_SECRET);
+    if (req.user.impersonatedByRole === 'partner_admin') {
+      const { validatePartnerSupportSession } = require('../services/partnerUserAccess.service');
+      try {
+        await validatePartnerSupportSession(req.user);
+      } catch (error) {
+        return res.status(error.status ? 401 : 503).json({ message: error.status ? 'Partner support session has expired or access has changed.' : 'Unable to verify the support session. Please retry.' });
+      }
+    }
     const targetCompanyId = req.headers['x-company-id'] || req.query.companyId;
     if (targetCompanyId && ['superadmin', 'partner_admin'].includes(req.user.role)) {
       req.user.companyId = targetCompanyId;

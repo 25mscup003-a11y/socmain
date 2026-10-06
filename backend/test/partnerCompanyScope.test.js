@@ -65,7 +65,7 @@ function request({ path = '/companies', scope = partnerId, extra = {} } = {}) {
 test('missing or invalid partner scope is rejected before any company or partner query', async t => {
   const calls = setup(t);
   for (const scope of [null, '', 'invalid', { $ne: null }]) {
-    for (const path of ['/companies', '/dashboard']) {
+    for (const path of ['/companies', '/dashboard', '/revenue/history']) {
       assert.equal((await request({ scope, path })).status, 403);
     }
   }
@@ -109,6 +109,60 @@ test('partner two receives only its own company records, even when asking for pa
   assert.deepEqual(response.body.map(company => company._id), [otherCompany._id]);
   assert.deepEqual(calls.companies.map(filter => ({ partnerId: String(filter.partnerId) })), [{ partnerId: otherPartnerId }]);
   for (const filter of calls.related) assert.deepEqual(filter.companyId, { $in: [otherCompany._id] });
+});
+
+for (const [scope, company] of [[partnerId, ownCompany], [otherPartnerId, otherCompany]]) {
+  test(`revenue history only contains current company payments for partner ${scope}`, async t => {
+    setup(t);
+    const payments = [
+      { _id: 'own-payment', partnerId, companyId: ownCompany, amountInr: 1000, status: 'captured', source: 'checkout', planType: 'custom' },
+      { _id: 'other-payment', partnerId: otherPartnerId, companyId: otherCompany, amountInr: 2000, status: 'captured', source: 'renewal', planType: 'custom' },
+      { _id: 'foreign-company', partnerId: scope, companyId: scope === partnerId ? otherCompany : ownCompany, amountInr: 3000 },
+      { _id: 'deleted-company', partnerId: scope, companyId: { _id: '600000000000000000000099' }, amountInr: 4000 },
+      { _id: 'platform', partnerId: scope, companyId: company, source: 'partner_checkout', amountInr: 5000 },
+      { _id: 'partner-licenses', partnerId: scope, companyId: company, source: 'partner_agent_license', amountInr: 6000 },
+      { _id: 'enterprise-plan', partnerId: scope, companyId: company, planType: 'partner_enterprise', amountInr: 7000 },
+      { _id: 'no-company', partnerId: scope, companyId: null, amountInr: 8000 },
+    ];
+    const same = (a, b) => String(a?._id || a) === String(b?._id || b);
+    t.mock.method(PaymentHistory, 'find', filter => {
+      assert.equal(String(filter.partnerId), scope);
+      assert.deepEqual(filter.companyId, { $in: [company._id] });
+      return query(payments.filter(payment => Object.entries(filter).every(([key, condition]) => {
+        if (condition?.$in) return condition.$in.some(value => same(payment[key], value));
+        if (condition?.$nin) return !condition.$nin.some(value => same(payment[key], value));
+        if (condition && Object.hasOwn(condition, '$ne')) return !same(payment[key], condition.$ne);
+        return same(payment[key], condition);
+      })));
+    });
+    const response = await request({ path: '/revenue/history', scope, extra: { partnerId: scope === partnerId ? otherPartnerId : partnerId, companyId: otherCompany._id } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.map(payment => payment.id), [scope === partnerId ? 'own-payment' : 'other-payment']);
+    assert.equal(response.body[0].companyId, company._id);
+    assert.equal(response.body[0].company, company.name);
+  });
+}
+
+test('a partner without companies has no revenue history or company totals', async t => {
+  const calls = setup(t);
+  t.mock.method(Company, 'find', () => query([]));
+  const history = await request({ path: '/revenue/history' });
+  assert.equal(history.status, 200);
+  assert.deepEqual(history.body, []);
+  assert.deepEqual(calls.related, []);
+  const dashboard = await request({ path: '/dashboard' });
+  assert.equal(dashboard.status, 200);
+  assert.equal(dashboard.body.companies, 0);
+  assert.equal(dashboard.body.paidRevenue, 0);
+  assert.equal(dashboard.body.pendingRevenue, 0);
+});
+
+test('revenue history query errors are not returned as an empty successful history', async t => {
+  setup(t);
+  t.mock.method(PaymentHistory, 'find', () => { throw new Error('Database unavailable'); });
+  const response = await request({ path: '/revenue/history' });
+  assert.equal(response.status, 500);
+  assert.ok(response.body.message);
 });
 
 for (const status of ['created', 'failed']) {

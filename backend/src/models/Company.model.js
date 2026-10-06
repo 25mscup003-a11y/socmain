@@ -15,6 +15,7 @@ const CompanySchema = new mongoose.Schema({
   source:     { type: String, enum: ['public', 'partner_referral', 'admin_created'], default: 'public' },
   company_type: { type: String, enum: ['DIRECT', 'PARTNER_MANAGED'], default: 'DIRECT', index: true },
   agentLicenseAllocation: { type: Number, default: 0 },
+  enterpriseSubscriptionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AddSystemSubscription' },
 
   // Dynamic plan — no predefined tiers, fully customizable
   plan: {

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link, useParams, useSearchParams } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import api from '../api/axios';
+import EnterprisePurchase from '../components/EnterprisePurchase';
 import {
   validateCompanyName, validateEmail, validatePassword,
   validatePhone, firstError,
@@ -56,6 +57,7 @@ export default function RegisterPage() {
   const [otpTimer, setOtpTimer] = useState(0);
 
   // Plan config (dynamic)
+  const [planType, setPlanType] = useState('dynamic');
   const [pricing, setPricing] = useState(null);
   const [pricingLoading, setPricingLoading] = useState(false);
   const [systemCount, setSystemCount] = useState(10);
@@ -457,7 +459,10 @@ export default function RegisterPage() {
 	              Choose how many systems, phones, and servers you need. Pricing is dynamic.
 	            </p>
 
-            {pricingLoading ? (
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20 }} role="tablist" aria-label="Plan type">
+              {[['dynamic', '💵 Dynamic Pricing'], ['enterprise', '🏢 Enterprise']].map(([id, label]) => <button type="button" role="tab" aria-selected={planType === id} key={id} onClick={() => setPlanType(id)} style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #2563eb', background: planType === id ? '#1e3a5f' : '#060e1a', color: '#e0f2fe', cursor: 'pointer' }}>{label}</button>)}
+            </div>
+            {planType === 'enterprise' ? <EnterprisePurchase /> : pricingLoading ? (
               <div style={{ textAlign: 'center', color: '#60a5fa', padding: 20, fontSize: 13 }}>Loading pricing…</div>
             ) : pricing ? (
               <>

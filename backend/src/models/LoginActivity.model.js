@@ -10,6 +10,21 @@ const LoginActivitySchema = new mongoose.Schema({
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', index: true },
   email:     { type: String, required: true, index: true },
 
+  // Immutable account-access identity, retained if a user is renamed or moved.
+  partnerAccess: {
+    type: new mongoose.Schema({
+      partnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Partner', required: true },
+      partnerName: String,
+      actorName: String,
+      targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      targetName: String,
+      targetEmail: String,
+      targetRole: String,
+      companyName: String,
+    }, { _id: false }),
+    default: undefined,
+  },
+
   // Event type
   action: {
     type: String,
@@ -29,6 +44,9 @@ const LoginActivitySchema = new mongoose.Schema({
       'superadmin_company_impersonation_started',
       'superadmin_impersonation_blocked',
       'superadmin_company_impersonation_blocked',
+      'partner_impersonation_started',
+      'partner_impersonation_ended',
+      'partner_impersonation_blocked',
       'partner_updated',
       'company_updated',
       'company_plan_updated',
@@ -83,6 +101,7 @@ const LoginActivitySchema = new mongoose.Schema({
 // Indexes for fast queries
 LoginActivitySchema.index({ companyId: 1, createdAt: -1 });
 LoginActivitySchema.index({ userId: 1, createdAt: -1 });
+LoginActivitySchema.index({ 'partnerAccess.partnerId': 1, createdAt: -1, _id: -1 });
 LoginActivitySchema.index({ userId: 1, sessionId: 1, createdAt: -1 });
 LoginActivitySchema.index({ email: 1, action: 1, createdAt: -1 });
 LoginActivitySchema.index({ companyId: 1, action: 1, createdAt: -1 });

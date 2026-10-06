@@ -4,6 +4,8 @@ const Company = require('../models/Company.model');
 const { emitCompanySupport, validSupportId, supportText } = require('../utils/companySupport');
 const Partner = require('../models/Partner.model');
 const User = require('../models/User.model');
+const SocCompanyAssignment = require('../models/SocCompanyAssignment.model');
+const { SOC_ROLES } = require('../services/socAccess.service');
 const Referral = require('../models/Referral.model');
 const System = require('../models/System.model');
 const { getPartnerCompanies, summarizePartnerCompanies, partnerScope, companyPaymentScope } = require('../services/partnerDashboard.service');
@@ -174,6 +176,9 @@ router.use(authenticate, requirePartnerAdmin, (req, res, next) => {
   }
   next();
 });
+
+router.use('/user-accounts', require('./partner-user-access.routes'));
+router.use('/enterprise-plans', require('./enterprise-management.routes')('partner'));
 
 // ── POST /partner/upload-doc — KYC document upload (PDF/image) ─────────────
 router.post('/upload-doc', partnerDocUpload.single('file'), async (req, res) => {
@@ -460,17 +465,16 @@ router.delete('/pricing/history/:index', authenticate, requirePartnerAdmin, asyn
 
 router.get('/revenue/history', requireActivePartnerPlan, async (req, res) => {
   try {
-    const filter = ownPartnerFilter(req);
-    const payments = await PaymentHistory.find({
-      ...filter,
-      companyId: { $ne: null },
-    })
+    const companies = await Company.find(partnerScope(req.user.partnerId)).select('_id').lean();
+    if (!companies.length) return res.json([]);
+    const payments = await PaymentHistory.find(companyPaymentScope(req.user.partnerId, companies.map(company => company._id)))
       .populate('companyId', 'name email plan.autoPay')
       .sort({ paidAt: -1, createdAt: -1 })
       .lean();
 
-    res.json(payments.map(payment => ({
+    res.json(payments.filter(payment => payment.companyId).map(payment => ({
       id: payment._id,
+      companyId: payment.companyId._id,
       company: payment.companyName || payment.companyId?.name || 'Company',
       email: payment.companyId?.email || '',
       paymentId: payment.paymentId || payment.orderId || '-',
@@ -484,6 +488,32 @@ router.get('/revenue/history', requireActivePartnerPlan, async (req, res) => {
     })));
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/staff', requireActivePartnerPlan, async (req, res) => {
+  if (req.user.role !== 'partner_admin') {
+    return res.status(403).json({ message: 'A linked partner account is required' });
+  }
+  try {
+    const scope = partnerScope(req.user.partnerId);
+    const companyIds = await Company.find(scope).distinct('_id');
+    const assignedUserIds = companyIds.length
+      ? await SocCompanyAssignment.find({ companyId: { $in: companyIds }, active: true }).distinct('userId')
+      : [];
+    const staff = await User.find({
+      role: { $in: [...SOC_ROLES, 'analyst'] },
+      superadminManaged: { $ne: true },
+      partnerId: { $in: [scope.partnerId, null] },
+      $or: [
+        scope,
+        { companyId: { $in: companyIds } },
+        { _id: { $in: assignedUserIds } },
+      ],
+    }).select('name email role isActive accountStatus').sort({ role: 1, name: 1 }).lean();
+    res.json(staff);
+  } catch (err) {
+    res.status(503).json({ message: 'Partner staff could not be loaded. Please retry.' });
   }
 });
 

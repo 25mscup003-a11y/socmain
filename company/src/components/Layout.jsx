@@ -133,8 +133,8 @@ export default function Layout() {
             matchActive: (loc) => (loc.pathname === '/partner/companies' || loc.pathname === '/partner-companies') && !new URLSearchParams(loc.search).get('invite')
           },
           {
-            to: '/partner/users', label: 'Users', icon: '👥',
-            matchActive: (loc) => (loc.pathname === '/partner/users' || loc.pathname === '/users') && !new URLSearchParams(loc.search).get('invite')
+            to: '/partner/analyst', label: 'Analyst', icon: '👥',
+            matchActive: (loc) => (loc.pathname === '/partner/analyst' || loc.pathname === '/partner/users' || loc.pathname === '/users') && !new URLSearchParams(loc.search).get('invite')
           },
           {
             to: '/partner/soc-managers', label: 'SOC Manager', icon: '+',
@@ -156,6 +156,8 @@ export default function Layout() {
             to: '/partner/company-support', label: 'Support', icon: '❓',
             matchActive: (loc) => loc.pathname === '/partner/company-support' || loc.pathname === '/partner/support' || loc.pathname === '/partner-company-support'
           },
+          { to: '/partner/user-passwords', label: 'User Passwords', icon: '🔑' },
+          { to: '/partner/audit', label: 'Audit', icon: '📋' },
         ],
       },
     ];

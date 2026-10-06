@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/axios';
+import PaginationControls from '../components/common/PaginationControls';
+import './UsersPage.css';
+
+const PAGE_SIZE = 6;
 
 const ROLE_STYLE = {
   superadmin:       { bg:'#78350f', color:'#fcd34d',  label:'Superadmin' },
@@ -26,6 +30,9 @@ export default function UsersPage() {
   const [loadError, setLoadError] = useState('');
   const [search,    setSearch]    = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [page, setPage] = useState(1);
+
+  useEffect(() => { setPage(1); }, [search, roleFilter, isAnalystView]);
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false);
@@ -117,6 +124,9 @@ export default function UsersPage() {
       u.role?.toLowerCase().includes(q);
     return matchesRole && matchesSearch;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedUsers = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const S = {
     inp: {
@@ -191,7 +201,7 @@ export default function UsersPage() {
             ))}
           </div>
           <div style={{ color:'#8b5cf6', fontSize:12 }}>
-            Showing {filtered.length} of {users.length}
+            {isAnalystView ? `${filtered.length} matching accounts` : `Showing ${filtered.length} of ${users.length}`}
           </div>
         </div>
       </div>
@@ -270,6 +280,49 @@ export default function UsersPage() {
           {loadError}
         </div>
       )}
+      {isAnalystView ? (
+        <section className="superadmin-staff-panel" aria-label="Super Admin SOC team">
+          <div className="superadmin-staff-scroll" role="region" aria-label="SOC team table" tabIndex={0}>
+            <table className="superadmin-staff-table" aria-label="SOC Managers and Analysts" aria-busy={loading}>
+              <thead>
+                <tr>{['Name', 'Email', 'Role', 'Scope', 'Status', 'Action'].map(label => <th key={label} scope="col">{label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={6} className="superadmin-staff-empty">Loading SOC team…</td></tr>
+                ) : loadError ? (
+                  <tr><td colSpan={6} className="superadmin-staff-empty">SOC team is unavailable. Please reload to retry.</td></tr>
+                ) : filtered.length === 0 ? (
+                  <tr><td colSpan={6} className="superadmin-staff-empty">No users found for this filter.</td></tr>
+                ) : pagedUsers.map(u => (
+                  <tr key={u._id}>
+                    <th scope="row">{u.name || '—'}</th>
+                    <td className="superadmin-staff-email">{u.email || '—'}</td>
+                    <td><span className="superadmin-staff-badge" style={{ background: ROLE_STYLE[u.role]?.bg || '#2e1065', color: ROLE_STYLE[u.role]?.color || '#c4b5fd' }}>{ROLE_STYLE[u.role]?.label || u.role}</span></td>
+                    <td>
+                      <div className="superadmin-staff-scope">
+                        {[u.tenantId?.name, u.partnerId?.name, u.companyId?.name, u.departmentId?.name].filter(Boolean).join(' · ') || '—'}
+                      </div>
+                    </td>
+                    <td><span className={`superadmin-staff-badge superadmin-staff-status-${u.isActive ? 'active' : 'disabled'}`}>{u.isActive ? 'Active' : 'Disabled'}</span></td>
+                    <td>
+                      <button type="button" className={`superadmin-staff-action${u.isActive ? ' superadmin-staff-action-disable' : ''}`} aria-label={`${u.isActive ? 'Disable' : 'Enable'} ${u.name || u.email}`} onClick={() => toggle(u)}>
+                        {u.isActive ? 'Disable' : 'Enable'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!loading && !loadError && filtered.length > 0 && (
+            <div className="superadmin-staff-pagination">
+              <PaginationControls page={currentPage} total={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+            </div>
+          )}
+        </section>
+      ) : (
+      <>
       {loading
         ? <p style={{ color:'#4c1d95', fontSize:13 }}>Loading users…</p>
         : filtered.map(u => (
@@ -331,6 +384,8 @@ export default function UsersPage() {
         }}>
           No users found for this filter.
         </div>
+      )}
+      </>
       )}
     </div>
   );

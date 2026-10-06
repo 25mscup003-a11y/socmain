@@ -46,6 +46,26 @@ test('bounded memory cache evicts the least recently used entry', () => {
   assert.equal(cache.get('k10'), 10);
 });
 
+test('partner support logins always reach live authorization instead of a cached dashboard', async t => {
+  const oldSecret = process.env.JWT_SECRET;
+  process.env.JWT_SECRET = 'partner-support-cache-test-secret';
+  t.after(() => { if (oldSecret === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = oldSecret; });
+  const token = jwt.sign({ id: 'target', role: 'company_admin', impersonatedByRole: 'partner_admin' }, process.env.JWT_SECRET);
+  let cacheReads = 0;
+  const cache = { get: async () => { cacheReads++; return { privateDashboard: true }; }, set: async () => {} };
+  const middleware = createScalableReadCache({ cache });
+  let routeRuns = 0;
+  for (let index = 0; index < 2; index++) {
+    const result = await responsePromise(res => middleware({ method: 'GET', path: '/api/company/overview', headers: { authorization: `Bearer ${token}` } }, res, () => {
+      routeRuns++;
+      res.status(401).json({ message: 'Support session expired' });
+    }));
+    assert.equal(result.status, 401);
+  }
+  assert.equal(routeRuns, 2);
+  assert.equal(cacheReads, 0);
+});
+
 test('identical dashboard cache misses are coalesced into one route execution', async () => {
   const oldSecret = process.env.JWT_SECRET;
   process.env.JWT_SECRET = 'test-secret-that-is-long-enough-for-jwt-cache';

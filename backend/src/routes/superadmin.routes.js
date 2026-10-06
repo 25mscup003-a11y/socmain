@@ -27,6 +27,7 @@ const { directSupportCompanies, requireDirectSupportCompany, emitCompanySupport,
 const { authenticate, requireSuperAdmin } = require('../middleware/auth.middleware');
 const { requireActiveSuperadminSession, requireOriginalSuperadminSession } = require('../middleware/superadminSession.middleware');
 const { createSuperadminLoginToken } = require('../services/superadminLogin.service');
+const { partnerAccessSessions } = require('../services/partnerAccessSessions.service');
 const { normalizeSlug, buildRegistrationUrl } = require('../utils/tenant');
 const { validatePassword } = require('../utils/validate');
 const { sendMail, partnerInvitationEmailHtml } = require('../utils/email');
@@ -36,6 +37,7 @@ const { isSystemOnline } = require('../utils/systemPresence');
 const { CONTROL_KEYS, REQUIRED_CONTROLS, desktopSecuritySupported, securityPolicyPosture } = require('../utils/agentSecurityPolicy');
 
 router.use(authenticate, requireSuperAdmin);
+router.use('/enterprise-plans', requireActiveSuperadminSession, requireOriginalSuperadminSession, require('./enterprise-management.routes')('superadmin'));
 
 async function withTimeout(promise, fallback, ms = 10000) {
   let timer;
@@ -1803,6 +1805,15 @@ router.get('/users', requireActiveSuperadminSession, async (req, res) => {
       .sort({ createdAt: -1 });
     res.json(users);
   } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+router.get('/partner-access-accounts', requireActiveSuperadminSession, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    res.json(await partnerAccessSessions(req.query));
+  } catch (error) {
+    res.status(error.status || 503).json({ message: error.status ? error.message : 'Unable to load partner account access logs. Please retry.' });
+  }
 });
 
 router.get('/user-login-audits', requireActiveSuperadminSession, async (req, res) => {

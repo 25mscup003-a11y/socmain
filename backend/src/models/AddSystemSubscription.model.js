@@ -12,6 +12,8 @@ const mongoose = require('mongoose');
 const AddSystemSubscriptionSchema = new mongoose.Schema({
   companyId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   companyName: { type: String },
+  enterpriseOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'EnterpriseOrder', unique: true, sparse: true },
+  parentBatchId: { type: mongoose.Schema.Types.ObjectId, ref: 'AddSystemSubscription' },
 
   // Razorpay payment details
   orderId:    { type: String, index: true },

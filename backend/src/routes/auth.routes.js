@@ -169,11 +169,13 @@ router.get('/me', authenticate, async (req, res) => {
         return res.status(401).json({ message: 'This user account is no longer active' });
       }
       const actor = await User.findById(req.user.impersonatedBy);
-      if (!actor || actor.role !== 'superadmin' || !actor.isActive
+      const expectedActorRole = req.user.impersonatedByRole === 'partner_admin' ? 'partner_admin' : 'superadmin';
+      const issuedAt = expectedActorRole === 'partner_admin' ? req.user.impersonationIssuedAt : Number(req.user.iat) * 1000;
+      if (!actor || actor.role !== expectedActorRole || !actor.isActive
         || (actor.accountStatus && actor.accountStatus !== 'active')
         || [actor, user].some(account => account.passwordChangedAt
-          && new Date(account.passwordChangedAt).getTime() > Number(req.user.iat) * 1000)) {
-        return res.status(401).json({ message: 'Superadmin login session has expired' });
+          && new Date(account.passwordChangedAt).getTime() > issuedAt)) {
+        return res.status(401).json({ message: 'Support login session has expired' });
       }
     }
     const payload = await authPayload(user, {
@@ -189,8 +191,9 @@ router.get('/me', authenticate, async (req, res) => {
       impersonation: req.user.impersonatedBy ? {
         active: true,
         by: req.user.impersonatedBy,
+        byRole: req.user.impersonatedByRole || 'superadmin',
         mode: req.user.impersonationMode || 'support_debug',
-        banner: `You are logged in as ${user.name || user.email} (${user.role.replaceAll('_', ' ')}) via Super Admin`,
+        banner: `You are logged in as ${user.name || user.email} (${user.role.replaceAll('_', ' ')}) via ${req.user.impersonatedByRole === 'partner_admin' ? 'Partner Admin' : 'Super Admin'}`,
       } : null,
     });
   } catch (err) {
@@ -216,6 +219,8 @@ async function authPayload(user, authContext = {}) {
       .select('-agreementDataUrl -profile.avatarDataUrl -profile.kycDocuments.gstCertificateDataUrl -profile.kycDocuments.panCardDataUrl -profile.kycDocuments.businessRegistrationDataUrl');
   }
   if (!tenant && user.role === 'superadmin') tenant = await getOrCreateMainTenant(user._id);
+  const dashboardUrl = buildDashboardUrl(user, tenant);
+  const redirectUrl = await require('../services/enterpriseLogin.service').enterpriseLoginDestination(user, dashboardUrl);
 
   return {
     token: sign(user, authContext),
@@ -227,7 +232,7 @@ async function authPayload(user, authContext = {}) {
     partnerPaymentRequired: user.role === 'partner_admin'
       ? !(partner?.plan?.paymentStatus === 'paid' && partner?.plan?.isActive === true)
       : false,
-    redirectUrl: buildDashboardUrl(user, tenant),
+    redirectUrl,
   };
 }
 
@@ -800,7 +805,19 @@ router.post('/session-event', authenticate, async (req, res) => {
 router.post('/logout', authenticate, async (req, res) => {
   try {
     if (req.user.impersonatedBy && req.user.sessionId) {
-      await SuperadminLoginAudit.updateOne({
+      if (req.user.impersonatedByRole === 'partner_admin') {
+        await LoginActivity.create({
+          userId: req.user.impersonatedBy, email: req.user.impersonatedByEmail,
+          companyId: req.user.companyId, sessionId: req.user.sessionId,
+          action: 'partner_impersonation_ended', success: true,
+          partnerAccess: {
+            partnerId: req.user.impersonatorPartnerId, actorName: req.user.impersonatedByName,
+            targetUserId: req.user.id, targetName: req.user.name, targetEmail: req.user.email, targetRole: req.user.role,
+          },
+          failReason: `partner:${req.user.impersonatorPartnerId};user:${req.user.id}`,
+          ipAddress: req.ip || req.socket?.remoteAddress || 'unknown', userAgent: req.get('user-agent') || '',
+        });
+      } else await SuperadminLoginAudit.updateOne({
         sessionId: req.user.sessionId, actorId: req.user.impersonatedBy,
         targetUserId: req.user.id, logoutAt: null,
       }, { $set: { logoutAt: new Date() } });

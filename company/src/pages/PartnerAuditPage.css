@@ -1,0 +1,3 @@
+.partner-audit table { min-width: 850px; }
+.partner-audit td { vertical-align: top; }
+.partner-audit time { white-space: nowrap; line-height: 1.6; }

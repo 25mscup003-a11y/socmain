@@ -1,0 +1,21 @@
+.superadmin-staff-panel { overflow: hidden; border: 1px solid #312e81; border-radius: 10px; background: #1e1b4b; }
+.superadmin-staff-scroll { overflow-x: auto; }
+.superadmin-staff-scroll:focus-visible { outline: 2px solid #a78bfa; outline-offset: -2px; }
+.superadmin-staff-table { width: 100%; min-width: 840px; border-collapse: collapse; text-align: left; font-size: 13px; }
+.superadmin-staff-table th, .superadmin-staff-table td { padding: 16px; border-bottom: 1px solid #312e81; vertical-align: middle; }
+.superadmin-staff-table thead { background: #241b51; color: #c4b5fd; }
+.superadmin-staff-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+.superadmin-staff-table tbody th { color: #f1f5f9; font-weight: 600; overflow-wrap: anywhere; }
+.superadmin-staff-table tbody td { color: #cbd5e1; }
+.superadmin-staff-table tbody tr:hover { background: #282354; }
+.superadmin-staff-email { overflow-wrap: anywhere; }
+.superadmin-staff-scope { min-width: 100px; max-width: 240px; color: #a5b4fc; font-size: 12px; overflow-wrap: anywhere; }
+.superadmin-staff-table .superadmin-staff-empty { padding: 36px 24px; color: #c4b5fd; text-align: center; }
+.superadmin-staff-badge { display: inline-block; border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.superadmin-staff-status-active { background: #064e3b; color: #6ee7b7; }
+.superadmin-staff-status-disabled { background: #7f1d1d; color: #fca5a5; }
+.superadmin-staff-action { min-width: 78px; padding: 7px 12px; border: 1px solid #047857; border-radius: 7px; background: #064e3b; color: #6ee7b7; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.superadmin-staff-action-disable { border-color: #991b1b; background: #451b25; color: #fca5a5; }
+.superadmin-staff-action:hover { filter: brightness(1.2); }
+.superadmin-staff-action:focus-visible { outline: 2px solid #a78bfa; outline-offset: 3px; }
+.superadmin-staff-pagination { padding: 0 16px 16px; }

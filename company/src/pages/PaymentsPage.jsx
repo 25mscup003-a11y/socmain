@@ -4,6 +4,7 @@ import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { openRazorpay } from '../utils/razorpay';
 import Swal from 'sweetalert2';
+import EnterprisePurchase from '../components/EnterprisePurchase';
 
 const fmtInr  = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -300,7 +301,7 @@ function CompanyPaymentsPage() {
   const [activateCalcLoad, setActivateCalcLoad] = useState(false);
 
   // Renewal
-  const [renewMode,    setRenewMode]    = useState('base'); // 'base' | 'batch'
+  const [renewMode,    setRenewMode]    = useState('base'); // 'base' | 'batch' | 'enterprise'
   const [renewCycle,   setRenewCycle]   = useState('monthly');
   const [renewCalc,    setRenewCalc]    = useState(null);
   const [renewLoading, setRenewLoading] = useState(false);
@@ -326,7 +327,7 @@ function CompanyPaymentsPage() {
 
   useEffect(() => {
     const tab = new URLSearchParams(location.search).get('tab');
-    if (tab === 'upgrade') setActiveTab('upgrade');
+    if (['upgrade', 'enterprise'].includes(tab)) setActiveTab(tab);
   }, [location.search]);
 
   // ── Load data ──────────────────────────────────────────────────────────────
@@ -402,13 +403,13 @@ function CompanyPaymentsPage() {
     const t = setTimeout(async () => {
       setAddCalcLoad(true);
       try {
-        const { data } = await api.post('/add-system/calculate', { systemCount: sys, serverCount: srv, phoneCount: phn, billingCycle: addCycle });
+        const { data } = await api.post(status?.enterpriseSubscriptionId ? '/payment/enterprise/addition/calculate' : '/add-system/calculate', { systemCount: sys, serverCount: srv, phoneCount: phn, billingCycle: addCycle });
         setAddCalc(data);
-      } catch { setAddCalc(null); }
+      } catch (err) { setAddCalc(null); setError(err.response?.data?.message || 'Unable to calculate license cost.'); }
       finally { setAddCalcLoad(false); }
     }, 400);
     return () => clearTimeout(t);
-	  }, [addSystems, addServers, addPhones, addCycle, activeTab]);
+	  }, [addSystems, addServers, addPhones, addCycle, activeTab, status?.enterpriseSubscriptionId]);
 
   // ── First-time activation cost calc ─────────────────────────────────────────
   useEffect(() => {
@@ -450,7 +451,7 @@ function CompanyPaymentsPage() {
 	    const baseSys = plan?.baseSystemCount > 0 ? plan.baseSystemCount : plan?.systemCount || 0;
 	    const baseSrv = plan?.baseServerCount > 0 ? plan.baseServerCount : plan?.serverCount || 0;
 	    const basePhn = plan?.basePhoneCount > 0 ? plan.basePhoneCount : plan?.phoneCount || 0;
-	    if (activeTab !== 'renewal' || renewMode !== 'base' || (baseSys === 0 && baseSrv === 0 && basePhn === 0)) { setRenewCalc(null); return; }
+    if (activeTab !== 'renewal' || renewMode !== 'base' || (status?.enterpriseSubscriptionId && plan?.paymentStatus !== 'paid') || (baseSys === 0 && baseSrv === 0 && basePhn === 0)) { setRenewCalc(null); return; }
     const t = setTimeout(async () => {
       setRenewLoading(true);
       try {
@@ -488,12 +489,14 @@ function CompanyPaymentsPage() {
   // ── Derived state ─────────────────────────────────────────────────────────
 	  const plan      = status?.plan;
 	  const now       = new Date();
-	  const expiresAt = new Date(plan?.expiresAt || 0);
-	  const planActive  = plan?.isActive && now < expiresAt;
+	  const enterprisePrimary = batches.find(b => String(b._id) === String(status?.enterpriseSubscriptionId));
+  const enterpriseRegistration = Boolean(status?.enterpriseSubscriptionId) && plan?.paymentStatus !== 'paid';
+  const expiresAt = new Date((enterpriseRegistration ? enterprisePrimary?.endDate : plan?.expiresAt) || 0);
+	  const planActive = (enterpriseRegistration ? enterprisePrimary?.status === 'active' : plan?.isActive) && now < expiresAt;
 	  const nearExpiry  = planActive && (expiresAt - now) < 7 * 24 * 60 * 60 * 1000;
 	  const showRenewal = !planActive || nearExpiry;
   const hasPurchasedPlan = plan?.paymentStatus === 'paid' || Number(plan?.systemCount || 0) + Number(plan?.serverCount || 0) + Number(plan?.phoneCount || 0) > 0;
-  const needsBaseActivation = !planActive && !hasPurchasedPlan;
+  const needsBaseActivation = !enterpriseRegistration && !planActive && !hasPurchasedPlan;
 
   // Active batches (for renewal dropdown)
   const activeBatches  = batches.filter(b => b.status === 'active');
@@ -507,16 +510,16 @@ function CompanyPaymentsPage() {
   const baseSystemCount = Number(plan?.baseSystemCount) || Math.max(0, totalSystemCount - addedSystemCount);
   const baseServerCount = Number(plan?.baseServerCount) || Math.max(0, totalServerCount - addedServerCount);
   const basePhoneCount = Number(plan?.basePhoneCount) || Math.max(0, totalPhoneCount - addedPhoneCount);
-  const currentPlanTitle = 'Base Subscription (Registration)';
-  const currentPlanSystems = baseSystemCount;
-  const currentPlanServers = baseServerCount;
-  const currentPlanPhones = basePhoneCount;
-  const currentBillingCycle = plan?.billingCycle;
-  const currentAmountPaid = plan?.amountPaid;
-  const currentPaymentStatus = plan?.paymentStatus;
-  const currentStartDate = plan?.startDate;
-  const currentEndDate = plan?.expiresAt;
-  const currentPaymentId = status?.razorpay?.paymentId;
+  const currentPlanTitle = enterpriseRegistration ? '🏢 Enterprise (Registration)' : 'Base Subscription (Registration)';
+  const currentPlanSystems = enterpriseRegistration ? Number(enterprisePrimary?.addedSystemCount || 0) : baseSystemCount;
+  const currentPlanServers = enterpriseRegistration ? Number(enterprisePrimary?.addedServerCount || 0) : baseServerCount;
+  const currentPlanPhones = enterpriseRegistration ? Number(enterprisePrimary?.addedPhoneCount || 0) : basePhoneCount;
+  const currentBillingCycle = enterpriseRegistration ? enterprisePrimary?.billingCycle : plan?.billingCycle;
+  const currentAmountPaid = enterpriseRegistration ? enterprisePrimary?.amountPaid : plan?.amountPaid;
+  const currentPaymentStatus = enterpriseRegistration ? enterprisePrimary?.paymentStatus : plan?.paymentStatus;
+  const currentStartDate = enterpriseRegistration ? enterprisePrimary?.startDate : plan?.startDate;
+  const currentEndDate = enterpriseRegistration ? enterprisePrimary?.endDate : plan?.expiresAt;
+  const currentPaymentId = enterpriseRegistration ? enterprisePrimary?.paymentId : status?.razorpay?.paymentId;
   const partnerStock = status?.partnerLicenseStock || {};
   const addRequestedLicenses = (Number(addSystems) || 0) + (Number(addServers) || 0) + (Number(addPhones) || 0);
   const partnerStockBlocked = Boolean(partnerStock.limited) && addRequestedLicenses > Number(partnerStock.available || 0);
@@ -569,11 +572,14 @@ function CompanyPaymentsPage() {
       return;
     }
     navigate('/checkout', { state: { checkout: {
-      mode: 'add-system',
+      mode: addCalc.enterprise ? 'enterprise-addition' : 'add-system',
+      purchaseKey: addCalc.enterprise ? crypto.randomUUID() : undefined,
+      totals: addCalc.enterprise ? addCalc.totals : undefined,
+      periodEnd: addCalc.periodEnd,
       planName: 'Add More Licenses',
       description: `Add: +${sys} Systems, +${srv} Servers, +${phn} Phones`,
       counts: { systemCount: sys, serverCount: srv, phoneCount: phn },
-      billingCycle: addCycle,
+      billingCycle: addCalc.billingCycle || addCycle,
       amountInr: addCalc.totalInr,
       calc: addCalc,
       serverDetails,
@@ -712,6 +718,7 @@ function CompanyPaymentsPage() {
   };
 
   const formatHistoryLicenses = (payment) => {
+    if (payment.planType?.startsWith('enterprise')) return `🏢 ${payment.planType === 'enterprise_addition' ? 'Enterprise Add Systems' : 'Enterprise'}: +${payment.addedSystems ?? payment.systemCount ?? 0} Systems · +${payment.addedServers ?? payment.serverCount ?? 0} Servers · +${payment.addedPhones ?? payment.phoneCount ?? 0} Phones`;
     if (payment.planType === 'autopay_activation') return '🔄 AutoPay Activation Mandate';
 
     // 1. Add-System Batch / Upgrade
@@ -786,7 +793,7 @@ function CompanyPaymentsPage() {
           addedPhoneCount: b.addedPhoneCount || 0,
           amountInr: batchAmount,
           status: b.status === 'active' ? 'captured' : (b.status || 'captured'),
-          planType: 'add_system',
+          planType: b.priceType?.startsWith('enterprise') ? b.priceType : 'add_system',
           isUpgrade: true,
           source: 'upgrade',
         });
@@ -799,8 +806,9 @@ function CompanyPaymentsPage() {
   // ── Tab config ────────────────────────────────────────────────────────────
   const tabs = [
     { id: 'subscription', label: '📊 Subscription' },
+    { id: 'enterprise',   label: '🏢 Enterprise' },
+    { id: 'upgrade',      label: 'Add Systems' },
     { id: 'renewal',      label: showRenewal ? '🔴 Renew Plan' : '🔄 Renew Plan' },
-    { id: 'upgrade',      label: '⬆️ Add Systems' },
     { id: 'history',      label: '📋 History' },
   ];
 
@@ -833,7 +841,7 @@ function CompanyPaymentsPage() {
     const bNear   = bActive && (bEnd - bNow) < 7 * 24 * 60 * 60 * 1000;
     return (
       <tr style={{ borderBottom: '1px solid #1e3a5f', background: idx % 2 === 0 ? 'rgba(0,0,0,0.15)' : 'transparent' }}>
-	        <td style={td}>{fmtShort(b.addedDate)}</td>
+	        <td style={td}>{fmtShort(b.addedDate)}{b.priceType?.startsWith('enterprise') && <div style={{ color: '#a5b4fc', fontSize: 11 }}>🏢 Enterprise{b.parentBatchId ? ' Add Systems' : ''}</div>}</td>
 	        <td style={{ ...td, fontWeight: 700, color: '#60a5fa' }}>+{b.addedSystemCount}</td>
 	        <td style={{ ...td, color: b.addedServerCount > 0 ? '#a78bfa' : '#334155' }}>
 	          {[
@@ -845,7 +853,7 @@ function CompanyPaymentsPage() {
         <td style={{ ...td, color: bActive ? (bNear ? '#fbbf24' : '#94a3b8') : '#f87171' }}>{fmtShort(b.endDate)}</td>
         <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{b.paymentId ? b.paymentId.slice(0, 14) + '…' : '—'}</td>
         <td style={td}>
-          {b.status === 'active' ? (
+          {b.status === 'active' && !b.priceType?.startsWith('enterprise') ? (
             <button onClick={() => b.autoPay ? handleBatchAutoPayDisable(b) : handleBatchAutoPayEnable(b)}
               style={{
                 padding: '3px 12px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontWeight: 700, border: 'none',
@@ -862,7 +870,7 @@ function CompanyPaymentsPage() {
             <StatusBadge status={b.status} active={bActive} nearExpiry={bNear} />
             {showRenewBtn && b.status !== 'cancelled' && (
               <button
-                onClick={() => { setRenewMode('batch'); setSelectedBatch(b); setActiveTab('renewal'); }}
+                onClick={() => { setRenewMode(b.priceType?.startsWith('enterprise') ? 'enterprise' : 'batch'); setSelectedBatch(b); setActiveTab('renewal'); }}
                 style={{ padding: '3px 10px', borderRadius: 6, border: '1px solid #2563eb', background: 'rgba(37,99,235,0.15)', color: '#60a5fa', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
                 Renew
               </button>
@@ -892,7 +900,7 @@ function CompanyPaymentsPage() {
     <div>
       <h2 style={{ fontSize: 22, color: '#e0f2fe', marginBottom: 6, fontWeight: 700 }}>💳 Plans & Payments</h2>
       <p style={{ color: '#475569', fontSize: 13, marginBottom: 24 }}>
-        Manage subscriptions, add systems as independent batches, renew, and view history
+        Manage subscriptions, add licenses, renew, and view payment history
       </p>
 
       {error && (
@@ -908,11 +916,13 @@ function CompanyPaymentsPage() {
       </div>
 
       {/* ══════════ SUBSCRIPTION TAB ══════════ */}
+      {activeTab === 'enterprise' && <EnterprisePurchase />}
 	      {activeTab === 'subscription' && (
 	        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 	          {needsBaseActivation && (
 	            <div style={{ background: '#0c1a2e', borderRadius: 12, padding: 24, border: '1px solid #f59e0b' }}>
 	              <h3 style={{ fontSize: 16, color: '#fcd34d', fontWeight: 700, marginBottom: 4 }}>Activate Your Base Plan</h3>
+                  <button type="button" onClick={() => setActiveTab('enterprise')} style={{ padding: '9px 14px', border: '1px solid #6366f1', borderRadius: 7, background: '#1e1b4b', color: '#c7d2fe', cursor: 'pointer', marginBottom: 12 }}>Choose Enterprise — custom price for your company</button>
 	              <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 18 }}>
 	                Choose your first license counts and complete payment. Phones include Android and iPhone devices.
 	              </p>
@@ -984,7 +994,7 @@ function CompanyPaymentsPage() {
 	                  {currentPlanSystems} Systems, {currentPlanServers} Servers & {currentPlanPhones} Phones
 	                </div>
               </div>
-              <StatusBadge status={!planActive && plan?.expiresAt && now >= expiresAt ? 'expired' : undefined} active={planActive} nearExpiry={nearExpiry} />
+              <StatusBadge status={!planActive && currentEndDate && now >= expiresAt ? 'expired' : undefined} active={planActive} nearExpiry={nearExpiry} />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
               {[
@@ -1041,9 +1051,9 @@ function CompanyPaymentsPage() {
 	            {showRenewal && !needsBaseActivation && (
               <div style={{ marginTop: 16, background: planActive ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)', border: `1px solid ${planActive ? '#f59e0b' : '#ef4444'}`, borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ fontSize: 13, color: planActive ? '#fcd34d' : '#fca5a5' }}>
-                  {planActive ? '⚠️ Your plan is expiring soon!' : '❌ Your base plan has expired.'}
+                  {planActive ? '⚠️ Your plan is expiring soon!' : 'Your plan has expired.'}
                 </div>
-                <button onClick={() => { setRenewMode('base'); setActiveTab('renewal'); }} style={{ padding: '6px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12, background: planActive ? '#f59e0b' : '#ef4444', color: '#fff' }}>
+                <button onClick={() => { setRenewMode(enterpriseRegistration ? 'enterprise' : 'base'); setActiveTab('renewal'); }} style={{ padding: '6px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12, background: planActive ? '#f59e0b' : '#ef4444', color: '#fff' }}>
                   Renew Now →
                 </button>
               </div>
@@ -1053,7 +1063,7 @@ function CompanyPaymentsPage() {
           {/* Add-system batches summary */}
           {activeBatches.length > 0 && (
             <div style={{ background: '#0c1a2e', borderRadius: 12, padding: 20, border: '1px solid #2563eb33' }}>
-              <div style={{ fontSize: 14, color: '#60a5fa', fontWeight: 700, marginBottom: 12 }}>⬆️ Add-System Batches ({activeBatches.length} active)</div>
+              <div style={{ fontSize: 14, color: '#60a5fa', fontWeight: 700, marginBottom: 12 }}>Purchased License Batches ({activeBatches.length} active)</div>
 	              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
                 <div style={{ background: 'rgba(37,99,235,0.1)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
                   <div style={{ fontSize: 11, color: '#475569', marginBottom: 4, textTransform: 'uppercase' }}>Total Added Systems</div>
@@ -1077,7 +1087,7 @@ function CompanyPaymentsPage() {
           )}
 
           {/* Base AutoPay */}
-          <div style={{ background: '#0c1a2e', borderRadius: 12, padding: 20, border: '1px solid #1e3a5f' }}>
+          {!enterpriseRegistration && <div style={{ background: '#0c1a2e', borderRadius: 12, padding: 20, border: '1px solid #1e3a5f' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 15, color: '#e0f2fe', fontWeight: 700, marginBottom: 4 }}>🔄 Base Plan AutoPay</div>
@@ -1095,7 +1105,7 @@ function CompanyPaymentsPage() {
                 </button>
               )}
             </div>
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1103,9 +1113,9 @@ function CompanyPaymentsPage() {
       {activeTab === 'renewal' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* Section selector */}
-          <div style={{ display: 'flex', gap: 0, background: '#060e1a', borderRadius: 10, padding: 4, width: 'fit-content' }}>
-            {[{ id: 'base', label: '🏠 Base Subscription' }, { id: 'batch', label: '⬆️ Add-System Batch' }].map(m => (
-              <button key={m.id} onClick={() => setRenewMode(m.id)} style={{
+          <div role="tablist" aria-label="Renewal plan type" style={{ display: 'flex', flexWrap: 'wrap', gap: 0, background: '#060e1a', borderRadius: 10, padding: 4, width: 'fit-content' }}>
+            {[{ id: 'base', label: '🏠 Base Subscription' }, { id: 'batch', label: '⬆️ Add-System Batch' }, { id: 'enterprise', label: '🏢 Enterprise' }].map(m => (
+              <button type="button" role="tab" aria-selected={renewMode === m.id} key={m.id} onClick={() => setRenewMode(m.id)} style={{
                 padding: '8px 20px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: renewMode === m.id ? 700 : 400,
                 background: renewMode === m.id ? '#1e3a5f' : 'transparent',
                 color: renewMode === m.id ? '#93c5fd' : '#475569',
@@ -1115,7 +1125,13 @@ function CompanyPaymentsPage() {
           </div>
 
           {/* A: Base renewal */}
-          {renewMode === 'base' && (
+          {renewMode === 'base' && enterpriseRegistration && (
+            <div style={{ background: '#0c1a2e', borderRadius: 12, padding: 24, border: '1px solid #1e3a5f', color: '#94a3b8' }}>
+              <p>Your registration plan is Enterprise. Open the Enterprise tab to renew it.</p>
+              <button type="button" onClick={() => setRenewMode('enterprise')} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #6366f1', background: '#1e1b4b', color: '#c7d2fe', cursor: 'pointer' }}>🏢 Renew Enterprise</button>
+            </div>
+          )}
+          {renewMode === 'base' && !enterpriseRegistration && (
             <div style={{ background: '#0c1a2e', borderRadius: 12, padding: 24, border: `1px solid ${showRenewal ? '#ef4444' : '#1e3a5f'}` }}>
               <h3 style={{ fontSize: 16, color: showRenewal ? '#f87171' : '#e0f2fe', fontWeight: 700, marginBottom: 4 }}>
                 🏠 Renew Base Subscription
@@ -1219,7 +1235,7 @@ function CompanyPaymentsPage() {
                       const bActive = b.status === 'active' && new Date() < bEnd;
                       const isSelected = selectedBatch?._id === b._id;
                       return (
-                        <div key={b._id} onClick={() => setSelectedBatch(b)} style={{
+                        <div key={b._id} onClick={() => b.priceType?.startsWith('enterprise') ? setRenewMode('enterprise') : setSelectedBatch(b)} style={{
                           background: isSelected ? 'rgba(37,99,235,0.2)' : 'rgba(0,0,0,0.2)',
                           border: `2px solid ${isSelected ? '#2563eb' : '#1e3a5f'}`,
                           borderRadius: 10, padding: '12px 16px', cursor: 'pointer', transition: 'all 0.2s',
@@ -1285,6 +1301,7 @@ function CompanyPaymentsPage() {
               )}
             </div>
           )}
+          {renewMode === 'enterprise' && <EnterprisePurchase />}
         </div>
       )}
 
@@ -1300,7 +1317,7 @@ function CompanyPaymentsPage() {
               <strong style={{ color: '#34d399' }}>{totalSystemCount} systems</strong>, <strong style={{ color: '#34d399' }}>{totalServerCount} servers</strong> & <strong style={{ color: '#34d399' }}>{totalPhoneCount} phones</strong>
             </p>
             <p style={{ fontSize: 12, color: '#f87171', marginBottom: 20 }}>
-              ⚠️ Each purchase creates an <strong>independent billing cycle</strong> — separate from your base plan.
+              Added licenses start their own billing period on the payment date. Monthly licenses renew one month later; yearly licenses renew one year later.
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16, marginBottom: 16 }}>
@@ -1323,8 +1340,8 @@ function CompanyPaymentsPage() {
             </div>
 
             <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', color: '#60a5fa', fontSize: 12, marginBottom: 8 }}>Billing Cycle (for this batch)</label>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <label style={{ display: 'block', color: '#60a5fa', fontSize: 12, marginBottom: 8 }}>Billing Cycle</label>
+              {status?.enterpriseSubscriptionId ? <p style={{ color: '#a5b4fc', fontSize: 13 }}>Billing cycle: {addCalc?.billingCycle || enterprisePrimary?.billingCycle}. Each addition starts a full cycle on its payment date: monthly renews one month later, yearly renews one year later.</p> : <div style={{ display: 'flex', gap: 8 }}>
                 {['monthly', 'yearly'].map(c => (
                   <div key={c} onClick={() => setAddCycle(c)} style={{
                     flex: 1, padding: '8px 12px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
@@ -1334,13 +1351,13 @@ function CompanyPaymentsPage() {
                     <span style={{ fontSize: 13, fontWeight: 600, color: addCycle === c ? '#93c5fd' : '#475569', textTransform: 'capitalize' }}>{c}</span>
                   </div>
                 ))}
-              </div>
+              </div>}
             </div>
 
             {addCalcLoad && <div style={{ color: '#60a5fa', fontSize: 12, textAlign: 'center', padding: 8 }}>Calculating…</div>}
             {addCalc && !addCalcLoad && (
               <div style={{ background: '#0a2e1f', border: '1px solid #10b981', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, marginBottom: 10 }}>💰 This Batch Cost (Renewal Pricing)</div>
+                <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, marginBottom: 10 }}>{addCalc.enterprise ? '💰 Enterprise Add Systems — full billing period' : '💰 This Batch Cost (Renewal Pricing)'}</div>
 	                {Number(addSystems) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ color: '#6ee7b7', fontSize: 12 }}>+{addSystems} Systems</span><span style={{ color: '#6ee7b7', fontSize: 12, fontWeight: 600 }}>{fmtInr(addCalc.subtotalSystems)}</span></div>}
 	                {Number(addServers) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ color: '#6ee7b7', fontSize: 12 }}>+{addServers} Servers</span><span style={{ color: '#6ee7b7', fontSize: 12, fontWeight: 600 }}>{fmtInr(addCalc.subtotalServers)}</span></div>}
 	                {Number(addPhones) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ color: '#6ee7b7', fontSize: 12 }}>+{addPhones} Phones</span><span style={{ color: '#6ee7b7', fontSize: 12, fontWeight: 600 }}>{fmtInr(addCalc.subtotalPhones)}</span></div>}
@@ -1349,7 +1366,7 @@ function CompanyPaymentsPage() {
                   <span style={{ fontSize: 20, color: '#34d399', fontWeight: 800 }}>{fmtInr(addCalc.totalInr)}</span>
                 </div>
                 <div style={{ fontSize: 11, color: '#475569', marginTop: 6 }}>
-                  This batch expires: {addCycle === 'yearly' ? '~1 year from today' : '~1 month from today'}
+                  Licenses expire: {addCalc.enterprise ? fmtDate(addCalc.periodEnd) : addCycle === 'yearly' ? '~1 year from today' : '~1 month from today'}
                 </div>
               </div>
             )}
@@ -1375,7 +1392,7 @@ function CompanyPaymentsPage() {
               background: (busy || !addCalc || addCalcLoad || partnerStockBlocked) ? '#1e3a5f' : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
               color: '#fff', fontSize: 14, cursor: (busy || !addCalc || addCalcLoad || partnerStockBlocked) ? 'not-allowed' : 'pointer', fontWeight: 700,
             }}>
-	              {partnerStockBlocked ? 'Partner License Stock Required' : busy ? 'Processing…' : '⬆️ Add Licenses (New Batch)'}
+	              {partnerStockBlocked ? 'Partner License Stock Required' : busy ? 'Processing…' : status?.enterpriseSubscriptionId ? '⬆️ Add Licenses to Enterprise' : '⬆️ Add Licenses (New Batch)'}
             </button>
           </div>
 
@@ -1384,7 +1401,7 @@ function CompanyPaymentsPage() {
             <div style={{ fontSize: 14, color: '#e0f2fe', fontWeight: 700, marginBottom: 16 }}>
               📋 Add-System Subscription History
               <span style={{ fontSize: 11, color: '#475569', fontWeight: 400, marginLeft: 8 }}>
-                (Registration plan not included — only add-system batches)
+                (Enterprise purchases and added licenses)
               </span>
             </div>
 

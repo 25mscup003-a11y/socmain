@@ -1,0 +1,35 @@
+.enterprise-manager { color: #e2e8f0; }
+.enterprise-manager header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+.enterprise-manager h2, .enterprise-manager h3 { margin: 0 0 10px; }
+.enterprise-manager p, .enterprise-manager small { color: #94a3b8; font-size: 12px; line-height: 1.6; }
+.enterprise-manager small { display: block; margin-top: 5px; }
+.enterprise-manager .em-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 20px; align-items: start; }
+.enterprise-manager .em-card { padding: 20px; min-width: 0; border: 1px solid #1e3a5f; background: #0c1a2e; border-radius: 12px; }
+.enterprise-manager .em-scroll { overflow-x: auto; margin-top: 16px; }
+.enterprise-manager table { border-collapse: collapse; width: 100%; min-width: 580px; font-size: 12px; text-align: left; }
+.enterprise-manager td, .enterprise-manager th { padding: 14px 10px; border-bottom: 1px solid #1e3a5f; vertical-align: top; }
+.enterprise-manager th { color: #94a3b8; }
+.enterprise-manager label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; margin-bottom: 14px; }
+.enterprise-manager input, .enterprise-manager select, .enterprise-manager textarea { box-sizing: border-box; width: 100%; background: #060e1a; color: #e2e8f0; border: 1px solid #1e3a5f; border-radius: 7px; padding: 10px; font: inherit; font-size: 13px; }
+.enterprise-manager textarea { min-height: 85px; resize: vertical; }
+.enterprise-manager .em-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.enterprise-manager button { border: 1px solid #1e3a5f; border-radius: 7px; padding: 9px 12px; background: #122640; color: #bfdbfe; cursor: pointer; font: inherit; font-size: 12px; }
+.enterprise-manager button:disabled { opacity: .5; cursor: not-allowed; }
+.enterprise-manager .em-primary { background: #2563eb; color: #fff; }
+.enterprise-manager .em-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 16px; font-size: 12px; }
+.enterprise-manager .em-error { color: #fda4af; }
+.enterprise-manager .em-success { color: #6ee7b7; }
+.enterprise-manager :is(input, select, textarea, button):focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
+@media (max-width: 1100px) { .enterprise-manager .em-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Purchase forms also live inside the narrow registration card. Size their
+   columns from the available container width, even on desktop screens. */
+.enterprise-manager.enterprise-purchase { min-width: 0; width: 100%; }
+.enterprise-manager.enterprise-purchase > header { flex-wrap: wrap; align-items: flex-start; }
+.enterprise-manager.enterprise-purchase > header > div { flex: 1 1 240px; min-width: 0; }
+.enterprise-manager.enterprise-purchase > header > button { flex: 0 0 auto; white-space: nowrap; }
+.enterprise-manager.enterprise-purchase .em-layout { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.enterprise-manager.enterprise-purchase .em-card { box-sizing: border-box; overflow-wrap: anywhere; }
+.enterprise-manager.enterprise-purchase .em-fields { grid-template-columns: repeat(auto-fit, minmax(min(100%, 100px), 1fr)); }
+.enterprise-manager.enterprise-purchase :is(label, input, select, textarea) { min-width: 0; }
+.enterprise-manager.enterprise-purchase button { max-width: 100%; }
