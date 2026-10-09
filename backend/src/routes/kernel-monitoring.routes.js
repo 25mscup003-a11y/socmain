@@ -1,3 +1,4 @@
+const { REPORT_PERIOD_HOURS } = require('../utils/edrTimeRange');
 const router = require('express').Router();
 const mongoose = require('mongoose');
 const Alert = require('../models/Alert.model');
@@ -35,7 +36,7 @@ function userScope(req) {
 
 function timeRange(req, defaultHours = 24) {
   const until = req.query.to ? new Date(req.query.to) : new Date();
-  const since = req.query.from ? new Date(req.query.from) : new Date(until.getTime() - boundedInt(req.query.windowHours, defaultHours, 1, 2160) * 3600000);
+  const since = req.query.from ? new Date(req.query.from) : new Date(until.getTime() - boundedInt(req.query.windowHours, defaultHours, 1, 4320) * 3600000);
   if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) {
     throw Object.assign(new Error('Invalid time range'), { statusCode: 400 });
   }
@@ -193,7 +194,9 @@ router.get('/events', async (req, res) => {
 
 router.get('/report', async (req, res) => {
   try {
-    const hours = { daily: 24, weekly: 168, monthly: 720, '90days': 2160 }[req.query.period] || 2160;
+    const period = String(req.query.period || '90days');
+    if (!Object.prototype.hasOwnProperty.call(REPORT_PERIOD_HOURS, period)) return res.status(400).json({ message: 'Invalid report period' });
+    const hours = REPORT_PERIOD_HOURS[period];
     const categories = {
       all: null,
       drivers: { $or: [{ kernelCategory: /driver|module/i }, { kernelEventType: /driver|module/i }, { ruleId: /driver|module|byovd/i }] },

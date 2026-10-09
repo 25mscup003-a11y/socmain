@@ -565,8 +565,17 @@ function normalizeConnection(alert, row, closed = false) {
   const listener = Boolean(row.listener) || String(row.state || '').toUpperCase() === 'LISTEN';
   const direction = listener ? 'inbound' : isPrivateIp(destinationIp) ? 'internal' : destinationIp ? 'outbound' : 'unknown';
   const risk = calculateNetworkRisk({ ...row, destinationIp });
-  const bytesReported = ['bytes_sent', 'bytesSent', 'bytes_received', 'bytesReceived']
-    .some(field => Object.prototype.hasOwnProperty.call(row, field) && row[field] !== null && row[field] !== undefined);
+  const byteCount = (...values) => {
+    for (const value of values) {
+      if (!['number', 'string'].includes(typeof value) || String(value).trim() === '') continue;
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    return null;
+  };
+  const bytesSent = byteCount(row.bytes_sent, row.bytesSent);
+  const bytesReceived = byteCount(row.bytes_received, row.bytesReceived);
+  const bytesReported = bytesSent !== null || bytesReceived !== null;
   const retentionDays = Math.max(1, Math.min(3650, number(process.env.NETWORK_RETENTION_DAYS, process.env.LOG_RETENTION_DAYS || 30)));
   const agentId = String(alert.agentId || alert.endpointId || alert.systemId || alert.hostname || 'unknown').slice(0, 128);
   const scope = { systemId: alert.systemId, agentId, hostname: alert.hostname || alert.agentName || 'unknown' };
@@ -606,8 +615,8 @@ function normalizeConnection(alert, row, closed = false) {
     ipVersion: number(row.ip_version || (net.isIP(destinationIp) || net.isIP(sourceIp) || 4), 4),
     interfaceName: String(row.interface || row.interfaceName || '').slice(0, 256),
     networkAdapter: String(row.network_adapter || row.networkAdapter || row.interface || '').slice(0, 256),
-    bytesSent: Math.max(0, number(row.bytes_sent ?? row.bytesSent)),
-    bytesReceived: Math.max(0, number(row.bytes_received ?? row.bytesReceived)),
+    bytesSent: bytesSent ?? 0,
+    bytesReceived: bytesReceived ?? 0,
     domain: String(row.domain || '').slice(0, 1024),
     dnsQueryType: String(row.query_type || row.queryType || '').slice(0, 32),
     startTime,
@@ -631,6 +640,12 @@ function normalizeConnection(alert, row, closed = false) {
     rawMetadata: {
       attributionConfidence: row.attribution_confidence || '',
       bytesScope: row.bytes_scope || (bytesReported ? 'connection' : 'not_available'),
+      bytesSentReported: bytesSent !== null,
+      bytesReceivedReported: bytesReceived !== null,
+      bytesSource: row.bytes_source || '',
+      socketCount: Math.max(1, number(row.socket_count, 1)),
+      measuredSocketCount: Math.max(0, number(row.measured_socket_count, bytesReported ? 1 : 0)),
+      domainSource: row.domain_source || '',
       endpointGroup: row.endpoint_group || row.endpointGroup || '',
       serverGroup: row.server_group || row.serverGroup || '',
     },
@@ -663,7 +678,7 @@ async function ingestNetworkTelemetry(alert, io = null) {
     return {
       ...row,
       domain: row.domain || peer.domain || peer.host || domainsByAddress.get(String(row.remote_ip || '')) || '',
-      geo: Object.values(geo).some(Boolean) ? geo : (row.geo || {}),
+      geo: Object.values(row.geo || {}).some(Boolean) ? row.geo : geo,
       threat_intel: row.threat_intel || peer.threat_intel || peer.threatIntel || {},
     };
   }) : [];

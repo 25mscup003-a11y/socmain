@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Data Security & DLP Monitoring — Capability ID: 12
  *
@@ -1307,7 +1308,9 @@ export function DataSecurityDashboardPanel({ alerts = [], loading = false, total
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <DataSecurityLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={12}>
+            <DataSecurityLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <DataSecurityReportsTab alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

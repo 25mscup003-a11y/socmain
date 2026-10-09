@@ -226,191 +226,33 @@ function enrichAndBlock(ip, companyId, alertId, io) {
     .catch(e => console.warn('[IDS→TI] Enrich error:', e.message));
 }
 
-async function verifyThreatIntelBeforeBlock(srcip, destip, alertId) {
-  const failOpen = process.env.IPS_TI_FAIL_OPEN === 'true';
-  const normalizedSrc = threatIntel.normalizeIp ? threatIntel.normalizeIp(srcip) : srcip;
-  const normalizedDest = threatIntel.normalizeIp ? threatIntel.normalizeIp(destip) : destip;
-
-  if (!normalizedSrc) return { allowed: false, summary: 'No source IP available for TI verification' };
-
-  // IPinfo Lite lookup for source and destination!
-  const [ipinfo, destIpinfo] = await Promise.all([
-    ipEnrichmentService.enrichIp(normalizedSrc).catch(err => {
-      console.warn('[IDS→IPinfo] Source enrichment failed:', err.message);
-      return null;
-    }),
-    normalizedDest ? ipEnrichmentService.enrichIp(normalizedDest).catch(err => {
-      console.warn('[IDS→IPinfo] Destination enrichment failed:', err.message);
-      return null;
-    }) : Promise.resolve(null)
-  ]);
-
+async function verifyThreatIntelBeforeBlock(srcip, destip, alertId, companyId, systemId) {
+  const decision = await require('../services/ipsThreatGate.service').verifyAutomaticNetworkAction({
+    ip: srcip, companyId, systemId, alertId, action: 'block_ip',
+  });
+  // Preserve display enrichment independently of the mandatory response gate.
   if (alertId) {
-    const updatePayload = {};
-    if (ipinfo) {
-      updatePayload.asn = ipinfo.asn;
-      updatePayload.asnOrg = ipinfo.organization;
-      updatePayload.asnDomain = ipinfo.domain;
-      updatePayload.geoCountry = ipinfo.country || undefined;
-      updatePayload.geoCountryCode = ipinfo.countryCode || undefined;
-      updatePayload.geoContinent = ipinfo.continent || undefined;
-      updatePayload.geoContinentCode = ipinfo.continentCode || undefined;
-      updatePayload.geoCity = ipinfo.city || undefined;
-      updatePayload.geoRegion = ipinfo.region || undefined;
-      updatePayload.geoPostal = ipinfo.postal || undefined;
-      updatePayload.geoTimezone = ipinfo.timezone || undefined;
-      updatePayload.geoLoc = ipinfo.loc || undefined;
-      updatePayload.geoProxy = ipinfo.privacy?.proxy || false;
-      updatePayload.geoHosting = ipinfo.privacy?.hosting || false;
-      updatePayload.geoVpn = ipinfo.privacy?.vpn || false;
-      updatePayload.geoTor = ipinfo.privacy?.tor || false;
-      updatePayload.geoRelay = ipinfo.privacy?.relay || false;
-      updatePayload.geoAnycast = ipinfo.anycast || false;
-      updatePayload.geoHostname = ipinfo.hostname || undefined;
-      updatePayload.geoAbuseEmail = ipinfo.abuse?.email || undefined;
-      updatePayload.geoAbusePhone = ipinfo.abuse?.phone || undefined;
-      updatePayload.geoAbuseAddress = ipinfo.abuse?.address || undefined;
-      updatePayload.geoAbuseNetwork = ipinfo.abuse?.network || undefined;
-      updatePayload.geoDomainsCount = ipinfo.domainsCount || 0;
-      updatePayload.geoAsnRoute = ipinfo.asnRoute || undefined;
+    const values = await Promise.all([srcip, destip].map(ip => ip
+      ? ipEnrichmentService.enrichIp(ip).catch(() => null) : null));
+    const fields = { asn: 'asn', asnOrg: 'organization', asnDomain: 'domain',
+      geoCountry: 'country', geoCountryCode: 'countryCode', geoContinent: 'continent', geoContinentCode: 'continentCode',
+      geoCity: 'city', geoRegion: 'region', geoPostal: 'postal', geoTimezone: 'timezone', geoLoc: 'loc',
+      geoAnycast: 'anycast', geoHostname: 'hostname', geoDomainsCount: 'domainsCount', geoAsnRoute: 'asnRoute' };
+    const update = {};
+    for (const [index, info] of values.entries()) {
+      if (!info) continue;
+      const key = field => index ? `dest${field[0].toUpperCase()}${field.slice(1)}` : field;
+      for (const [field, source] of Object.entries(fields)) if (info[source] != null) update[key(field)] = info[source];
+      for (const field of ['proxy', 'hosting', 'vpn', 'tor', 'relay']) {
+        if (info.privacy?.[field] != null) update[key(`geo${field[0].toUpperCase()}${field.slice(1)}`)] = info.privacy[field];
+      }
+      for (const field of ['email', 'phone', 'address', 'network']) {
+        if (info.abuse?.[field] != null) update[key(`geoAbuse${field[0].toUpperCase()}${field.slice(1)}`)] = info.abuse[field];
+      }
     }
-    if (destIpinfo) {
-      updatePayload.destAsn = destIpinfo.asn;
-      updatePayload.destAsnOrg = destIpinfo.organization;
-      updatePayload.destAsnDomain = destIpinfo.domain;
-      updatePayload.destGeoCountry = destIpinfo.country || undefined;
-      updatePayload.destGeoCountryCode = destIpinfo.countryCode || undefined;
-      updatePayload.destGeoContinent = destIpinfo.continent || undefined;
-      updatePayload.destGeoContinentCode = destIpinfo.continentCode || undefined;
-      updatePayload.destGeoCity = destIpinfo.city || undefined;
-      updatePayload.destGeoRegion = destIpinfo.region || undefined;
-      updatePayload.destGeoPostal = destIpinfo.postal || undefined;
-      updatePayload.destGeoTimezone = destIpinfo.timezone || undefined;
-      updatePayload.destGeoLoc = destIpinfo.loc || undefined;
-      updatePayload.destGeoProxy = destIpinfo.privacy?.proxy || false;
-      updatePayload.destGeoHosting = destIpinfo.privacy?.hosting || false;
-      updatePayload.destGeoVpn = destIpinfo.privacy?.vpn || false;
-      updatePayload.destGeoTor = destIpinfo.privacy?.tor || false;
-      updatePayload.destGeoRelay = destIpinfo.privacy?.relay || false;
-      updatePayload.destGeoAnycast = destIpinfo.anycast || false;
-      updatePayload.destGeoHostname = destIpinfo.hostname || undefined;
-      updatePayload.destGeoAbuseEmail = destIpinfo.abuse?.email || undefined;
-      updatePayload.destGeoAbusePhone = destIpinfo.abuse?.phone || undefined;
-      updatePayload.destGeoAbuseAddress = destIpinfo.abuse?.address || undefined;
-      updatePayload.destGeoAbuseNetwork = destIpinfo.abuse?.network || undefined;
-      updatePayload.destGeoDomainsCount = destIpinfo.domainsCount || 0;
-      updatePayload.destGeoAsnRoute = destIpinfo.asnRoute || undefined;
-    }
-    if (Object.keys(updatePayload).length > 0) {
-      await Alert.findByIdAndUpdate(alertId, updatePayload).catch(err => 
-        console.warn('[IDS→IPinfo] Failed to save IPinfo details to alert:', err.message)
-      );
-    }
+    if (Object.keys(update).length) await Alert.updateOne({ _id: alertId, companyId }, { $set: update }).catch(() => {});
   }
-
-  // The source is the remote actor. Destination enrichment is display-only;
-  // it must never select the protected service/DNS resolver as the block target.
-  if (ipinfo && ipEnrichmentService.isWhitelisted(ipinfo)) {
-    const summary = `Block bypassed: Source IP belongs to trusted organization/domain (${ipinfo.organization || ipinfo.domain || ipinfo.asn})`;
-    if (alertId) {
-      await Alert.findByIdAndUpdate(alertId, {
-        $addToSet: { capabilityIds: 29 },
-        $set: { tiEnriched: true, tiConfidence: 0, tiSummary: summary },
-      }).catch(() => {});
-    }
-    return { allowed: false, summary };
-  }
-
-  const sourceIsPublic = threatIntel.isPublicIp ? threatIntel.isPublicIp(normalizedSrc) : true;
-
-  if (!sourceIsPublic) {
-    const isReserved = threatIntel.isReservedIp ? threatIntel.isReservedIp(normalizedSrc) : true;
-    const summary = isReserved
-      ? `TI skipped: non-public/invalid source IP (${normalizedSrc})`
-      : `TI skipped: trusted CDN/cloud source IP (${normalizedSrc})`;
-
-    if (alertId) {
-      await Alert.findByIdAndUpdate(alertId, {
-        tiEnriched: false,
-        tiConfidence: 0,
-        tiSummary: summary,
-        tiFeeds: {
-          abuseScore: 0,
-          otxPulses: 0,
-          vtDetections: 0,
-          vtScore: 0,
-          vtVerdict: vt.isEnabled() ? 'skipped_non_public_ip' : 'not_configured',
-          feedSource: 'skipped_non_public_ip',
-        },
-      });
-    }
-    // Fail-open still never changes the identity of the actor being blocked.
-    if (failOpen && normalizedSrc) {
-      return { allowed: true, summary: `${summary} — fail-open: using srcip (${normalizedSrc})`, blockIp: normalizedSrc };
-    }
-    return { allowed: false, summary };
-  }
-
-  const [intel, vtResult] = await Promise.all([
-    threatIntel.enrichIp(normalizedSrc).catch(error => ({ error: error.message })),
-    vt.isEnabled() ? vt.scanIp(normalizedSrc).catch(error => ({ error: error.message })) : Promise.resolve(null),
-  ]);
-
-  const abuseScore = Number(intel?.abuseipdb?.abuseScore || 0);
-  const otxPulses = Number(intel?.otx?.pulseCount || 0);
-  const tiConfidence = Number(intel?.confidence || 0);
-  const vtDetections = Number(vtResult?.detections || 0);
-  const vtScore = Number(vtResult?.score || 0);
-  const vtVerdict = vtResult?.verdict || (vtResult ? 'unknown' : 'not_configured');
-
-  const malicious = Boolean(
-    intel?.isMalicious ||
-    abuseScore >= threatIntel.AUTO_BLOCK_THRESHOLD ||
-    otxPulses > 0 ||
-    vtVerdict === 'malicious' ||
-    vtVerdict === 'suspicious' ||
-    vtDetections > 0 ||
-    vtScore >= 10
-  );
-  const checked = Boolean(intel || vtResult);
-  const summary = [
-    `AbuseIPDB=${abuseScore}`,
-    `OTX=${otxPulses} pulses`,
-    `VT=${vtDetections}/${vtResult?.total ?? 0} ${vtVerdict}`,
-    `confidence=${Math.max(tiConfidence, vtScore)}%`,
-  ].join(' | ');
-
-  if (alertId) {
-    const update = {
-      $set: {
-        tiEnriched: checked,
-        tiConfidence: Math.max(tiConfidence, vtScore),
-        tiSummary: malicious ? `TI verified malicious: ${summary}` : `TI block gate failed: ${summary}`,
-        tiFeeds: {
-          abuseScore,
-          otxPulses,
-          vtDetections,
-          vtScore,
-          vtVerdict,
-          feedSource: intel?.publicFeeds?.feedSource,
-        },
-        ...(vtResult && {
-          vtScore,
-          vtDetections,
-          vtTotal: vtResult.total || 0,
-          vtDetectionRatio: vtResult.detection_ratio || vtResult.ratio,
-          vtVerdict,
-          vtScannedAt: vtResult.scannedAt || new Date(),
-        }),
-      },
-      ...(checked ? { $addToSet: { capabilityIds: 29 } } : {}),
-    };
-    await Alert.findByIdAndUpdate(alertId, update);
-  }
-
-  if (malicious) return { allowed: true, summary, blockIp: normalizedSrc };
-  if (!checked && failOpen) return { allowed: true, summary: `TI unavailable, fail-open enabled: ${summary}`, blockIp: normalizedSrc };
-  return { allowed: false, summary };
+  return { allowed: decision.allowed, summary: decision.reason, blockIp: decision.ip };
 }
 
 // ── IDS notifies IPS Engine (NEVER blocks directly) ────────────────────────────
@@ -518,7 +360,7 @@ async function notifyIPS(doc, adminEmail) {
               systemId,
               agentName: doc.agentName || '',
               description: description || attackType || policy.name,
-              blocked: policy.mode === 'block',
+              blocked: false, // policy intent is not proof of firewall enforcement
               createdAt: matchedAt,
               updatedAt: matchedAt,
             })), { ordered: false }).catch(error => {
@@ -540,8 +382,9 @@ async function notifyIPS(doc, adminEmail) {
 
     if (!severityBlock && !policyBlock && !sensorTiCandidate) return;
 
-    const tiGate = await verifyThreatIntelBeforeBlock(srcip, destip, doc._id);
+    const tiGate = await verifyThreatIntelBeforeBlock(srcip, destip, doc._id, companyId, systemId);
     if (!tiGate.allowed) {
+      if (doc._id && policyBlock) await Alert.updateOne({ _id: doc._id, companyId }, { $set: { policyActionStatus: 'skipped' } });
       console.log(`[IDS → IPS] Block skipped until TI confirms ${srcip} (${doc.source || 'ids'}): ${tiGate.summary}`);
       return;
     }
@@ -572,6 +415,7 @@ async function notifyIPS(doc, adminEmail) {
         systemId: systemId?.toString?.() || systemId || null,
       });
       if (doc._id && policyBlock) {
+        await IdsPolicyViolation.updateMany({ companyId, alertId: doc._id, mode: 'block' }, { $set: { blocked: incident?.blockStatus === 'success' } });
         await Alert.updateOne({ _id: doc._id, companyId }, {
           $set: {
             policyActionStatus: incident?.blockStatus === 'success'

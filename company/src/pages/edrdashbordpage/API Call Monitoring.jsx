@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * API Call Monitoring — Capability ID: 20
  *
@@ -1166,7 +1167,9 @@ export function ApiCallMonitoringDashboardPanel({ alerts = [], loading = false, 
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <ApiLogMonitor alerts={rows} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={20}>
+            <ApiLogMonitor alerts={rows} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={20} alerts={rows} />
         ) : activeTab === 'dashboard' ? (

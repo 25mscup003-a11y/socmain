@@ -1,3 +1,5 @@
+import CapabilityReportsPanel from './CapabilityReportsPanel';
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Web & DNS Monitoring — Capability ID: 9
  * 
@@ -766,184 +768,9 @@ export function WebDnsLogMonitor({ alerts = [] }) {
 // 3. SOC REPORT GENERATOR COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 export function WebDnsReportsTab({ alerts = [] }) {
-  const [reportType, setReportType] = useState('daily');
-  const [generating, setGenerating] = useState(false);
-  const [reportGenerated, setReportGenerated] = useState(false);
-
-  const handleGenerate = () => {
-    setGenerating(true);
-    setTimeout(() => {
-      setGenerating(false);
-      setReportGenerated(true);
-    }, 1000);
-  };
-
-  const handleDownloadReport = (format) => {
-    if (format === 'PDF') {
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        alert('Please allow popups to generate PDF reports.');
-        return;
-      }
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Web & DNS Executive SOC Security Report (${reportType.toUpperCase()})</title>
-          <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 30px; background: #fff; color: #1e293b; line-height: 1.5; }
-            .header { border-bottom: 3px solid #0284c7; padding-bottom: 12px; margin-bottom: 24px; display: flex; justify-space-between: space-between; align-items: center; }
-            h1 { margin: 0; color: #0f172a; font-size: 24px; }
-            .meta { color: #64748b; font-size: 12px; margin-top: 6px; }
-            .badge { background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 12px; }
-            .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 24px 0; }
-            .metric-card { background: #f8fafc; border: 1px solid #cbd5e1; padding: 14px; border-radius: 8px; }
-            .metric-title { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold; }
-            .metric-val { font-size: 22px; font-weight: 800; color: #0284c7; margin-top: 6px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
-            th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; }
-            th { background: #f1f5f9; color: #334155; font-weight: bold; }
-            .sev-critical { color: #dc2626; font-weight: bold; }
-            .sev-high { color: #ea580c; font-weight: bold; }
-            .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div>
-              <h1>🛡️ Web & DNS Executive SOC Security Report</h1>
-              <div class="meta">Generated: ${new Date().toLocaleString()} | Scope: ${reportType.toUpperCase()} | Classification: CONFIDENTIAL</div>
-            </div>
-            <span class="badge">SECURITY VERIFIED</span>
-          </div>
-
-          <div class="metrics-grid">
-            <div class="metric-card"><div class="metric-title">Total Web/DNS Logs Analyzed</div><div class="metric-val">148,200</div></div>
-            <div class="metric-card"><div class="metric-title">Blocked Malicious Domains</div><div class="metric-val">412</div></div>
-            <div class="metric-card"><div class="metric-title">DNS Tunneling Alerts</div><div class="metric-val">18</div></div>
-            <div class="metric-card"><div class="metric-title">Overall Security Score</div><div class="metric-val">88 / 100</div></div>
-          </div>
-
-          <h2>Summary of Detected Web & DNS Threat Vectors</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Threat Category</th>
-                <th>Affected Host Count</th>
-                <th>Severity</th>
-                <th>Detection Engine</th>
-                <th>Applied Mitigation</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>DNS Tunneling & Data Exfiltration</td><td>6 Hosts</td><td class="sev-critical">CRITICAL</td><td>Heuristic Engine v5</td><td>Automated DNS Sinkhole</td></tr>
-              <tr><td>Phishing Domain Lookups</td><td>14 Hosts</td><td class="sev-high">HIGH</td><td>Threat Intel Stream</td><td>Domain Blacklist Block</td></tr>
-              <tr><td>WAF Web Attacks (SQLi / XSS)</td><td>12 Servers</td><td class="sev-high">HIGH</td><td>WAF eBPF Driver</td><td>IP Block & Rate Limit</td></tr>
-              <tr><td>C2 Outbound Beaconing</td><td>4 Hosts</td><td class="sev-critical">CRITICAL</td><td>Behavioral Analytics</td><td>Network Isolation</td></tr>
-            </tbody>
-          </table>
-
-          <div class="footer">
-            Confidential — Generated by Enterprise SOC Platform | Web & DNS Monitoring Module
-          </div>
-
-          <script>
-            window.onload = function() { window.print(); }
-          </script>
-        </body>
-        </html>
-      `;
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      return;
-    }
-
-    if (format === 'CSV') {
-      const headers = ["Timestamp", "Hostname", "Username", "Source IP", "Destination IP", "Domain/URL", "Query Type", "Severity", "Threat Type", "Action Taken"];
-      const rows = alerts.map(a => [
-        `"${a.createdAt || a.timestamp || ''}"`,
-        `"${a.hostname || a.agentName || ''}"`,
-        `"${a.username || ''}"`,
-        `"${a.srcip || a.srcIp || ''}"`,
-        `"${a.destip || a.dstIp || ''}"`,
-        `"${a.domain || a.url || ''}"`,
-        `"${a.queryType || ''}"`,
-        `"${a.severity || ''}"`,
-        `"${a.threatType || a.threatCategory || a.ruleId || ''}"`,
-        `"${a.actionTaken || (a.blocked ? 'Blocked' : '')}"`
-      ]);
-
-      const csvData = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-      const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `webdns_soc_report_${reportType}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      return;
-    }
-
-    // JSON Export
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(alerts.length > 0 ? alerts : { title: "Web & DNS Executive SOC Security Report", reportType, generatedAt: new Date().toISOString() }, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `webdns_soc_report_${reportType}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
-  return (
-    <div style={{ background: MON.bg, color: MON.text, padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ background: MON.card, border: `1px solid ${MON.border}`, borderRadius: 8, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#f8fafc' }}>📄 Automated Web & DNS SOC Executive Report Generator</h3>
-          <div style={{ fontSize: 11, color: MON.muted, marginTop: 4 }}>Generate Executive Summary, Top Threats, DNS Statistics & MITRE ATT&CK Mapping</div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select value={reportType} onChange={(e) => setReportType(e.target.value)} style={{ background: MON.bg, border: `1px solid ${MON.border}`, color: MON.text, padding: '8px 14px', borderRadius: 6, fontSize: 12 }}>
-            <option value="daily">Daily Report (24 Hours)</option>
-            <option value="weekly">Weekly Executive Summary</option>
-            <option value="monthly">Monthly SOC Intelligence Report</option>
-            <option value="custom">Custom Threat Scope</option>
-          </select>
-          <button type="button" onClick={handleGenerate} disabled={generating} style={{ background: MON.cyan, color: '#000', border: 'none', padding: '8px 18px', borderRadius: 6, fontWeight: 800, cursor: 'pointer' }}>
-            {generating ? 'Generating...' : '⚡ Generate Report'}
-          </button>
-        </div>
-      </div>
-
-      {reportGenerated && (
-        <div style={{ background: MON.card, border: `1px solid ${MON.border}`, borderRadius: 8, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: `1px solid ${MON.line}`, paddingBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: MON.cyan }}>Executive Summary Preview ({reportType.toUpperCase()})</div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button type="button" onClick={() => handleDownloadReport('PDF')} style={{ background: MON.red, color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, fontWeight: 800, fontSize: 11, cursor: 'pointer' }}>Export PDF</button>
-              <button type="button" onClick={() => handleDownloadReport('CSV')} style={{ background: MON.green, color: '#000', border: 'none', padding: '6px 12px', borderRadius: 4, fontWeight: 800, fontSize: 11, cursor: 'pointer' }}>Export CSV</button>
-              <button type="button" onClick={() => handleDownloadReport('JSON')} style={{ background: MON.blue, color: '#000', border: 'none', padding: '6px 12px', borderRadius: 4, fontWeight: 800, fontSize: 11, cursor: 'pointer' }}>Export JSON</button>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-            <div style={{ background: MON.card2, padding: 12, borderRadius: 6, border: `1px solid ${MON.border}` }}><div style={{ fontSize: 10, color: MON.muted }}>Total Web/DNS Logs Analyzed</div><div style={{ fontSize: 18, color: MON.cyan, fontWeight: 900 }}>148,200 Logs</div></div>
-            <div style={{ background: MON.card2, padding: 12, borderRadius: 6, border: `1px solid ${MON.border}` }}><div style={{ fontSize: 10, color: MON.muted }}>Blocked Malicious Domains</div><div style={{ fontSize: 18, color: MON.red, fontWeight: 900 }}>412 Domains</div></div>
-            <div style={{ background: MON.card2, padding: 12, borderRadius: 6, border: `1px solid ${MON.border}` }}><div style={{ fontSize: 10, color: MON.muted }}>DNS Tunneling Attacks</div><div style={{ fontSize: 18, color: MON.orange, fontWeight: 900 }}>18 Incidents</div></div>
-            <div style={{ background: MON.card2, padding: 12, borderRadius: 6, border: `1px solid ${MON.border}` }}><div style={{ fontSize: 10, color: MON.muted }}>Overall Security Score</div><div style={{ fontSize: 18, color: MON.green, fontWeight: 900 }}>88 / 100</div></div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <CapabilityReportsPanel capabilityId={9} alerts={alerts} />;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// 4. MAIN DASHBOARD PANEL COMPONENT
-// ═════════════════════════════════════════════════════════════════════════════
-// ── Visual Helper Components for Web & DNS Monitoring Dashboard ─────────────
 function WebTrafficOverTimeChart({ data = [] }) {
   const times = ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'];
   const maxValue = Math.max(...data, 1);
@@ -1764,7 +1591,9 @@ export default function WebDnsDashboardPanel({ alerts = [], loading = false, tot
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
 
       {activeTab === 'log-monitor' ? (
-        <WebDnsLogMonitor alerts={alerts} />
+        <CapabilityLogsPanel capabilityId={9}>
+            <WebDnsLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
       ) : activeTab === 'reports' ? (
         <WebDnsReportsTab alerts={alerts} />
       ) : activeTab === 'dashboard' ? (

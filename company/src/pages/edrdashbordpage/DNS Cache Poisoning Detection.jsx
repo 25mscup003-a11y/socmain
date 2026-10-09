@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * DNS Cache Poisoning Detection — Capability ID: 30
  *
@@ -1471,7 +1472,9 @@ export default function DnsCachePoisoningDashboard({ alerts = [], loading = fals
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
 
         {activeTab === 'log-monitor' ? (
-          <DnsCachePoisoningLogMonitor alerts={alerts} onRefresh={onRefresh} />
+          <CapabilityLogsPanel capabilityId={30}>
+            <DnsCachePoisoningLogMonitor alerts={alerts} onRefresh={onRefresh} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <DnsCachePoisoningReportsTab alerts={alerts} />
         ) : activeTab === 'configure' ? (

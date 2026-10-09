@@ -1,4 +1,6 @@
 const mockExecFile = jest.fn();
+const mockVerify = jest.fn();
+jest.mock('../src/services/threatVerificationService', () => ({ verifyAutomaticBlock: (...args) => mockVerify(...args) }));
 let mockDatabase = null;
 jest.mock('child_process', () => ({ execFile: (...args) => mockExecFile(...args) }));
 jest.mock('../src/db/mongodb', () => ({ getDB: () => mockDatabase }));
@@ -16,11 +18,27 @@ const B = '507f1f77bcf86cd799439012';
 const target = { ip: '203.0.113.100', company: A };
 
 beforeEach(() => {
+  mockVerify.mockReset().mockResolvedValue({ allowed: true });
   mockDatabase = null;
   jest.useFakeTimers();
   jest.setSystemTime(new Date('2026-10-05T00:00:00Z'));
   mockExecFile.mockReset().mockImplementation((cmd, args, opts, callback) => callback(null, '@blocked_ipv4 @blocked_ipv6', ''));
   load();
+});
+
+test('automatic blocks cannot reach firewall/cache when backend threat verification is incomplete', async () => {
+  mockVerify.mockResolvedValue({ allowed: false, reason: 'OTX unavailable' });
+  const result = await service.blockTarget(target);
+  expect(result).toMatchObject({ enforced: false, tiDeferred: true, skipped: true });
+  expect(service.getBlocklist(A)).toHaveLength(0);
+  expect(mockExecFile).not.toHaveBeenCalled();
+});
+
+test('explicit manual block retains its existing behavior without automatic TI approval', async () => {
+  mockVerify.mockResolvedValue({ allowed: false });
+  await service.blockTarget({ ...target, automatic: false });
+  expect(mockVerify).not.toHaveBeenCalled();
+  expect(service.getBlocklist(A)).toHaveLength(1);
 });
 afterEach(async () => {
   mockDatabase = null;

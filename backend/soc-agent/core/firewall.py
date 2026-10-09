@@ -201,7 +201,9 @@ class FirewallModule:
     def unblock_ip(self, ip: str) -> bool:
         ip = ip.strip()
         try:
-            fw_backend.unblock_ip(ip, direction='both')
+            if not fw_backend.unblock_ip(ip, direction='both'):
+                logger.warning('Firewall: unblock_ip %s failed; retaining local rule state', ip)
+                return False
 
             self._rules = [r for r in self._rules if not (r.get('action') == 'block_ip' and r.get('ip') == ip)]
             self._save_rules()

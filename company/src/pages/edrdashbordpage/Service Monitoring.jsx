@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Service Monitoring — Capability ID: 24 (Backend ID: 24)
  *
@@ -1337,7 +1338,9 @@ export function ServiceMonitoringDashboardPanel({ alerts = [], loading = false, 
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <ServiceAnomalyLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={24}>
+            <ServiceAnomalyLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <ServiceAnomalyReportsTab alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

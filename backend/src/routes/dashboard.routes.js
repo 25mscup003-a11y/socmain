@@ -11,6 +11,7 @@ const { authenticate, requireAnalyst, requireSuperAdmin, requireManager } = requ
 const { getUserDataFilter } = require('../services/socAccess.service');
 const SocAuditEvent = require('../models/SocAuditEvent.model');
 const { readyUebaSystemIds } = require('../utils/uebaBaseline');
+const { LOG_RANGE_HOURS, REPORT_PERIOD_HOURS } = require('../utils/edrTimeRange');
 
 function emitAlertChange(req, event, alert) {
   const io = req.app.get('io');
@@ -1841,6 +1842,70 @@ router.get('/capabilities/:capabilityId/live', requireAnalyst, async (req, res) 
   }
 });
 
+// Historical SIEM rows use the same capability boundary as the overview, but
+// have their own time window and pagination instead of a live snapshot limit.
+router.get('/capabilities/:capabilityId/logs', requireAnalyst, async (req, res) => {
+  const capabilityId = Number(req.params.capabilityId);
+  const range = String(req.query.range || '24h');
+  if (!PUBLIC_EDR_CAPABILITY_IDS.has(capabilityId)) return res.status(400).json({ message: 'Unsupported capability' });
+  if (!Object.prototype.hasOwnProperty.call(LOG_RANGE_HOURS, range)) return res.status(400).json({ message: 'Invalid log time range' });
+  if (!mongoose.Types.ObjectId.isValid(req.user.companyId)) return res.status(400).json({ message: 'Invalid tenant scope' });
+  const now = new Date();
+  const until = req.query.windowEnd ? new Date(req.query.windowEnd) : now;
+  if (Number.isNaN(until.getTime()) || until > now) return res.status(400).json({ message: 'Invalid log window end' });
+  const since = new Date(until.getTime() - LOG_RANGE_HOURS[range] * 3600000);
+  const page = Math.max(1, Math.trunc(Number(req.query.page) || 1));
+  const limit = Math.min(500, Math.max(1, Math.trunc(Number(req.query.limit) || 500)));
+  if (!Number.isSafeInteger(page) || !Number.isSafeInteger((page - 1) * limit)) return res.status(400).json({ message: 'Invalid log page' });
+  try {
+    const companyId = new mongoose.Types.ObjectId(req.user.companyId);
+    const departmentId = resolveCapabilityDepartmentScope(req.user, req.query.departmentId);
+    const systemId = await resolveRequestedSystemScope(companyId, req.query.systemId, departmentId);
+    let evidence = liveTargetCapabilityMatch(companyId, capabilityId, since, departmentId, systemId);
+    if (capabilityId === 5) {
+      // The memory SIEM table includes metric telemetry as well as detections.
+      evidence = { $or: [evidence, {
+        companyId, ...(departmentId ? { departmentId } : {}),
+        createdAt: { $gte: since }, isSynthetic: { $ne: true },
+        $and: [
+          { $or: [{ capabilityId: 5 }, { capabilityIds: 5 }] },
+          { $or: [{ eventType: 'memory.metric' }, { memoryMetricType: { $in: ['host', 'process'] } }] },
+        ],
+      }] };
+    }
+    const conditions = [evidence, { createdAt: { $lte: until } }];
+    if (systemId) conditions.push({ systemId });
+    if (capabilityId === 11) {
+      conditions.push({ systemId: { $in: await readyUebaSystemIds({ companyId, departmentId, now: until }) } });
+    }
+    if (capabilityId === 23) {
+      const policyScope = { companyId, enabled: true };
+      if (departmentId) policyScope.$or = [{ departmentId }, { departmentId: null }, { departmentId: { $exists: false } }];
+      const policies = await GeolocationPolicy.find(policyScope).select('conditions.systemIds').lean();
+      if (!policies.length) conditions.push({ _id: { $exists: false } });
+      else if (!policies.some(policy => !Array.isArray(policy.conditions?.systemIds) || policy.conditions.systemIds.length === 0)) {
+        conditions.push({ systemId: { $in: policies.flatMap(policy => policy.conditions.systemIds || []) } });
+      }
+    }
+    const query = { $and: conditions };
+    // Pin the existing ordered index: the nested legacy evidence predicates
+    // otherwise spend the query budget in MongoDB's multiplanner. Adding _id
+    // to the sort would force a blocking sort of the entire time window.
+    const indexHint = capabilityId === 28
+      ? { companyId: 1, source: 1, createdAt: -1 }
+      : { companyId: 1, createdAt: -1 };
+    const rows = await Alert.find(query).hint(indexHint).sort({ createdAt: -1 })
+      .skip((page - 1) * limit).limit(limit + 1)
+      .populate('systemId', 'name hostname ip ipAddress os osType').maxTimeMS(10000).lean();
+    // This table displays loaded rows, so an exact count of months of history
+    // is unnecessary. A lookahead row answers whether another page exists.
+    const alerts = rows.slice(0, limit);
+    res.json({ alerts, total: null, hasMore: rows.length > limit, page, limit, range, since, until });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
 // ── GET /api/dashboard/alerts/:category — detail view ────────────────────────
 router.get('/alerts/:category', requireAnalyst, async (req, res) => {
   const { companyId, role, departmentId } = req.user;
@@ -2349,7 +2414,7 @@ router.get('/process-activity/report', requireAnalyst, async (req, res) => {
     const { period = '90days', category = 'all', departmentId: deptParam } = req.query;
 
     // Period → window hours mapping
-    const periodHoursMap = { daily: 24, weekly: 168, monthly: 720, '90days': 2160 };
+    const periodHoursMap = REPORT_PERIOD_HOURS;
     if (!Object.prototype.hasOwnProperty.call(periodHoursMap, period)) {
       return res.status(400).json({ message: 'Invalid report period' });
     }
@@ -2463,6 +2528,7 @@ router.get('/capability-report/:capabilityId', requireAnalyst, async (req, res) 
   allowedCapabilities.add(7);
   allowedCapabilities.add(6);
   allowedCapabilities.add(8);
+  allowedCapabilities.add(9);
   allowedCapabilities.add(10);
   allowedCapabilities.add(11);
   allowedCapabilities.add(12);
@@ -2471,8 +2537,9 @@ router.get('/capability-report/:capabilityId', requireAnalyst, async (req, res) 
   allowedCapabilities.add(15);
   allowedCapabilities.add(16);
   allowedCapabilities.add(17);
-  const periodHours = { daily: 24, weekly: 168, monthly: 720, '90days': 2160 };
+  const periodHours = REPORT_PERIOD_HOURS;
   const categories = {
+    9: { all: null },
     4: {
       all: null,
       successful: { $or: [{ authResult: 'success' }, { userAction: /^(?:login|remote_login|privileged_login|screen_unlock_success)$/i }, { ruleId: /AUTH_(?:SUCCESS|MFA_SUCCESS|SCREEN_UNLOCK_SUCCESS)/i }] },

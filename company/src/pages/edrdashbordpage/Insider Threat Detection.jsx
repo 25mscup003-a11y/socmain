@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Insider Threat Detection — Capability ID: 16
  *
@@ -1336,7 +1337,9 @@ export function InsiderThreatDashboardPanel({ alerts = [], loading = false, tota
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <InsiderLogMonitor alerts={alerts} />
+          <CapabilityLogsPanel capabilityId={16}>
+            <InsiderLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={16} alerts={rows} />
         ) : activeTab === 'dashboard' ? (

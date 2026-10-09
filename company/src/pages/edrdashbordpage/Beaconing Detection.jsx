@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Beaconing Detection — Capability ID: 26 (Backend ID: 26)
  *
@@ -1093,7 +1094,9 @@ export function BeaconingDashboardPanel({ alerts = [], loading = false, total = 
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'logs' ? (
-          <BeaconingLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={26}>
+            <BeaconingLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <BeaconingReportsTab alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

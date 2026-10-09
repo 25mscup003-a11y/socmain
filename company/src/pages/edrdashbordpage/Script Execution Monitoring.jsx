@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Script Execution Monitoring — Capability ID: 21
  *
@@ -1276,7 +1277,9 @@ export function ScriptExecutionDashboardPanel({ alerts = [], loading = false, to
             </div>
           </div>
         ) : activeTab === 'log-monitor' ? (
-          <ScriptLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={21}>
+            <ScriptLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <ScriptReportsTab alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

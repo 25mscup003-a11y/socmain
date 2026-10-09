@@ -14,6 +14,10 @@ const https  = require('https');
 const net    = require('net');
 const Alert  = require('../models/Alert.model');
 const { BlockedIP } = require('../services/ips.service');
+const System = require('../models/System.model');
+const IpsWhitelist = require('../models/IpsWhitelist.model');
+const IpsAuditEvent = require('../models/IpsAuditEvent.model');
+const IdsPolicyViolation = require('../models/IdsPolicyViolation.model');
 const { authenticate, requireAnalyst, requireSuperAdmin } = require('../middleware/auth.middleware');
 const { CAPABILITY_GROUPS, listAttackTypes, resolveAttackType } = require('../constants/idsIpsCapabilities');
 const threatIntel = require('../services/threat-intel.service');
@@ -90,7 +94,7 @@ async function resolveIdsIpsWindow(companyFilter, hours = 24) {
   return { filter: liveFilter, isStale: false, capturedAt: null };
 }
 
-router.get('/idsips/public-debug-unknowns', async (req, res) => {
+router.get('/idsips/public-debug-unknowns', authenticate, requireSuperAdmin, async (req, res) => {
   try {
     const alerts = await Alert.find({
       $or: [{ attackType: 'Unknown Attack' }, { attackType: null }]
@@ -423,8 +427,15 @@ router.get('/idsips/logs', async (req, res) => {
     const skipCount = req.query.skipCount === 'true';
     const pageNumber = Math.max(1, Number(page) || 1);
     const pageLimit = Math.min(500, Math.max(1, Number(limit) || 100));
+    // Keep the legacy 90-day range for existing clients. Query ranges do not
+    // change the company's storage retention or restore expired records.
     const retentionDays = 90;
-    const queryWindowDays = req.query.range === 'retention' ? retentionDays : 1;
+    const rangeDays = { '24h': 1, '7d': 7, '30d': 30, '60d': 60, '90d': 90, '180d': 180, retention: retentionDays };
+    const range = req.query.range ?? '24h';
+    if (typeof range !== 'string' || !Object.hasOwn(rangeDays, range)) {
+      return res.status(400).json({ message: 'Invalid log range. Choose 24h, 7d, 30d, 60d, 90d or 180d.' });
+    }
+    const queryWindowDays = rangeDays[range];
     const retentionStart = new Date(Date.now() - queryWindowDays * 24 * 60 * 60 * 1000);
 
     let filter = {};
@@ -576,6 +587,7 @@ router.get('/idsips/logs', async (req, res) => {
       total,
       overallTotal: counts.total,
       retentionDays,
+      maxQueryDays: 180,
       queryWindowDays,
       retentionStart,
       page: pageNumber,
@@ -766,12 +778,22 @@ router.get('/idsips/summary', async (req, res) => {
     // process. The durable MongoDB blocklist remains authoritative here.
     const connectivityPromise = checkIPSServerConnectivity(750).catch(() => ({ online: false }));
 
-    const [alertRollup, ipsBlockedFromDb] = await Promise.all([
+    const tenantFilter = companyFilter.companyId ? { companyId: companyFilter.companyId } : {};
+    const now = new Date();
+    const recent = { $gte: new Date(now.getTime() - 24 * 3600000) };
+    const [alertRollup, ipsBlockedFromDb, whitelistCount, policyCount, auditCount, isolationCount] = await Promise.all([
       loadIdsAlertRollup(Alert, filter),
       BlockedIP.countDocuments({
-        ...(isSuperAdmin ? {} : { companyId: req.user.companyId }),
-        reverted: false,
+        ...tenantFilter, reverted: false, method: { $ne: 'log-only' },
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
       }).maxTimeMS(10000),
+      IpsWhitelist.countDocuments(tenantFilter).maxTimeMS(5000),
+      IdsPolicyViolation.countDocuments({ ...tenantFilter, createdAt: recent }).maxTimeMS(5000),
+      // The audit tab shows the latest 500 events across all dates.
+      IpsAuditEvent.countDocuments(tenantFilter).maxTimeMS(5000).then(count => Math.min(500, count)),
+      System.countDocuments({ ...tenantFilter, $or: [
+        { isIsolated: true }, { isolationStatus: { $in: ['pending', 'isolated', 'reconnecting', 'failed'] } },
+      ] }).maxTimeMS(5000),
     ]);
     const { total, blocked, critical, high } = alertRollup;
 
@@ -787,6 +809,7 @@ router.get('/idsips/summary', async (req, res) => {
       high,
       capabilities: CAPABILITY_GROUPS.reduce((sum, group) => sum + group.capabilities.length, 0),
       ipsBlocked:    ipsBlockedCount,
+      ipsMetrics: { whitelist: whitelistCount, policy: policyCount, audit: auditCount, isolationFlow: isolationCount },
       ipsOnline:     connectivity.online,
       ipsStatus:     connectivity.online ? 'online' : 'offline',
       checked:       new Date().toISOString(),
@@ -803,7 +826,7 @@ router.get('/idsips/summary', async (req, res) => {
   }
 });
 
-router.get('/idsips/debug-unknowns', async (req, res) => {
+router.get('/idsips/debug-unknowns', requireSuperAdmin, async (req, res) => {
   try {
     const alerts = await Alert.find({
       $or: [{ attackType: 'Unknown Attack' }, { attackType: null }]

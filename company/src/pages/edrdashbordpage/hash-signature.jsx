@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Hash & Digital Signature Analysis — canonical UI/backend capability ID: 25
  *
@@ -1173,7 +1174,9 @@ export function HashSignatureDashboardPanel({ alerts = [], loading = false, tota
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <HashSignatureLogMonitor alerts={alerts} onResponse={queueResponse} />
+          <CapabilityLogsPanel capabilityId={25}>
+            <HashSignatureLogMonitor alerts={alerts} onResponse={queueResponse} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <HashSignatureReportsTab alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

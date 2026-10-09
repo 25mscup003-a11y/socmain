@@ -13,6 +13,30 @@ const { authenticate, requireAnalyst, requireManager } = require('../middleware/
 const { blockIP, unblockIP, getBlocklist, isBlocked, BlockedIP } = require('../services/ips.service');
 const Alert = require('../models/Alert.model');
 
+// IPS server asks for a decision only; this route never dispatches a block.
+router.post('/verify-automatic', async (req, res) => {
+  const crypto = require('crypto');
+  const secret = Buffer.from(process.env.IPS_WEBHOOK_SECRET || '');
+  const supplied = Buffer.from(String(req.headers['x-webhook-secret'] || ''));
+  if (!secret.length || secret.length !== supplied.length || !crypto.timingSafeEqual(secret, supplied)) {
+    return res.status(401).json({ allowed: false, reason: 'Unauthorized' });
+  }
+  try {
+    const companyId = req.headers['x-company-id'];
+    if (!require('mongoose').isValidObjectId(companyId)
+        || !await require('../models/Company.model').exists({ _id: companyId })) {
+      return res.status(400).json({ allowed: false, reason: 'Valid company required' });
+    }
+    const result = await require('../services/networkResponseVerification.service').checkNetworkResponse({
+      companyId, ip: req.body.ip, action: 'block_ip',
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(result);
+  } catch {
+    return res.status(503).json({ allowed: false, reason: 'Network response verification unavailable' });
+  }
+});
+
 router.use(authenticate, requireAnalyst);
 router.use(require('./country-block.routes'));
 
@@ -61,9 +85,9 @@ router.post('/block', requireManager, async (req, res) => {
       ip, port: port || undefined, reason: reason || `Manual block by ${req.user.name || req.user.email}`,
       companyId: req.user.companyId,
       blockedBy: 'analyst',
-      ttlHours: ttlHours || undefined,
+      ttlHours: ttlHours ?? undefined,
     });
-    res.json(result);
+    res.status(result.ok ? 200 : result.agentAccepted ? 202 : result.whitelisted ? 409 : 422).json(result);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
@@ -75,7 +99,7 @@ router.delete('/block/:ip', requireManager, async (req, res) => {
       companyId: req.user.companyId,
       reason: `Manual unblock by ${req.user.name || req.user.email}`,
     });
-    res.json(result);
+    res.status(result.ok ? 200 : result.accepted ? 202 : 502).json(result);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
@@ -182,7 +206,7 @@ router.post('/rules', requireManager, async (req, res) => {
         reason: `Firewall rule: ${type}=${value} dir=${direction} proto=${protocol}`,
         companyId, blockedBy: 'analyst',
       });
-      return res.json({ ok: true, rule: result, companyId });
+      return res.status(result.ok ? 200 : result.agentAccepted ? 202 : result.whitelisted ? 409 : 422).json({ ok: result.ok, rule: result, companyId });
     }
     const entry = await BlockedIP.create({
       ip: `${type}:${value}`, companyId,

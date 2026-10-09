@@ -14,9 +14,31 @@ const PERIODS = [
   { key: 'weekly', label: '1 Week', icon: '📆', days: 7 },
   { key: 'monthly', label: '1 Month', icon: '🗓', days: 30 },
   { key: '90days', label: '3 Months', icon: '📊', days: 90 },
+  { key: '180days', label: '6 Months', icon: '📅', days: 180 },
 ];
 
 const DEFINITIONS = {
+  9: {
+    title: 'Web & DNS Monitoring',
+    subtitle: 'Web requests, DNS queries and threat evidence reported by endpoint agents',
+    categories: [['all', 'All Web & DNS Events']],
+    classify: () => 'all',
+    metrics: rows => [
+      ['Total Events', rows.length, COLORS.cyan],
+      ['Critical Events', count(rows, row => severity(row) === 'critical'), COLORS.red],
+      ['High Severity', count(rows, row => severity(row) === 'high'), COLORS.orange],
+      ['Blocked', count(rows, row => row.blocked || /block|deny/i.test(String(field(row, 'actionTaken')))), COLORS.green],
+    ],
+    columns: [
+      ['Time', row => eventTime(row)], ['Host', host],
+      ['Domain / URL', row => field(row, 'domain', 'url')],
+      ['Query Type', row => field(row, 'queryType')],
+      ['Source IP', row => field(row, 'srcip', 'sourceIp')],
+      ['Destination IP', row => field(row, 'destip')],
+      ['Severity', severity], ['Rule', row => field(row, 'ruleId')],
+      ['Action', row => field(row, 'actionTaken')],
+    ],
+  },
   4: {
     title: 'User & Authentication Monitoring',
     subtitle: 'Endpoint login activity, account changes, privileged access, remote authentication and correlated identity threats',

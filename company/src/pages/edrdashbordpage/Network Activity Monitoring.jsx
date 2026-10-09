@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Network Activity Monitoring — Capability ID: 3
  *
@@ -95,26 +96,39 @@ export function mergeNetworkLogRows(connections = [], alerts = []) {
     const ips = Array.isArray(row.destinationIps) && row.destinationIps.length
       ? row.destinationIps
       : [netDstIp(row)];
-    ips.filter(Boolean).forEach(ip => dnsAttributionKeys.set(`${processKey}|${String(ip)}`, rowId));
+    ips.filter(Boolean).forEach(ip => {
+      const key = `${processKey}|${String(ip)}`;
+      dnsAttributionKeys.set(key, [...(dnsAttributionKeys.get(key) || []), rowId]);
+    });
   });
+  const nearbyAttribution = (ids, row) => {
+    const observed = new Date(alertTime(row) || 0).getTime();
+    return (ids || [])
+      .map(id => ({ id, delta: Math.abs(observed - new Date(alertTime(attributedById.get(id)) || 0).getTime()) }))
+      .filter(item => observed > 0 && Number.isFinite(item.delta) && item.delta <= 15 * 60 * 1000)
+      .sort((a, b) => a.delta - b.delta)[0]?.id;
+  };
   const unmatchedConnections = connections.filter(row => {
     const processKey = identity(row);
-    let matchId = dnsAttributionKeys.get(`${processKey}|${String(netDstIp(row))}`);
+    let matchId = nearbyAttribution(dnsAttributionKeys.get(`${processKey}|${String(netDstIp(row))}`), row);
     // A socket snapshot may not carry its DNS name after a CDN rotates to a
     // sibling address. Correlate only outbound, domain-empty rows from the
     // same endpoint/process/PID/service and a nearby attribution event.
     if (!matchId && !netDnsQuery(row) && String(row?.direction || '').toLowerCase() === 'outbound') {
-      const observed = new Date(alertTime(row) || 0).getTime();
-      matchId = (processAttributionKeys.get(processKey) || [])
-        .map(id => ({ id, delta: Math.abs(observed - new Date(alertTime(attributedById.get(id)) || 0).getTime()) }))
-        .filter(item => Number.isFinite(item.delta) && item.delta <= 15 * 60 * 1000)
-        .sort((a, b) => a.delta - b.delta)[0]?.id;
+      matchId = nearbyAttribution(processAttributionKeys.get(processKey), row);
     }
     if (!matchId) return true;
     const attribution = attributedById.get(matchId);
     const destinationIp = netDstIp(row);
     if (attribution && destinationIp && !attribution.destinationIps.includes(destinationIp)) {
       attribution.destinationIps.push(destinationIp);
+    }
+    // Keep the matching socket's DNS/geo/byte evidence when its separate row
+    // is absorbed. A sibling CDN address must not supply the primary IP's geo.
+    if (attribution && destinationIp === netDstIp(attribution)) {
+      const previous = attribution.correlatedConnection;
+      const distance = candidate => Math.abs(new Date(alertTime(candidate)) - new Date(alertTime(attribution)));
+      if (!previous || distance(row) < distance(previous)) attribution.correlatedConnection = row;
     }
     return false;
   });
@@ -186,9 +200,14 @@ function alertHost(row) {
 }
 
 function alertUser(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || row?.raw || {};
-  return row?.user || row?.username || row?.userName || row?.account || row?.correlatedConnection?.username
-    || raw.username || raw.user || 'Not reported';
+  const sources = [...networkTelemetrySources(row), ...networkTelemetrySources(row?.correlatedConnection)];
+  for (const source of sources.flatMap(value => [value, value.connection])) {
+    for (const value of [source?.username, source?.user, source?.userName, source?.user_name, source?.account]) {
+      const name = networkText(value) || networkText(value?.username) || networkText(value?.name);
+      if (name) return name;
+    }
+  }
+  return 'Not reported';
 }
 
 function alertStatus(row) {
@@ -310,19 +329,66 @@ function suspiciousConnectionEvidence(row) {
   }).filter(connection => netDstIp(connection));
 }
 
+function networkTelemetrySources(row) {
+  const records = [row, row?.rawEvent, row?.rawEvent?.raw, row?.raw, row?.raw?.raw];
+  return records.filter(source => source && typeof source === 'object' && !Array.isArray(source));
+}
+
+function networkText(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return /^(?:unknown|n\/?a|none|null|undefined|not[ _-]?(?:reported|available)|unavailable|-|—)$/i.test(text) ? '' : text;
+}
+
+function netTraffic(row) {
+  const number = value => {
+    if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  };
+  const read = (sources, keys) => {
+    for (const source of sources) {
+      for (const key of keys) {
+        const value = number(source?.[key]);
+        if (value !== null) return value;
+      }
+    }
+    return null;
+  };
+  for (const record of [row, row?.correlatedConnection]) {
+    const sources = networkTelemetrySources(record);
+    const scope = sources.map(source => source.bytesScope || source.bytes_scope || source.rawMetadata?.bytesScope).find(Boolean);
+    if (scope === 'not_available') continue;
+    const adapter = sources.map(source => source.adapter_delta || source.adapterDelta).find(value => value && typeof value === 'object');
+    const values = sources.flatMap(source => [source, source.connection, source.flow]);
+    // Adapter totals belong only to the event that reports them. Never use
+    // liveContext.networkSnapshot to fill a socket's missing byte counts.
+    if (adapter) values.push(adapter);
+    const sent = record?.rawMetadata?.bytesSentReported === false ? null : read(values, ['bytesSent', 'bytes_sent', 'sentBytes', 'sent', 'orig_bytes', 'bytes_toserver']);
+    const received = record?.rawMetadata?.bytesReceivedReported === false ? null : read(values, ['bytesReceived', 'bytes_received', 'bytesRecv', 'bytes_recv', 'receivedBytes', 'recv', 'resp_bytes', 'bytes_toclient']);
+    if (sent !== null || received !== null) return { sent, received, scope: adapter ? 'adapter' : (scope || 'connection') };
+  }
+  return { sent: null, received: null, scope: 'not_available' };
+}
+
 function netBytesSent(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || row?.raw || {};
-  return Number(row?.bytesSent ?? row?.bytes_sent ?? row?.sentBytes ?? row?.sent ?? row?.correlatedConnection?.bytesSent ?? raw.bytesSent ?? raw.bytes_sent ?? raw.sentBytes ?? 0);
+  return netTraffic(row).sent ?? 0;
 }
 
 function netBytesRecv(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || row?.raw || {};
-  return Number(row?.bytesRecv ?? row?.bytesReceived ?? row?.bytes_recv ?? row?.receivedBytes ?? row?.recv ?? row?.correlatedConnection?.bytesReceived ?? raw.bytesRecv ?? raw.bytesReceived ?? raw.bytes_recv ?? raw.receivedBytes ?? 0);
+  return netTraffic(row).received ?? 0;
 }
 
 function netDnsQuery(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || row?.raw || {};
-  return row?.dnsQuery || row?.dns_query || row?.domain || row?.query || row?.correlatedConnection?.domain || raw.dnsQuery || raw.dns_query || raw.domain || raw.query || '';
+  const sources = [...networkTelemetrySources(row), ...networkTelemetrySources(row?.correlatedConnection)];
+  for (const source of sources.flatMap(value => [value, value.connection])) {
+    const queries = Array.isArray(source?.dns?.queries) ? source.dns.queries : [];
+    const candidates = [source?.dnsQuery, source?.dns_query, source?.domain, source?.query,
+      source?.dns?.rrname, source?.dns?.query, ...queries.map(query => query?.rrname),
+      source?.tls?.sni, source?.sni, source?.server_name, source?.http?.hostname];
+    const value = candidates.map(networkText).find(Boolean);
+    if (value) return value;
+  }
+  return '';
 }
 
 function netDetail(row, ...keys) {
@@ -342,16 +408,29 @@ function netDetail(row, ...keys) {
 }
 
 function netGeo(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || row?.raw || {};
-  const correlated = row?.correlatedConnection || {};
-  const city = row?.geoCity || correlated?.geo?.city || raw.geoCity || raw.city || '';
-  const country = row?.geoCountry || row?.country || correlated?.geo?.country || raw.geoCountry || raw.country || '';
-  const geo = row?.geo || correlated.geo || raw.geo;
-  if (city || country) return [city, country].filter(Boolean).join(', ');
-  if (typeof row?.geoLoc === 'string') return row.geoLoc;
-  if (typeof raw.geoLoc === 'string') return raw.geoLoc;
-  if (geo && typeof geo === 'object') return [geo.city, geo.region, geo.country].filter(Boolean).join(', ');
-  return typeof geo === 'string' ? geo : '';
+  const sources = [...networkTelemetrySources(row), ...networkTelemetrySources(row?.correlatedConnection)];
+  for (const source of sources.flatMap(value => [value, value.connection]).filter(Boolean)) {
+    const geo = source.geo || {};
+    const city = networkText(source.geoCity) || networkText(geo.city) || networkText(source.city);
+    const region = networkText(source.geoRegion) || networkText(geo.region);
+    const country = networkText(source.geoCountry) || networkText(geo.country) || networkText(source.country)
+      || networkText(source.geoCountryCode) || networkText(geo.countryCode);
+    const location = [city, region, country].filter(Boolean).join(', ')
+      || networkText(source.geoLoc) || networkText(source.geo);
+    if (location) return location;
+  }
+  return '';
+}
+
+function netGeoDisplay(row) {
+  const geo = netGeo(row);
+  if (geo) return geo;
+  const ip = String(netDstIp(row)).toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  if (!ip || ip === '0.0.0.0' || ip === '::') return /listen/i.test(alertStatus(row)) ? 'Local listener' : 'Not reported';
+  const address = ip.replace(/^::ffff:/, '');
+  if (/^(?:127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(address)
+    || /^(?:::1$|f[cd][\da-f]{2}:|fe[89ab][\da-f]:)/.test(address)) return 'Local network';
+  return 'Not reported';
 }
 
 function containsAny(row, words = []) {
@@ -859,6 +938,26 @@ export function NetworkLogDetailModal({ log: initialLog, onClose, onSaved }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // 2. SUB-PANELS (SIEM Log Monitor, Reports Generator, Overview Dashboard)
 // ═════════════════════════════════════════════════════════════════════════════
+function NetworkDnsGeo({ row }) {
+  const dns = netDnsQuery(row) || 'Not reported';
+  const geo = netGeoDisplay(row);
+  return <div style={{ minWidth: 0, fontSize: 10, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+    <div title={dns} style={{ color: MON.yellow }}><span style={{ color: MON.muted }}>DNS: </span>{dns}</div>
+    <div title={geo} style={{ color: MON.text }}><span style={{ color: MON.muted }}>Geo: </span>{geo}</div>
+  </div>;
+}
+
+function NetworkTraffic({ row }) {
+  const { sent, received, scope } = netTraffic(row);
+  if (sent === null && received === null) return <span title="Byte counts were not reported for this event." style={{ color: MON.muted, fontSize: 10 }}>Not reported</span>;
+  return <div title="Cumulative byte counters from the last socket observation." style={{ fontSize: 10, lineHeight: 1.5 }}>
+    <div style={{ color: MON.green }}>↑ Sent: {sent === null ? 'Not reported' : formatBytes(sent)}</div>
+    <div style={{ color: MON.cyan }}>↓ Received: {received === null ? 'Not reported' : formatBytes(received)}</div>
+    {scope === 'adapter' && <div title="Total across adapters in this event's measurement interval." style={{ color: MON.muted, fontSize: 9 }}>Adapter total</div>}
+    {scope === 'active_sockets' && <div style={{ color: MON.muted, fontSize: 9 }}>Observed sockets</div>}
+  </div>;
+}
+
 function NetworkLogMonitor({ alerts = [], total = 0, onSaved }) {
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState('all');
@@ -880,6 +979,7 @@ function NetworkLogMonitor({ alerts = [], total = 0, onSaved }) {
   }, [alerts, query, platform, severity, protoFilter]);
   const filtersActive = Boolean(query) || platform !== 'all' || severity !== 'all' || protoFilter !== 'all';
   const exactTotal = filtered.length;
+  const logColumns = 'minmax(130px, 1fr) minmax(150px, 1.2fr) 60px minmax(120px, 1fr) 85px minmax(175px, 1.4fr) 130px 75px 80px 85px';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -921,13 +1021,13 @@ function NetworkLogMonitor({ alerts = [], total = 0, onSaved }) {
           </div>
           <span style={{ fontSize: 10, color: MON.green }}>● Live 15s Refresh</span>
         </div>
-        <div style={{ minWidth: 1550 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 80px 1fr 1fr 1fr 90px 90px 90px 90px', gap: 8, padding: '8px 12px', background: MON.card2, color: MON.muted, fontSize: 10, fontWeight: 800 }}>
+        <div style={{ minWidth: 1280 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: logColumns, gap: 8, padding: '8px 12px', background: MON.card2, color: MON.muted, fontSize: 10, fontWeight: 800 }}>
             <span>Source IP / Host</span><span>Destination IP : Port</span><span>Proto</span><span>Process (PID)</span><span>User</span><span>DNS / Geo</span><span>Traffic</span><span>Severity</span><span>Status</span><span>Actions</span>
           </div>
           <div style={{ maxHeight: 440, overflowY: 'auto' }}>
             {filtered.length ? filtered.map(row => (
-              <div key={recordId(row)} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 80px 1fr 1fr 1fr 90px 90px 90px 90px', gap: 8, padding: '10px 12px', borderTop: `1px solid ${MON.line}`, fontSize: 10, alignItems: 'center' }}>
+              <div key={recordId(row)} style={{ display: 'grid', gridTemplateColumns: logColumns, gap: 8, padding: '10px 12px', borderTop: `1px solid ${MON.line}`, fontSize: 10, alignItems: 'center', overflowWrap: 'anywhere' }}>
                 <div>
                   <b style={{ color: MON.cyan, cursor: 'pointer', display: 'block' }} onClick={() => setSelectedLog(row)}>{netSrcIp(row)}</b>
                   <span style={{ fontSize: 9, color: MON.sub }}>{alertHost(row)}</span>
@@ -944,11 +1044,8 @@ function NetworkLogMonitor({ alerts = [], total = 0, onSaved }) {
                   <span style={{ fontSize: 9, color: MON.sub }}>{netPid(row) ? `PID: ${netPid(row)}` : 'PID unavailable'}</span>
                 </div>
                 <span style={{ color: MON.text }}>{alertUser(row)}</span>
-                <div style={{ minWidth: 0 }}>
-                  <span title={netDnsQuery(row)} style={{ color: MON.yellow, fontSize: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{netDnsQuery(row) || 'DNS/SNI unavailable'}</span>
-                  <span title={netGeo(row)} style={{ color: MON.sub, fontSize: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{netGeo(row) || 'Geo unavailable'}</span>
-                </div>
-                <span style={{ color: MON.cyan, fontSize: 9 }}>{formatBytes(netBytesSent(row) + netBytesRecv(row))}</span>
+                <NetworkDnsGeo row={row} />
+                <NetworkTraffic row={row} />
                 <span style={{ background: SEV_BG[alertSeverity(row)] || SEV_BG.low, color: SEV_COLOR[alertSeverity(row)] || MON.green, padding: '2px 6px', borderRadius: 4, fontWeight: 900, textTransform: 'uppercase', textAlign: 'center' }}>
                   {alertSeverity(row)}
                 </span>
@@ -979,6 +1076,7 @@ function NetworkReportsTab({ alerts = [], companyId = '' }) {
     { key: 'weekly', label: '1 Week', icon: '📆', sub: 'Last 7 days', days: 7 },
     { key: 'monthly', label: '1 Month', icon: '🗓', sub: 'Last 30 days', days: 30 },
     { key: 'quarterly', label: '3 Months', icon: '📊', sub: 'Last 90 days', days: 90 },
+    { key: '180days', label: '6 Months', icon: '📅', sub: 'Last 180 days', days: 180 },
   ];
   const selectedWindow = reportWindows.find(option => option.key === reportType) || reportWindows[0];
 
@@ -989,9 +1087,9 @@ function NetworkReportsTab({ alerts = [], companyId = '' }) {
     const cutoff = now - days * dayMs;
     const filtered = alerts.filter(a => {
       const t = alertTime(a);
-      return t ? new Date(t).getTime() >= cutoff : true;
+      return t ? new Date(t).getTime() >= cutoff && new Date(t).getTime() <= now : false;
     });
-    return filtered.length > 0 ? filtered : alerts;
+    return filtered;
   };
 
   const handleGenerate = async () => {
@@ -2055,7 +2153,9 @@ export function NetworkActivityDashboard({ alerts = [], loading = false, total =
           </div>
         )}
         {activeTab === 'log-monitor' ? (
-          <NetworkLogMonitor alerts={alerts} total={selected24hLogTotal} onSaved={onRefresh} />
+          <CapabilityLogsPanel capabilityId={3} mergeRows={mergeNetworkLogRows} companyId={companyId}>
+            <NetworkLogMonitor alerts={alerts} total={selected24hLogTotal} onSaved={onRefresh} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <NetworkReportsTab alerts={alerts} companyId={companyId} />
         ) : activeTab === 'dashboard' ? (

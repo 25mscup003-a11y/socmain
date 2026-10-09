@@ -8,6 +8,7 @@ const NetworkConnection = require('../models/NetworkConnection.model');
 const NetworkPolicy = require('../models/NetworkPolicy.model');
 const GeolocationPolicy = require('../models/GeolocationPolicy.model');
 const SocAuditEvent = require('../models/SocAuditEvent.model');
+const { LOG_RANGE_HOURS } = require('../utils/edrTimeRange');
 const { enrichIp } = require('../services/ipEnrichmentService');
 const { buildGpsDestinationMap, isPublicRoutableIp } = require('../services/idsAttackMap.service');
 const {
@@ -46,8 +47,17 @@ function integer(value, fallback, min, max) {
 function networkWindow(query = {}, nowValue = new Date()) {
   const now = new Date(nowValue);
   const safeNow = Number.isNaN(now.getTime()) ? new Date() : now;
-  const hours = integer(query.hours || query.windowHours, 24, 1, 24);
-  const earliest = new Date(safeNow.getTime() - 24 * 3600000);
+  // Overview remains a rolling 24 hours; SIEM logs explicitly select a preset.
+  if (query.range && !Object.prototype.hasOwnProperty.call(LOG_RANGE_HOURS, query.range)) {
+    const error = new Error('Invalid log time range');
+    error.statusCode = 400;
+    throw error;
+  }
+  const maxHours = query.range ? LOG_RANGE_HOURS[query.range] : 24;
+  const hours = query.range ? maxHours : integer(query.hours || query.windowHours, 24, 1, 24);
+  const requestedEnd = query.range && query.windowEnd ? new Date(query.windowEnd) : safeNow;
+  const anchor = Number.isNaN(requestedEnd.getTime()) ? safeNow : new Date(Math.min(safeNow.getTime(), requestedEnd.getTime()));
+  const earliest = new Date(anchor.getTime() - maxHours * 3600000);
   const requestedTo = query.to ? new Date(query.to) : safeNow;
   const safeTo = Number.isNaN(requestedTo.getTime())
     ? safeNow

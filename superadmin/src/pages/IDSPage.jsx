@@ -1257,7 +1257,7 @@ function BlocklistTab({ onTabChange }) {
         const ipv4 = value.match(/^(\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?$/);
         const validIpv4 = ipv4 && value.split('/')[0].split('.').every(part => Number(part) >= 0 && Number(part) <= 255);
         const validIpv6 = value.includes(':');
-        if (!validIpv4 && !validIpv6) throw new Error('Enter a valid IPv4, IPv6, or CIDR address');
+        if (value.includes('/') || (!validIpv4 && !validIpv6)) throw new Error('Enter a single IPv4 or IPv6 address; CIDR ranges belong in whitelist rules');
       }
       if (blockType === 'Port' && (!Number.isInteger(Number(value)) || Number(value) < 1 || Number(value) > 65535)) {
         throw new Error('Port must be between 1 and 65535');
@@ -1312,7 +1312,8 @@ function BlocklistTab({ onTabChange }) {
       setSubmitting(true);
       setMsg('');
       try {
-        await api.post('/ips-proxy/unblock', payload);
+        const { data: unblockResult } = await api.post('/ips-proxy/unblock', payload);
+        const actionStatus = unblockResult.firewallEnforced ? 'IP unblock confirmed' : 'IP unblock queued; endpoint confirmation pending';
         const target = block.ip || block.blockKey || block.domain || label;
         const approvalResult = await api.post('/ips-engine/audit/manual', {
           action: 'Manual Override Approved',
@@ -1320,9 +1321,9 @@ function BlocklistTab({ onTabChange }) {
           target,
           srcIp: block.ip || block.blockKey,
           systemId: block.systemId || '',
-          detail: `Manual block removed by administrator: ${label}. Server restored by manual override.`,
+          detail: `${actionStatus}: ${label}. Network isolation is unchanged.`,
           emailSubject: 'Manual Override Approved',
-          emailMessage: `Manual block removed by administrator.\n\nTarget: ${label}\nServer Live: Yes\nRisk acceptance has been recorded in Audit Log.`,
+          emailMessage: `${actionStatus}.\n\nTarget: ${label}\nEndpoint enforcement confirmation is reported separately\nRisk acceptance has been recorded in Audit Log.`,
           manualOverride: {
             approvalStatus: 'Manual Override Approved',
             reason: block.reason || 'Manual unblock requested by administrator',
@@ -1340,18 +1341,10 @@ function BlocklistTab({ onTabChange }) {
             },
           },
         }));
-        await api.post('/ips-engine/audit/manual', {
-          action: 'Server Restored',
-          severity: 'high',
-          target,
-          srcIp: block.ip || block.blockKey,
-          systemId: block.systemId || '',
-          detail: `Server Live after manual block removal: ${label}`,
-        }).catch(() => { });
         const emailResult = approvalResult?.data?.event;
         setMsg(emailResult?.emailSent
-          ? `✅ Manual block removed: ${label}. Email sent to ${emailResult.emailTo}`
-          : `⚠️ Manual block removed: ${label}, but email delivery failed${emailResult?.emailTo ? ` (${emailResult.emailTo})` : ''}`);
+          ? `${unblockResult.firewallEnforced ? '✅' : '⏳'} ${actionStatus}: ${label}. Notification accepted by SMTP for ${emailResult.emailTo}`
+          : `⚠️ ${actionStatus}: ${label}, but email failed or was not configured${emailResult?.emailTo ? ` (${emailResult.emailTo})` : ''}`);
         setPendingRestore(null);
         setTimeout(load, 600);
       } catch (e) {
@@ -1456,12 +1449,12 @@ function BlocklistTab({ onTabChange }) {
       time: approvalTime.toLocaleTimeString(),
       auditLog: true,
       emailSubject: 'Manual Override Approved',
-      emailMessage: 'Administrator has manually restored the server while the attack is still active. Risk acceptance has been recorded.',
+      emailMessage: 'Administrator approved a reconnect request while an attack may still be active. Endpoint confirmation is pending. Risk acceptance has been recorded.',
     };
     payload.reason = `Manual Override Approved | Approved By: ${overrideForm.approvedBy} | Reason: ${overrideForm.reason} | Categories: ${selectedReasons.join(', ')}`;
     setSubmitting(true);
     try {
-      await api.post('/ips-proxy/unblock', payload);
+      const { data: unblockResult } = await api.post('/ips-proxy/unblock', payload);
       await api.post('/ips-engine/audit/manual', {
         action: 'Checklist Submitted',
         severity: 'high',
@@ -1473,6 +1466,7 @@ function BlocklistTab({ onTabChange }) {
       }).catch(() => { });
       const approvalResult = await api.post('/ips-engine/audit/manual', {
         action: 'Manual Override Approved',
+        restoreEndpoint: true,
         severity: 'high',
         target: overrideForm.ipAddress || pendingRestore.ip || pendingRestore.blockKey,
         srcIp: pendingRestore.ip || pendingRestore.blockKey || overrideForm.ipAddress,
@@ -1481,28 +1475,12 @@ function BlocklistTab({ onTabChange }) {
         emailSubject: payload.manualOverride.emailSubject,
         emailMessage: payload.manualOverride.emailMessage,
         manualOverride: payload.manualOverride,
-      }).catch(error => ({
-        data: {
-          event: {
-            emailSent: false,
-            emailTo: null,
-            emailError: error.response?.data?.message || error.message,
-          },
-        },
-      }));
-      await api.post('/ips-engine/audit/manual', {
-        action: 'Server Restored',
-        severity: 'high',
-        target: overrideForm.ipAddress || pendingRestore.ip || pendingRestore.blockKey,
-        srcIp: pendingRestore.ip || pendingRestore.blockKey || overrideForm.ipAddress,
-        systemId: overrideForm.systemId,
-        detail: `Server Live after manual override approval by ${overrideForm.approvedBy} (Employee ID: ${overrideForm.employeeId})`,
-        manualOverride: payload.manualOverride,
-      }).catch(() => { });
+      });
       const emailResult = approvalResult?.data?.event;
-      setMsg(emailResult?.emailSent
-        ? `✅ Manual Override Approved — Server Live: ${pendingRestore.label}. Email sent to ${emailResult.emailTo}`
-        : `⚠️ Server Live: ${pendingRestore.label}, but admin email delivery failed${emailResult?.emailTo ? ` (${emailResult.emailTo})` : ''}`);
+      const reconnected = emailResult?.metadata?.reconnect?.confirmed === true;
+      const reconnectStatus = reconnected ? 'Endpoint reconnection confirmed' : 'Reconnect queued; endpoint confirmation pending';
+      const blockStatus = unblockResult.firewallEnforced ? 'IP unblock confirmed' : 'IP unblock pending';
+      setMsg(`${reconnected ? '✅' : '⏳'} ${reconnectStatus}. ${blockStatus}. ${emailResult?.emailSent ? `Notification accepted by SMTP for ${emailResult.emailTo}` : 'Admin notification failed or was not configured'}`);
       setOverrideError('');
       setPendingRestore(null);
       setManualOverride(false);
@@ -1716,7 +1694,7 @@ function BlocklistTab({ onTabChange }) {
                   else if (blockType === 'Application') setForm(p => ({ ...p, application: val }));
                   else setForm(p => ({ ...p, protocol: val }));
                 }}
-                placeholder={blockType === 'IP Address' ? 'e.g., 192.168.1.100' : blockType === 'Domain' ? 'e.g., evil.com' : blockType === 'Port' ? 'e.g., 22' : blockType === 'Application' ? '/usr/bin/app' : 'e.g., tcp'}
+                placeholder={blockType === 'IP Address' ? 'e.g., 203.0.113.45' : blockType === 'Domain' ? 'e.g., evil.com' : blockType === 'Port' ? 'e.g., 22' : blockType === 'Application' ? '/usr/bin/app' : 'e.g., tcp'}
               />
             </label>
             <label>ATTACK TYPE
@@ -3729,7 +3707,7 @@ function WhitelistTab({ onTabChange }) {
             </select>
           </label>
           <label>Value
-            <input value={form.value} onChange={e => setForm(p => ({ ...p, value: e.target.value }))} placeholder={form.type === 'ip' ? 'e.g., 192.168.1.100' : form.type === 'domain' ? 'e.g., trusted.example.com' : 'e.g., 10.0.0.0/8'} required />
+            <input value={form.value} onChange={e => setForm(p => ({ ...p, value: e.target.value }))} placeholder={form.type === 'ip' ? 'e.g., 203.0.113.45' : form.type === 'domain' ? 'e.g., trusted.example.com' : 'e.g., 10.0.0.0/8'} required />
           </label>
           <label>Reason <span>(Optional)</span>
             <input value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} placeholder="e.g., Office network, Trusted partner..." />
@@ -4530,6 +4508,10 @@ function AuditLogTab() {
     'Email Failed',
     'Reminder Sent',
     'Auto Isolation',
+    'Isolation Check',
+    'Threat Verification Passed',
+    'Threat Verification Deferred',
+    'Isolation Deferred',
     'Recovery Check',
     'Attack Still Active',
     'Isolation Again',
@@ -4553,7 +4535,7 @@ function AuditLogTab() {
         id: `audit-${event.id || event.ts}`,
         time: event.ts,
         action: event.action || 'User Actions',
-        category: ['Auto Isolation', 'Isolation Again', 'Isolation Completed'].includes(event.action) ? 'isolation'
+        category: ['Isolation Check', 'Isolation Deferred', 'Auto Isolation', 'Isolation Again', 'Isolation Completed'].includes(event.action) ? 'isolation'
           : ['Recovery Check', 'Attack Still Active', 'Attack Cleared', 'Server Restored', 'Incident Closed'].includes(event.action) ? 'recovery'
             : ['Email Sent', 'Email Failed', 'Reminder Sent'].includes(event.action) ? 'email'
               : ['Manual Override Requested', 'Manual Override Cancelled', 'Checklist Submitted', 'Manual Override Approved'].includes(event.action) ? 'manual'
@@ -4730,7 +4712,7 @@ function IsolationFlowTab() {
     const events = [
       'system:isolated', 'system:isolation_failed', 'system:reconnected',
       'system:reconnect_failed', 'ips:isolationPending', 'ips:isolated',
-      'ips:isolationFailed', 'ips:recovered',
+      'ips:isolationFailed', 'ips:isolationDeferred', 'ips:recovered',
     ];
     events.forEach(event => socket.on(event, refresh));
     const releaseSocket = connectSocket(socket);

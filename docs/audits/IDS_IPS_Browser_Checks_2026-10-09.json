@@ -1,0 +1,146 @@
+{
+  "tabs": [
+    {
+      "module": "ips",
+      "name": "Blocklist",
+      "pageErrors": []
+    },
+    {
+      "module": "ips",
+      "name": "Block Country",
+      "pageErrors": []
+    },
+    {
+      "module": "ips",
+      "name": "Whitelist",
+      "pageErrors": []
+    },
+    {
+      "module": "ips",
+      "name": "WAF",
+      "pageErrors": []
+    },
+    {
+      "module": "ips",
+      "name": "Policy IDS&IPS",
+      "pageErrors": []
+    },
+    {
+      "module": "ips",
+      "name": "Audit Log",
+      "pageErrors": []
+    },
+    {
+      "module": "ips",
+      "name": "Isolation Flow",
+      "pageErrors": []
+    },
+    {
+      "module": "ids",
+      "name": "IDS Overview",
+      "pageErrors": []
+    },
+    {
+      "module": "ids",
+      "name": "Threats",
+      "pageErrors": []
+    },
+    {
+      "module": "ids",
+      "name": "Logs",
+      "pageErrors": []
+    },
+    {
+      "module": "ids",
+      "name": "Coverage",
+      "pageErrors": []
+    },
+    {
+      "module": "ips",
+      "name": "Pending unblock and failed unisolate messages",
+      "pageErrors": []
+    }
+  ],
+  "errors": [],
+  "requests": [
+    "/alerts",
+    "/auth/me",
+    "/company/notifications",
+    "/ids/geo-attacks",
+    "/ids/policies",
+    "/ids/policy-presets",
+    "/ids/policy-violations",
+    "/ids/stats",
+    "/idsips/capabilities",
+    "/idsips/logs",
+    "/idsips/summary",
+    "/idsips/threats",
+    "/ips-engine/audit",
+    "/ips-engine/audit/manual",
+    "/ips-proxy/unblock",
+    "/ips-proxy/whitelist",
+    "/ips/blocklist",
+    "/ips/country-blocks",
+    "/ips/country-blocks/summary",
+    "/ips/status",
+    "/system",
+    "/system/failed-system/isolate",
+    "/transport/public-key",
+    "/waf/attack-protection-policy",
+    "/waf/attacks",
+    "/waf/integration",
+    "/waf/status"
+  ],
+  "interceptedWrites": [
+    {
+      "method": "POST",
+      "path": "/ips-proxy/unblock"
+    },
+    {
+      "method": "POST",
+      "path": "/ips-engine/audit/manual"
+    },
+    {
+      "method": "DELETE",
+      "path": "/system/failed-system/isolate"
+    }
+  ],
+  "ipsCards": [
+    {
+      "y": 99,
+      "width": 149.421875,
+      "text": "🛡️ BLOCKLIST\n🟢\n0\nActive IP blocks"
+    },
+    {
+      "y": 99,
+      "width": 149.421875,
+      "text": "🌐 BLOCK COUNTRY\n🟢\n0\nEnabled country rules"
+    },
+    {
+      "y": 99,
+      "width": 149.4375,
+      "text": "✅ WHITELIST\n🟢\n3\nTrusted entries"
+    },
+    {
+      "y": 99,
+      "width": 149.421875,
+      "text": "🔥 WAF\n🟢\n6\nBlocked requests"
+    },
+    {
+      "y": 99,
+      "width": 149.4375,
+      "text": "🛡️ POLICY IDS&IPS\n🟢\n4\nViolations in 24h"
+    },
+    {
+      "y": 99,
+      "width": 149.421875,
+      "text": "🧾 AUDIT LOG\n🟢\n5\nAudit events in 24h"
+    },
+    {
+      "y": 99,
+      "width": 149.4375,
+      "text": "🔓 ISOLATION FLOW\n🟢\n0\nActive workflows"
+    }
+  ],
+  "scope": "Mock API responses and built frontend; no live backend or endpoint calls"
+}

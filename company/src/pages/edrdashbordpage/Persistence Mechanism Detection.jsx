@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Persistence Mechanism Detection — Capability ID: 8
  *
@@ -1300,7 +1301,9 @@ export function PersistenceMechanismDashboard({ alerts = [], loading = false, to
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <PersistenceLogMonitor alerts={alerts} />
+          <CapabilityLogsPanel capabilityId={8}>
+            <PersistenceLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={8} alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

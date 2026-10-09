@@ -51,7 +51,7 @@ class IPSModule:
     def block_ip(self, ip: str, reason: str = 'auto-block',
                  port: int = None, protocol: str = None,
                  threat_level: str = None, payload: str = None,
-                 attack_type: str = None) -> bool:
+                 attack_type: str = None, authorized_by_backend: bool = False) -> bool:
         """Block an IP on the local host firewall. Returns True on success."""
         ip = (ip or '').strip()
         if not ip or self.is_whitelisted(ip, 'ip'):
@@ -60,6 +60,11 @@ class IPSModule:
         if self._is_private(ip):
             logger.debug('IPS: skipping private IP %s', ip)
             return False
+        if not authorized_by_backend:
+            from .network_verification import verify_network_action
+            if not verify_network_action(self._config, ip, 'block_ip'):
+                logger.info('IPS auto-block deferred for %s: backend threat checks did not authorize it', ip)
+                return False
 
         with self._lock:
             if ip in self._blocked:

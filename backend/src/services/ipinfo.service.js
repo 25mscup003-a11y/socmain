@@ -50,12 +50,12 @@ function unavailable(message, code = 'provider_unavailable') {
   return Object.assign(new Error(message), { code, status: 503 });
 }
 
-async function lookupIpInfo(value) {
+async function lookupIpInfo(value, { maxCacheAgeMs = CACHE_TTL } = {}) {
   const ip = normalizeIp(value);
   if (isPrivateIp(ip)) throw unavailable('Private or reserved IPs have no public country', 'not_public');
   if (!config.token) throw unavailable('IPINFO_TOKEN is not configured on the backend', 'not_configured');
   const hit = cache.get(ip);
-  if (hit?.expires > Date.now()) return hit.result;
+  if (hit?.expires > Date.now() && Date.now() - Date.parse(hit.result.countryCheckedAt) < maxCacheAgeMs) return hit.result;
   if (Date.now() < retryAt) throw providerError;
   if (inFlight.has(ip)) return inFlight.get(ip);
 

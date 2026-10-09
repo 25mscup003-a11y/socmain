@@ -14,7 +14,6 @@ const mongoose  = require('mongoose');
 const { authenticate, requireAnalyst, requireManager } = require('../middleware/auth.middleware');
 const ipsEngine = require('../services/ipsEngine.service');
 const System    = require('../models/System.model');
-const User      = require('../models/User.model');
 const { listAttackTypes } = require('../constants/idsIpsCapabilities');
 
 router.use(authenticate, requireAnalyst);
@@ -30,9 +29,9 @@ router.get('/attack-types', (req, res) => {
 // Called by the IDS alert receivers to pass detection data into the IPS engine.
 // IDS → event → IPS Engine → block with retry → isolation fallback
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/notify', async (req, res) => {
+router.post('/notify', requireManager, async (req, res) => {
   try {
-    const { srcIp, attackType, severity, adminEmail, description, companyId: bodyCompanyId } = req.body;
+    const { srcIp, attackType, severity, description, systemId, companyId: bodyCompanyId } = req.body;
 
     if (!srcIp || !attackType) {
       return res.status(400).json({ message: 'srcIp and attackType are required' });
@@ -45,6 +44,9 @@ router.post('/notify', async (req, res) => {
       : req.user.companyId?.toString();
 
     if (!companyId) return res.status(400).json({ message: 'companyId is required' });
+    if (systemId && (!mongoose.Types.ObjectId.isValid(systemId) || !await System.exists({ _id: systemId, companyId, isActive: true }))) {
+      return res.status(404).json({ message: 'Target system not found in this company' });
+    }
 
     // Fire-and-forget: IPS engine handles retries and isolation asynchronously
     ipsEngine.handleDetection({
@@ -52,11 +54,12 @@ router.post('/notify', async (req, res) => {
       srcIp,
       attackType,
       severity:   severity || 'high',
-      adminEmail: adminEmail || req.user.email || process.env.SMTP_USER,
+      adminEmail: req.user.email,
+      systemId,
       description,
     }).catch(err => console.error('[IPS Engine Route] handleDetection error:', err.message));
 
-    res.json({
+    res.status(202).json({
       ok: true,
       message: 'IPS Engine notified. Auto-block + retry + isolation running asynchronously.',
       srcIp,
@@ -86,15 +89,17 @@ router.post('/isolate', requireManager, async (req, res) => {
       ? (bodyCompanyId || req.user.companyId?.toString())
       : req.user.companyId?.toString();
 
+    if (!companyId || !systemId || !mongoose.Types.ObjectId.isValid(systemId)) return res.status(400).json({ message: 'companyId and a valid target systemId are required' });
+    if (!await System.exists({ _id: systemId, companyId, isActive: true })) return res.status(404).json({ message: 'Target system not found in this company' });
     const incident = await ipsEngine.manualIsolate({
       companyId, srcIp, attackType, systemId,
       adminEmail: req.user.email || process.env.SMTP_USER,
     });
 
-    res.json({
-      ok: true,
-      incident,
-      message: 'System manually isolated. Alert emails stopped. Recovery email will be sent when unblocked.',
+    res.status(incident.phase === 'isolated' ? 200 : incident.phase === 'isolation_failed' ? 502 : 202).json({
+      ok: incident.phase === 'isolated', accepted: incident.phase === 'isolation_pending',
+      incident: { ...incident, timers: undefined },
+      message: incident.phase === 'isolated' ? 'Endpoint confirmed isolation' : incident.phase === 'isolation_failed' ? 'Endpoint isolation failed' : 'Isolation queued; waiting for endpoint acknowledgement',
     });
   } catch (err) {
     console.error('[IPS Engine] /isolate error:', err.message);
@@ -104,7 +109,7 @@ router.post('/isolate', requireManager, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/ips-engine/recover
-// Admin removes isolation, unblocks IP, sends recovery email.
+// Admin removes endpoint isolation; IP blocks have a separate lifecycle.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/recover', requireManager, async (req, res) => {
   try {
@@ -118,15 +123,17 @@ router.post('/recover', requireManager, async (req, res) => {
       ? (bodyCompanyId || req.user.companyId?.toString())
       : req.user.companyId?.toString();
 
+    if (!companyId || !systemId || !mongoose.Types.ObjectId.isValid(systemId)) return res.status(400).json({ message: 'companyId and a valid target systemId are required' });
+    if (!await System.exists({ _id: systemId, companyId, isActive: true })) return res.status(404).json({ message: 'Target system not found in this company' });
     const incident = await ipsEngine.manualRecover({
       companyId, srcIp, attackType, systemId,
       adminEmail: req.user.email || process.env.SMTP_USER,
     });
 
-    res.json({
-      ok: true,
-      incident,
-      message: 'System restored to normal. Recovery email sent.',
+    res.status(incident.phase === 'recovered' ? 200 : incident.phase === 'recovery_failed' ? 502 : 202).json({
+      ok: incident.phase === 'recovered', accepted: incident.phase === 'recovery_pending',
+      incident: { ...incident, timers: undefined },
+      message: incident.phase === 'recovered' ? 'Endpoint confirmed reconnection' : incident.phase === 'recovery_failed' ? 'Endpoint reconnection failed' : 'Reconnection queued; confirmation email follows the endpoint acknowledgement',
     });
   } catch (err) {
     console.error('[IPS Engine] /recover error:', err.message);
@@ -181,7 +188,7 @@ async function queueManualReconnect({ companyId, systemId, reason, req }) {
     companyId,
     systemId: system._id,
     command: 'reconnect',
-    reason: reason || 'Manual override approved — server restored',
+    reason: reason || 'Manual override approved — reconnect requested',
   });
   return {
     queued: delivery.queued > 0 || delivery.pending > 0,
@@ -200,62 +207,49 @@ router.post('/audit/manual', requireManager, async (req, res) => {
     const companyId = isSuperAdmin
       ? (req.body.companyId || req.query.companyId || req.user.companyId?.toString())
       : req.user.companyId?.toString();
-    const recipients = new Set([req.user.email].filter(Boolean));
-
-    if ((req.body.action === 'Manual Override Approved' || req.body.emailSubject) && companyId) {
-      const requestedSystemId = req.body.systemId || req.body.manualOverride?.systemId;
-      let departmentId = req.user.role === 'department_admin' ? req.user.departmentId : null;
-
-      if (requestedSystemId && mongoose.Types.ObjectId.isValid(requestedSystemId)) {
-        const system = await System.findOne({
-          _id: requestedSystemId,
-          companyId,
-          isActive: true,
-        }).select('departmentId').lean();
-        if (system?.departmentId) departmentId = system.departmentId;
-      }
-
-      const recipientFilters = [{ role: 'company_admin' }];
-      if (departmentId) {
-        recipientFilters.push(
-          { role: 'department_admin', departmentId },
-          { role: 'department_admin', departmentIds: departmentId },
-        );
-      }
-      const admins = await User.find({
-        companyId,
-        isActive: true,
-        $or: recipientFilters,
-      }).select('email').lean();
-      admins.forEach(admin => {
-        if (admin.email) recipients.add(admin.email);
-      });
+    if (!companyId || !mongoose.Types.ObjectId.isValid(companyId)) return res.status(400).json({ message: 'A valid companyId is required' });
+    const requestedSystemId = req.body.systemId || req.body.manualOverride?.systemId;
+    if (req.body.restoreEndpoint === true) {
+      if (!mongoose.Types.ObjectId.isValid(requestedSystemId || '')) return res.status(400).json({ message: 'A valid target systemId is required for reconnection' });
+      if (!await System.exists({ _id: requestedSystemId, companyId, isActive: true })) return res.status(404).json({ message: 'Target system not found in this company' });
     }
-    if (!recipients.size && process.env.SMTP_USER) recipients.add(process.env.SMTP_USER);
+    const recipients = await ipsEngine.resolveAdminRecipients({ companyId,
+      systemId: mongoose.Types.ObjectId.isValid(requestedSystemId || '') ? requestedSystemId : null,
+      fallback: req.user.email });
 
     let reconnectResult = null;
-    if (['Manual Override Approved', 'Server Restored'].includes(req.body.action)) {
+    if (req.body.action === 'Manual Override Approved' && req.body.restoreEndpoint === true) {
       const systemId = req.body.systemId || req.body.manualOverride?.systemId;
       reconnectResult = await queueManualReconnect({
         companyId,
         systemId,
-        reason: req.body.detail || req.body.manualOverride?.reason || 'Manual override approved — server restored',
+        reason: req.body.detail || req.body.manualOverride?.reason || 'Manual override approved — reconnect requested',
         req,
       });
     }
 
+    const manualActions = new Set(['Manual Override Requested', 'Manual Override Cancelled', 'Manual Override Approved', 'Checklist Submitted', 'User Actions']);
+    const action = manualActions.has(req.body.action) ? req.body.action : 'User Actions';
     const event = await ipsEngine.recordAuditEvent({
       ...req.body,
+      // Confirmation events belong to authenticated agent ACKs, not browser claims.
+      action,
+      detail: action !== req.body.action ? `Administrator reported ${String(req.body.action || 'an action').slice(0, 100)}; enforcement confirmation is recorded separately` : req.body.detail,
       companyId,
       actor: req.user.name || req.user.email || 'Admin',
       emailTo: [...recipients],
       metadata: {
         ...(req.body.metadata || {}),
+        ...(action !== req.body.action ? { reportedAction: req.body.action } : {}),
         ...(req.body.manualOverride ? { manualOverride: req.body.manualOverride } : {}),
         ...(reconnectResult ? { reconnect: reconnectResult } : {}),
       },
     });
-    res.status(201).json({ ok: true, event });
+    const reconnectFailed = reconnectResult && !reconnectResult.confirmed && (!reconnectResult.queued || reconnectResult.status === 'failed');
+    res.status(reconnectFailed ? 502 : reconnectResult && !reconnectResult.confirmed ? 202 : 201).json({
+      ok: !reconnectFailed, event,
+      ...(reconnectFailed ? { message: 'Override recorded, but endpoint reconnection failed', reconnect: reconnectResult } : {}),
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

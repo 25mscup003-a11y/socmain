@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * System Changes Monitoring — Capability ID: 7
  *
@@ -1443,7 +1444,9 @@ export function SystemChangesDashboard({ alerts = [], loading = false, total = 0
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <SystemChangeLogMonitor alerts={alerts} />
+          <CapabilityLogsPanel capabilityId={7}>
+            <SystemChangeLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <SystemChangeReportsTab alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

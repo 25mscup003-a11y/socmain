@@ -175,6 +175,9 @@ async function queryAbuseIPDB(ip) {
       timeout: 10000,
     });
     const d = r.data?.data || {};
+    if (!Number.isFinite(d.abuseConfidenceScore) || d.abuseConfidenceScore < 0 || d.abuseConfidenceScore > 100) {
+      throw new Error('invalid AbuseIPDB reputation response');
+    }
     const result = {
       source:           'abuseipdb',
       ip,
@@ -188,6 +191,7 @@ async function queryAbuseIPDB(ip) {
       isWhitelisted:    d.isWhitelisted || false,
       isTorNode:        d.usageType === 'Tor Exit Node',
       isMalicious:      (d.abuseConfidenceScore || 0) >= AUTO_BLOCK_THRESHOLD,
+      checkedAt:        new Date().toISOString(),
     };
     setCache(cKey, result);
     return result;
@@ -226,6 +230,7 @@ async function queryOTX_IP(ip) {
       timeout: 15000,  // OTX can be slow — increased timeout
     });
     const d = r.data || {};
+    if (!Number.isInteger(d.pulse_info?.count) || d.pulse_info.count < 0) throw new Error('invalid OTX pulse response');
     const result = {
       source:          'otx',
       ip,
@@ -236,6 +241,7 @@ async function queryOTX_IP(ip) {
       countryCode:     d.country_code || '',
       asn:             d.asn || '',
       isMalicious:     (d.pulse_info?.count || 0) > 0,
+      checkedAt:       new Date().toISOString(),
     };
     setCache(cKey, result);
     return result;
@@ -300,6 +306,7 @@ let _etIps     = new Set();
 let _torIps    = new Set();
 let _feedsLoaded = false;
 let _feedsLoading = false;
+let _feedLoadPromise = null;
 let _feedRefreshTimer = null;
 let _feedFailureWarningAt = 0;
 const FEED_FAILURE_WARNING_INTERVAL_MS = 30 * 60 * 1000;
@@ -310,6 +317,8 @@ const PUBLIC_FEEDS = Object.freeze([
   { name: 'tor', url: process.env.THREAT_FEED_TOR_URL || 'https://check.torproject.org/torbulkexitlist' },
 ]);
 const _feedReady = { feodo: false, emergingThreats: false, tor: false };
+const _feedCheckedAt = { feodo: null, emergingThreats: null, tor: null };
+const _feedFailed = { feodo: false, emergingThreats: false, tor: false };
 
 function isDnsFailure(error) {
   const root = error?.cause || error;
@@ -422,6 +431,8 @@ function replacePublicFeed(name, ips) {
   if (name === 'emergingThreats') _etIps = ips;
   if (name === 'tor') _torIps = ips;
   _feedReady[name] = true;
+  _feedCheckedAt[name] = new Date().toISOString();
+  _feedFailed[name] = false;
 }
 
 function schedulePublicFeedRefresh(delayMs) {
@@ -430,7 +441,13 @@ function schedulePublicFeedRefresh(delayMs) {
   _feedRefreshTimer.unref?.();
 }
 
-async function loadPublicFeeds({ client = axios, schedule = true, waitFn = wait } = {}) {
+function loadPublicFeeds(options = {}) {
+  if (_feedLoadPromise) return _feedLoadPromise;
+  _feedLoadPromise = performPublicFeedLoad(options).finally(() => { _feedLoadPromise = null; });
+  return _feedLoadPromise;
+}
+
+async function performPublicFeedLoad({ client = axios, schedule = true, waitFn = wait } = {}) {
   if (process.env.THREAT_INTEL_PUBLIC_FEEDS_ENABLED === 'false') {
     return { disabled: true, loaded: false, feeds: { ..._feedReady } };
   }
@@ -446,6 +463,7 @@ async function loadPublicFeeds({ client = axios, schedule = true, waitFn = wait 
       const definition = PUBLIC_FEEDS[index];
       if (result.status === 'fulfilled') replacePublicFeed(definition.name, result.value.ips);
       else {
+        _feedFailed[definition.name] = true;
         failures.push(definition.name);
         failureDetails.push({ name: definition.name, ...feedFailureDetails(result.reason) });
       }
@@ -482,6 +500,32 @@ async function loadPublicFeeds({ client = axios, schedule = true, waitFn = wait 
   } finally {
     _feedsLoading = false;
   }
+}
+
+function publicFeedVerification(ip, now = Date.now()) {
+  const maxAge = boundedFeedNumber(process.env.THREAT_FEED_REFRESH_MS, 21600000, 60000, 86400000);
+  const matched = checkPublicFeeds(ip);
+  return PUBLIC_FEEDS.map(({ name }) => ({
+    provider: name,
+    status: process.env.THREAT_INTEL_PUBLIC_FEEDS_ENABLED === 'false' ? 'disabled'
+      : !_feedReady[name] ? 'unavailable'
+        : _feedFailed[name] ? 'unavailable'
+          : now < Date.parse(_feedCheckedAt[name]) || now - Date.parse(_feedCheckedAt[name]) >= maxAge ? 'stale' : 'checked',
+    checkedAt: _feedCheckedAt[name],
+    expiresAt: _feedCheckedAt[name] ? new Date(Date.parse(_feedCheckedAt[name]) + maxAge).toISOString() : null,
+    matched: name === 'feodo' ? matched.isFeodo : name === 'emergingThreats' ? matched.isET : matched.isTor,
+  }));
+}
+
+async function verifyPublicFeeds(ip) {
+  // Join startup/refresh instead of interpreting an empty, still-loading set as clean.
+  if (_feedLoadPromise) await _feedLoadPromise;
+  let checks = publicFeedVerification(ip);
+  if (checks.some(check => check.status === 'stale') || (!_feedsLoaded && !_feedRefreshTimer)) {
+    await loadPublicFeeds();
+    checks = publicFeedVerification(ip);
+  }
+  return checks;
 }
 
 function checkPublicFeeds(ip) {
@@ -684,7 +728,7 @@ async function enrichAndMaybeBlock(ip, companyId, alertId, io) {
         });
 
         // Real-time socket notification
-        if (io && companyId) {
+        if (io && companyId && (blockResult?.agentConfirmed || blockResult?.webhookOk)) {
           io.to(`company:${companyId}`).emit('ips:block', {
             ip, srcIp: ip, attackType: 'Threat Intelligence Auto-Block',
             severity: 'high', reason: intel.summary, source: 'threat_intel',
@@ -718,6 +762,8 @@ module.exports = {
   queryOTX_IP,
   queryOTX_Domain,
   checkPublicFeeds,
+  verifyPublicFeeds,
+  publicFeedVerification,
   loadPublicFeeds,
   fetchPublicFeed,
   parsePublicFeed,

@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * File Activity Monitoring (FIM) — Capability ID: 2
  *
@@ -100,9 +101,33 @@ function alertHost(row) {
   return row?.hostname || row?.host || row?.agentName || row?.systemId?.hostname || row?.systemId?.name || raw.hostname || raw.host || raw.agent_name || 'unknown';
 }
 
+function fimUserIdentity(row) {
+  const sources = [row, row?.rawEvent, row?.rawEvent?.raw, row?.raw, row?.raw?.raw];
+  const read = keys => {
+    for (const source of sources) {
+      for (const key of keys) {
+        const value = source?.[key];
+        const candidates = typeof value === 'string' ? [value]
+          : value && typeof value === 'object' ? [value.username, value.userName, value.name, value.account] : [];
+        for (const candidate of candidates) {
+          const text = typeof candidate === 'string' ? candidate.trim() : '';
+          if (text && !/^(?:unknown(?: user)?|n\/?a|none|null|undefined|not[ _-]?(?:reported|available|provided)|unavailable|-|—)$/i.test(text)) return text;
+        }
+      }
+    }
+    return null;
+  };
+  const reported = read(['actor', 'changedByUser', 'changed_by_user', 'changedBy', 'changed_by'])
+    || read(['username', 'userName', 'user_name', 'user', 'account', 'process_user', 'SubjectUserName']);
+  if (reported) return { name: reported, kind: 'reported' };
+  // File ownership is useful context, but does not identify who made a change.
+  const owner = read(['fileUser', 'file_user']);
+  return owner ? { name: owner, kind: 'owner' } : { name: 'Not reported', kind: 'missing' };
+}
+
 function alertUser(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || row?.raw || {};
-  return row?.user || row?.username || row?.userName || row?.changedBy || row?.actor || row?.account || raw.user || raw.username || raw.actor || 'unknown';
+  const identity = fimUserIdentity(row);
+  return identity.kind === 'owner' ? `${identity.name} (file owner)` : identity.name;
 }
 
 function alertStatus(row) {
@@ -761,7 +786,7 @@ function FileLogMonitor({ alerts = [], loading = false, total = 0, updatedAt = n
                   <b style={{ color: '#fff', display: 'block' }}>{alertHost(row)}</b>
                   <span style={{ fontSize: 9, color: MON.muted }}>{processOs(row)}</span>
                 </div>
-                <span style={{ color: MON.green }}>{alertUser(row)}</span>
+                <span title="Account reported with this event. File-watch events may report the agent service/session account; file-owner fallbacks are labelled separately." style={{ color: MON.green }}>{alertUser(row)}</span>
                 <span style={{ color: MON.blue }}>{fimProcess(row)}</span>
                 <span style={{ color: MON.orange, fontWeight: 800 }}>{fimAction(row)}</span>
                 <span style={{ background: SEV_BG[alertSeverity(row)] || SEV_BG.low, color: SEV_COLOR[alertSeverity(row)] || MON.green, padding: '2px 6px', borderRadius: 4, fontWeight: 900, textTransform: 'uppercase', textAlign: 'center' }}>
@@ -782,62 +807,26 @@ function FileLogMonitor({ alerts = [], loading = false, total = 0, updatedAt = n
   );
 }
 
-function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
+function FileReportsTab() {
   const [reportType, setReportType] = useState('daily');
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
   const [reportData, setReportData] = useState(null);
   const [reportError, setReportError] = useState('');
 
-  const windowDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90 };
-
-  const calculateReportData = useCallback((type) => {
-    const days = windowDays[type] || 1;
-    const now = Date.now();
-    const cutoff = now - days * 86400000;
-
-    const filtered = alerts.filter(a => {
-      const t = alertTime(a);
-      return t ? new Date(t).getTime() >= cutoff : true;
-    });
-
-    const list = filtered;
-    const rawSev = { critical: 0, high: 0, medium: 0, low: 0 };
-    list.forEach(a => {
-      const s = alertSeverity(a).toLowerCase();
-      if (rawSev[s] !== undefined) rawSev[s]++; else rawSev.low++;
-    });
-
-    return {
-      alerts: list,
-      total: list.length,
-      bySev: rawSev,
-    };
-  }, [alerts]);
-
-  useEffect(() => {
-    if (reportType !== 'daily' || generating) return;
-    const local = calculateReportData('daily');
-    setReportData({
-      ...local,
-      total: Number(fimStats?.total ?? total ?? local.total) || 0,
-      bySev: {
-        critical: Number(fimStats?.critical ?? local.bySev.critical) || 0,
-        high: Number(fimStats?.high ?? local.bySev.high) || 0,
-        medium: Number(fimStats?.medium ?? local.bySev.medium) || 0,
-        low: Number(fimStats?.low ?? local.bySev.low) || 0,
-      },
-    });
-    setGenerated(true);
-  }, [alerts, total, fimStats, reportType, generating, calculateReportData]);
+  const windowDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90, '180days': 180 };
 
   const fetchReportFromApi = useCallback((type) => {
     setGenerating(true);
+    setGenerated(false);
+    setReportData(null);
     setReportError('');
     const windowHours = (windowDays[type] || 1) * 24;
+    const until = new Date().toISOString();
+    const since = new Date(new Date(until).getTime() - windowHours * 3600000).toISOString();
 
     const buildReportState = (logsArr, totalVal, statsObj) => {
-      const safeLogs = Array.isArray(logsArr) ? logsArr : alerts;
+      const safeLogs = Array.isArray(logsArr) ? logsArr : [];
       const rawSev = { critical: 0, high: 0, medium: 0, low: 0 };
 
       safeLogs.forEach(a => {
@@ -852,6 +841,7 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
       const reportTotal = Number(totalVal ?? safeLogs.length);
 
       return {
+        period: type, since, until, generatedAt: until,
         alerts: safeLogs,
         total: reportTotal,
         bySev: {
@@ -863,7 +853,7 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
       };
     };
 
-    api.get(`/dashboard/alerts/file?limit=500&capabilityId=2&windowHours=${windowHours}`, { skipCache: true })
+    api.get(`/dashboard/alerts/file?limit=500&capabilityId=2&windowHours=${windowHours}&windowEnd=${encodeURIComponent(until)}`, { skipCache: true })
       .then(r => {
         const data = r.data || {};
         const logs = data.alerts || data.logs || data.data || [];
@@ -872,27 +862,19 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
         setGenerating(false);
       })
       .catch(() => {
-        api.get(`/dashboard/capabilities/2/live?limit=500&windowHours=${windowHours}`, { skipCache: true })
-          .then(r => {
-            const data = r.data || {};
-            const logs = data.alerts || data.logs || data.data || [];
-            setReportData(buildReportState(logs, data.total, data.fimStats || data.stats));
-            setGenerated(true);
-          })
-          .catch(() => {
-            setReportData(null);
-            setGenerated(false);
-            setReportError('Live FIM report could not be loaded. Please retry.');
-          })
-          .finally(() => setGenerating(false));
+        setReportData(null);
+        setGenerated(false);
+        setReportError('FIM report could not be loaded for the selected period. Please retry.');
+        setGenerating(false);
       });
-  }, [alerts, total, calculateReportData]);
+  }, []);
 
   const handleSelectWindow = (key) => {
+    if (generating) return;
     setReportType(key);
     setGenerated(false);
     setReportData(null);
-    fetchReportFromApi(key);
+    setReportError('');
   };
 
   const handleGenerate = () => {
@@ -902,13 +884,13 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
 
   const handleExportCSV = async () => {
     const days = windowDays[reportType] || 1;
-    const to = new Date().toISOString();
-    const from = new Date(Date.now() - days * 86400000).toISOString();
+    const to = reportData?.until || new Date().toISOString();
+    const from = reportData?.since || new Date(new Date(to).getTime() - days * 86400000).toISOString();
     try {
       const res = await api.get(`/reports/csv?from=${from}&to=${to}&type=fim&capabilityId=2`, { responseType: 'blob' });
       downloadBlob(res.data, `fim_executive_report_${reportType}.csv`);
     } catch {
-      const filtered = reportData?.alerts || alerts;
+      const filtered = reportData?.alerts || [];
       const header = 'Timestamp,File Path,Action,Host,User,Process,Severity,Hash';
       const rowsHtml = filtered.map(a => [
         csvCell(alertTime(a)),
@@ -926,8 +908,8 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
 
   const handleExportPDF = async () => {
     const days = windowDays[reportType] || 1;
-    const to = new Date().toISOString();
-    const from = new Date(Date.now() - days * 86400000).toISOString();
+    const to = reportData?.until || new Date().toISOString();
+    const from = reportData?.since || new Date(new Date(to).getTime() - days * 86400000).toISOString();
     try {
       const response = await api.get(`/reports/pdf?from=${from}&to=${to}&type=fim&capabilityId=2`, { responseType: 'blob' });
       const url = URL.createObjectURL(response.data);
@@ -937,16 +919,7 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
     } catch {
       // Fall back to the local printable report below when the report service is unavailable.
     }
-    let filtered = reportData?.alerts || [];
-    if (filtered.length === 0) {
-      try {
-        const r = await api.get(`/dashboard/file-activity/report?period=${reportType}`);
-        filtered = r.data?.alerts || r.data?.logs || [];
-      } catch {
-        filtered = alerts;
-      }
-    }
-    if (!filtered.length) filtered = alerts;
+    const filtered = reportData?.alerts || [];
     const win = window.open('', '_blank');
     if (!win) return;
     const rowsHtml = filtered.slice(0, 100).map((a, i) => `
@@ -1058,12 +1031,14 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
               { key: 'weekly', label: '1 Week', icon: '📆', sub: 'Last 7 days' },
               { key: 'monthly', label: '1 Month', icon: '🗓', sub: 'Last 30 days' },
               { key: '90days', label: '3 Months', icon: '📊', sub: 'Last 90 days' },
+              { key: '180days', label: '6 Months', icon: '📅', sub: 'Last 180 days' },
             ].map(opt => {
               const active = reportType === opt.key;
               return (
                 <button
                   key={opt.key}
                   type="button"
+                  disabled={generating}
                   onClick={() => handleSelectWindow(opt.key)}
                   style={{
                     background: active ? MON.cyan : MON.card2,
@@ -1095,7 +1070,7 @@ function FileReportsTab({ alerts = [], total = 0, fimStats = null }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${MON.line}`, paddingBottom: 12 }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 800, color: MON.cyan }}>📄 FIM Executive Security & Compliance Report</div>
-              <div style={{ fontSize: 10, color: MON.muted, marginTop: 4 }}>Total Monitored FIM Logs: <b style={{ color: MON.cyan }}>{reportData?.total}</b> | Generated: {new Date().toLocaleString()}</div>
+              <div style={{ fontSize: 10, color: MON.muted, marginTop: 4 }}>Total Monitored FIM Logs: <b style={{ color: MON.cyan }}>{reportData?.total}</b> | Generated: {new Date(reportData.generatedAt).toLocaleString()}</div>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button type="button" onClick={handleExportCSV} style={{ background: MON.green, color: '#000', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>
@@ -1548,17 +1523,12 @@ export function FileActivityDashboard({ alerts = [], loading = false, total = 0,
 
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
-        <div style={{ minHeight: 30, padding: '6px 10px', borderRadius: 6, background: `${MON.cyan}0d`, border: `1px solid ${MON.cyan}33`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 10 }}>
-          <span style={{ color: liveData?.error ? MON.red : loading ? MON.yellow : MON.green, fontWeight: 800 }}>
-            ● {liveData?.error ? liveData.error : loading ? 'Syncing live FIM data…' : 'Live tenant data'} · {Number(totalRows).toLocaleString()} events · {rows.length.toLocaleString()} recent records loaded
-            {liveData?.updatedAt ? ` · updated ${new Date(liveData.updatedAt).toLocaleTimeString()}` : ''}
-          </span>
-          {onRefresh && <button type="button" onClick={onRefresh} disabled={loading} style={{ background: MON.card2, border: `1px solid ${MON.border}`, color: MON.cyan, padding: '4px 9px', borderRadius: 4, fontSize: 9, fontWeight: 800, cursor: loading ? 'wait' : 'pointer' }}>↻ Refresh live data</button>}
-        </div>
         {activeTab === 'log-monitor' ? (
-          <FileLogMonitor alerts={masterFimTelemetry} loading={loading} total={totalRows} updatedAt={liveData?.updatedAt} onRefresh={onRefresh} />
+          <CapabilityLogsPanel capabilityId={2}>
+            <FileLogMonitor alerts={masterFimTelemetry} loading={loading} total={totalRows} updatedAt={liveData?.updatedAt} onRefresh={onRefresh} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
-          <FileReportsTab alerts={masterFimTelemetry} total={totalRows} fimStats={fimStats} />
+          <FileReportsTab />
         ) : activeTab === 'dashboard' ? (
           <FileOverviewDashboard alerts={masterFimTelemetry} total={totalRows} fimStats={fimStats} loading={loading} liveData={liveData} />
         ) : (

@@ -524,6 +524,10 @@ class HeartbeatService:
                 if audit_id and audit_id in self._security_completed:
                     self._security_action_results.append(self._security_completed[audit_id])
                     continue
+                from .command_guard import automatic_isolation_error
+                denied = automatic_isolation_error(command, item)
+                if denied:
+                    raise RuntimeError(denied)
                 if _SECURITY_LOCKDOWN.is_set() and command not in _LOCKDOWN_ALLOWED_COMMANDS:
                     raise RuntimeError(
                         'command denied: agent is in evidence-preserving security lockdown'

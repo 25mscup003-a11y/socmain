@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Credential Security Monitoring — Capability ID: 13
  *
@@ -1661,7 +1662,9 @@ export function CredentialSecurityDashboardPanel({ alerts = [], loading = false,
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <CredentialSecurityLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={13}>
+            <CredentialSecurityLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={13} alerts={rows} />
         ) : activeTab === 'dashboard' ? (

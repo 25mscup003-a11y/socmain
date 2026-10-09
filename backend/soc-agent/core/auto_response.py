@@ -81,7 +81,8 @@ class AutoResponseEngine:
         """
         params = params or {}
         from .heartbeat import security_command_error
-        denied = security_command_error(action)
+        from .network_verification import automatic_network_error
+        denied = security_command_error(action) or automatic_network_error(action, params)
         if denied:
             return {'ok': False, 'result': denied}
         started = time.monotonic()
@@ -201,6 +202,9 @@ class AutoResponseEngine:
             'expiresAt': payload.get('expiresAt', ''), 'retryCount': payload.get('retryCount', 0),
             'maxRetries': payload.get('maxRetries', 0), 'correlationId': payload.get('correlationId', ''),
         }
+        for field in ('automatic', 'threatVerification'):
+            if field in payload:
+                signed[field] = payload[field]
         expected = hmac.new(
             str(self._config.get('agent_key', '')).encode('utf-8'),
             canonicalize(signed).encode('utf-8'), hashlib.sha256,
@@ -466,7 +470,7 @@ class AutoResponseEngine:
         if not ip:
             raise RuntimeError('No IP specified')
         if self._ips:
-            ok = self._ips.block_ip(ip, reason='auto-response')
+            ok = self._ips.block_ip(ip, reason='auto-response', authorized_by_backend=True)
             if not ok:
                 raise RuntimeError(f'Block failed: {ip}')
             return f'IP blocked: {ip}'

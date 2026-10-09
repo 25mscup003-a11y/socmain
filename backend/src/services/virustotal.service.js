@@ -160,25 +160,30 @@ async function scanHash(hash) {
  * Scan an IP address against VirusTotal.
  * Returns { score, detections, total, ratio, engines[], scannedAt } or null.
  */
-async function scanIp(ip) {
+async function scanIp(ip, { maxCacheAgeMs = CACHE_TTL } = {}) {
   const key = getKey();
   ip = normalizeIp(ip);
   if (!key || !isPublicIp(ip) || rateLimitActive()) return null;
 
   const cacheKey = `ip:${ip}`;
   const cached = _cache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+  if (cached && Date.now() - cached.ts < Math.min(CACHE_TTL, maxCacheAgeMs)) return cached.data;
 
   try {
     const { data } = await axios.get(`${VT_BASE}/ip_addresses/${ip}`, {
       headers: { 'x-apikey': key },
       timeout: 10000,
     });
+    if (!data?.data?.attributes?.last_analysis_stats) throw new Error('invalid VirusTotal IP response');
     const result = _parseResponse(data);
     _cache.set(cacheKey, { data: result, ts: Date.now() });
     return result;
   } catch (err) {
-    if (err.response?.status === 404) return null;
+    if (err.response?.status === 404) {
+      const result = { verdict: 'not_found', detections: 0, score: 0, total: 0, notFound: true, scannedAt: new Date() };
+      _cache.set(cacheKey, { data: result, ts: Date.now() });
+      return result;
+    }
     if (err.response?.status === 429) { noteRateLimit(); return null; }
     console.error('[VT] scanIp error:', err.message);
     return null;

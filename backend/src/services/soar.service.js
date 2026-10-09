@@ -335,6 +335,7 @@ async function executeActionHandler(alert, action, execution) {
         auditTrail: [{ status: 'queued', message: 'Approved SOAR action queued for verified endpoint execution', actorId: execution.triggeredBy }],
       });
       await dispatchResponse(response, system, _io);
+      if (response.status === 'failed') throw new Error(response.errorDetail || 'Automatic IP block verification failed');
       return {
         pending: true,
         automatedResponseId: response._id,

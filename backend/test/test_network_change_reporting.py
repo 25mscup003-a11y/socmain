@@ -47,13 +47,15 @@ class NetworkChangeReportingTests(unittest.TestCase):
         events = [call.args[0] for call in self.sender.enqueue.call_args_list]
         return [event for event in events if not rule or event['rule_id'] == rule]
 
-    def test_unchanged_inventory_sends_one_baseline_despite_elapsed_time_and_bytes(self):
+    def test_unchanged_inventory_does_not_resend_before_usage_interval(self):
         self.emit([connection(observed_at='2026-01-01', duration=0,
                               start_time='2026-01-01', end_time=None)])
         baseline = len(self.events())
         self.assertEqual(baseline, 4)
+        baseline_time = network.time.time()
+        self.collector._last_usage_emit = baseline_time
         for counter in range(1, 20):
-            with patch.object(network.time, 'time', return_value=counter * 86400):
+            with patch.object(network.time, 'time', return_value=baseline_time + counter):
                 self.emit([connection(observed_at=str(counter), duration=counter * 20,
                                       start_time=str(counter), end_time=str(counter + 1))], io_delta={
                     'interval_seconds': 20, 'bytes_sent': counter * 100, 'bytes_received': counter,
@@ -246,6 +248,7 @@ class NetworkChangeReportingTests(unittest.TestCase):
     def test_rejected_enqueue_is_retried_with_closures_and_accumulated_bytes(self):
         tracked, _, _ = self.collector._track_connection_lifecycle([connection()])
         self.emit(tracked)
+        self.collector._last_usage_emit = network.time.time()
         self.emit(tracked, io_delta={'interval_seconds': 20, 'bytes_sent': 30})
         active, closed, _ = self.collector._track_connection_lifecycle([])
         self.sender.enqueue.return_value = False
@@ -259,6 +262,20 @@ class NetworkChangeReportingTests(unittest.TestCase):
         self.assertEqual(event['bytes_sent'], 120)
         self.assertEqual(event['raw']['adapter_delta']['interval_seconds'], 60)
         self.assertEqual(self.collector._pending_closed_connections, {})
+
+    def test_socket_counters_refresh_periodically_without_an_adapter_delta(self):
+        with patch.object(network.time, 'time', return_value=1000) as clock:
+            self.emit([connection(bytes_sent=100, bytes_received=200)])
+            self.sender.reset_mock()
+            clock.return_value = 1020
+            self.emit([connection(bytes_sent=200, bytes_received=300)])
+            self.sender.enqueue.assert_not_called()
+            clock.return_value = 1061
+            self.emit([connection(bytes_sent=300, bytes_received=400)])
+        events = self.events('NET_CONNECTION_SUMMARY')
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['raw']['connections'][0]['bytes_sent'], 300)
+        self.assertEqual(events[0]['raw']['connections'][0]['bytes_received'], 400)
 
     def test_closure_batches_are_drained_without_losing_rows(self):
         self.collector._config['network_snapshot_max_closed'] = 1

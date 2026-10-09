@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Lateral Movement Detection — Capability ID: 14
  *
@@ -1493,7 +1494,9 @@ export function LateralMovementDashboardPanel({ alerts = [], loading = false, to
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <LateralMovementLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={14}>
+            <LateralMovementLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={14} alerts={rows} />
         ) : activeTab === 'dashboard' ? (

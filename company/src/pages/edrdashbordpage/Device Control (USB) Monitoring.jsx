@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Device Control (USB) Monitoring — Capability ID: 10
  * 
@@ -1765,7 +1766,9 @@ export default function UsbDeviceControlDashboard({ alerts = [], loading = false
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
 
       {activeTab === 'log-monitor' ? (
-        <UsbLogMonitor alerts={alerts} />
+        <CapabilityLogsPanel capabilityId={10}>
+            <UsbLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
       ) : activeTab === 'policy-violations' ? (
         <UsbPolicyViolationsTab />
       ) : activeTab === 'reports' ? (

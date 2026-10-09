@@ -38,6 +38,22 @@ const TABS = [
 
 const IDS_TAB_IDS = new Set(['overview', 'threats', 'logs', 'coverage']);
 const IPS_TAB_IDS = new Set(['blocklist', 'country', 'whitelist', 'waf', 'policy', 'audit', 'isolationFlow']);
+const IDS_LOG_RANGES = [
+  { value: '24h', label: 'Last 24 hours', shortLabel: '24H' },
+  { value: '7d', label: 'Last 7 days', shortLabel: '7D' },
+  { value: '30d', label: 'Last 30 days', shortLabel: '30D' },
+  { value: '60d', label: 'Last 60 days', shortLabel: '60D' },
+  { value: '90d', label: 'Last 90 days', shortLabel: '90D' },
+  { value: '180d', label: 'Last 180 days', shortLabel: '180D' },
+];
+
+// Publish the same metric the tab renders. The open tab's snapshot takes
+// precedence over an independently polled dashboard summary.
+function useTabMetric(onMetricsChange, tab, value, sub, status = 'OK') {
+  useEffect(() => {
+    onMetricsChange?.(tab, { value, sub, status: value == null ? 'Unknown' : status });
+  }, [onMetricsChange, tab, value, sub, status]);
+}
 const IDS_SENSOR_NOISE_RULES = new Set([
   'SURICATA_2200003',
   'SURICATA_2210045',
@@ -222,7 +238,7 @@ const sourceTrendPoints = (hourly = []) => {
   }).join(' ');
 };
 
-function OverviewTab({ onTabChange, onOpenReport, onSeverityFilter, summary, ipsOnline }) {
+function OverviewTab({ onTabChange, onOpenReport, onSeverityFilter, summary, ipsOnline, onMetricsChange }) {
   const OVERVIEW_LIST_LIMIT = 10;
   const [selectedIp, setSelectedIp] = useState(null);
   const [stats, setStats] = useState(null);
@@ -302,6 +318,7 @@ function OverviewTab({ onTabChange, onOpenReport, onSeverityFilter, summary, ips
   const sev = { CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#eab308', LOW: '#60a5fa' };
   const severity = stats?.severity || {};
   const high = severity.high || 0;
+  useTabMetric(onMetricsChange, 'overview', stats ? total : null, `${critical} critical`, critical > 0 ? 'Danger' : high > 0 ? 'Warning' : 'OK');
   const medium = severity.medium || 0;
   const low = severity.low || 0;
   const severityTotal = critical + high + medium + low;
@@ -1061,7 +1078,7 @@ function InlineLogPanel({ title = '📋 Activity Log', filterLevel = null }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  BLOCKLIST  — from IPS Webhook Server (5050) + block/unblock via backend
 // ══════════════════════════════════════════════════════════════════════════════
-function BlocklistTab({ onTabChange }) {
+function BlocklistTab({ onTabChange, onMetricsChange }) {
   const authorizationContext = getStoredAuthorizationContext();
   const [list, setList] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -1177,10 +1194,11 @@ function BlocklistTab({ onTabChange }) {
       // wait for the optional IPS webhook service, and do not merge historical
       // block events back into the active blocklist.
       const [backendBlocks, st, systemList] = await Promise.allSettled([
-        api.get('/ips/blocklist'),
-        api.get('/ips/status'),
-        api.get('/system'),
+        api.get('/ips/blocklist', { skipCache: true }),
+        api.get('/ips/status', { skipCache: true }),
+        api.get('/system', { skipCache: true }),
       ]);
+      if (backendBlocks.status === 'rejected') throw backendBlocks.reason;
       const agentRows = systemList.status === 'fulfilled'
         ? (Array.isArray(systemList.value?.data) ? systemList.value.data : (systemList.value?.data?.systems || []))
         : [];
@@ -1205,10 +1223,10 @@ function BlocklistTab({ onTabChange }) {
         // displayed twice. Log-only records are audit evidence, not active
         // endpoint firewall blocks.
         const rawKey = block.ip || block.blockKey || block.domain || block.application || `${block.port || ''}:${block.protocol || ''}`;
-        const key = String(rawKey || '').replace(/^ip:/i, '').toLowerCase();
-        if (!key) return;
+        const target = String(rawKey || '').replace(/^ip:/i, '').toLowerCase();
+        if (!target) return;
+        const key = `${target}|port:${block.port || ''}`;
         if (String(block.method || '').toLowerCase() === 'log-only') {
-          mergedByKey.delete(key);
           return;
         }
         const previous = mergedByKey.get(key);
@@ -1231,9 +1249,11 @@ function BlocklistTab({ onTabChange }) {
         ttlHours: backendStatus?.ttlHours ?? 24,
         blocklistActive: blocklistData.length,
       });
-    } catch { }
+    } catch { setStatus(null); }
     if (!silent) setLoading(false);
   }, []);
+
+  useTabMetric(onMetricsChange, 'blocklist', status ? list.length : null, 'Active IP blocks', list.length > 0 ? 'Warning' : 'OK');
 
   useEffect(() => {
     load();
@@ -1276,7 +1296,7 @@ function BlocklistTab({ onTabChange }) {
         const ipv4 = value.match(/^(\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?$/);
         const validIpv4 = ipv4 && value.split('/')[0].split('.').every(part => Number(part) >= 0 && Number(part) <= 255);
         const validIpv6 = value.includes(':');
-        if (!validIpv4 && !validIpv6) throw new Error('Enter a valid IPv4, IPv6, or CIDR address');
+        if (value.includes('/') || (!validIpv4 && !validIpv6)) throw new Error('Enter a single IPv4 or IPv6 address; CIDR ranges belong in whitelist rules');
       }
       if (blockType === 'Port' && (!Number.isInteger(Number(value)) || Number(value) < 1 || Number(value) > 65535)) {
         throw new Error('Port must be between 1 and 65535');
@@ -1308,8 +1328,8 @@ function BlocklistTab({ onTabChange }) {
         body.agentName = 'Central Firewall';
       }
       body.source = 'Manual'; // Mark as manual block so Source column shows '👤 Manual'
-      await api.post('/ips-proxy/block', body);
-      setMsg('✅ Block applied');
+      const { data } = await api.post('/ips-proxy/block', body);
+      setMsg(data.firewallEnforced ? '✅ Firewall confirmed block' : '⏳ Block queued; waiting for endpoint acknowledgement');
       setForm({ ip: '', port: '', domain: '', application: '', protocol: 'tcp', reason: '', attackType: '', ttlHours: '24', systemId: '' });
       setShowForm(false); setTimeout(load, 800);
     } catch (e) {
@@ -1331,7 +1351,8 @@ function BlocklistTab({ onTabChange }) {
       setSubmitting(true);
       setMsg('');
       try {
-        await api.post('/ips-proxy/unblock', payload);
+        const { data: unblockResult } = await api.post('/ips-proxy/unblock', payload);
+        const actionStatus = unblockResult.firewallEnforced ? 'IP unblock confirmed' : 'IP unblock queued; endpoint confirmation pending';
         const target = block.ip || block.blockKey || block.domain || label;
         const approvalResult = await api.post('/ips-engine/audit/manual', {
           action: 'Manual Override Approved',
@@ -1339,9 +1360,9 @@ function BlocklistTab({ onTabChange }) {
           target,
           srcIp: block.ip || block.blockKey,
           systemId: block.systemId || '',
-          detail: `Manual block removed by administrator: ${label}. Server restored by manual override.`,
+          detail: `${actionStatus}: ${label}. Network isolation is unchanged.`,
           emailSubject: 'Manual Override Approved',
-          emailMessage: `Manual block removed by administrator.\n\nTarget: ${label}\nServer Live: Yes\nRisk acceptance has been recorded in Audit Log.`,
+          emailMessage: `${actionStatus}.\n\nTarget: ${label}\nEndpoint enforcement confirmation is reported separately\nRisk acceptance has been recorded in Audit Log.`,
           manualOverride: {
             approvalStatus: 'Manual Override Approved',
             reason: block.reason || 'Manual unblock requested by administrator',
@@ -1359,18 +1380,10 @@ function BlocklistTab({ onTabChange }) {
             },
           },
         }));
-        await api.post('/ips-engine/audit/manual', {
-          action: 'Server Restored',
-          severity: 'high',
-          target,
-          srcIp: block.ip || block.blockKey,
-          systemId: block.systemId || '',
-          detail: `Server Live after manual block removal: ${label}`,
-        }).catch(() => { });
         const emailResult = approvalResult?.data?.event;
         setMsg(emailResult?.emailSent
-          ? `✅ Manual block removed: ${label}. Email sent to ${emailResult.emailTo}`
-          : `⚠️ Manual block removed: ${label}, but email delivery failed${emailResult?.emailTo ? ` (${emailResult.emailTo})` : ''}`);
+          ? `${unblockResult.firewallEnforced ? '✅' : '⏳'} ${actionStatus}: ${label}. Notification accepted by SMTP for ${emailResult.emailTo}`
+          : `⚠️ ${actionStatus}: ${label}, but email failed or was not configured${emailResult?.emailTo ? ` (${emailResult.emailTo})` : ''}`);
         setPendingRestore(null);
         setTimeout(load, 600);
       } catch (e) {
@@ -1475,12 +1488,12 @@ function BlocklistTab({ onTabChange }) {
       time: approvalTime.toLocaleTimeString(),
       auditLog: true,
       emailSubject: 'Manual Override Approved',
-      emailMessage: 'Administrator has manually restored the server while the attack is still active. Risk acceptance has been recorded.',
+      emailMessage: 'Administrator approved a reconnect request while an attack may still be active. Endpoint confirmation is pending. Risk acceptance has been recorded.',
     };
     payload.reason = `Manual Override Approved | Approved By: ${overrideForm.approvedBy} | Reason: ${overrideForm.reason} | Categories: ${selectedReasons.join(', ')}`;
     setSubmitting(true);
     try {
-      await api.post('/ips-proxy/unblock', payload);
+      const { data: unblockResult } = await api.post('/ips-proxy/unblock', payload);
       await api.post('/ips-engine/audit/manual', {
         action: 'Checklist Submitted',
         severity: 'high',
@@ -1492,6 +1505,7 @@ function BlocklistTab({ onTabChange }) {
       }).catch(() => { });
       const approvalResult = await api.post('/ips-engine/audit/manual', {
         action: 'Manual Override Approved',
+        restoreEndpoint: true,
         severity: 'high',
         target: overrideForm.ipAddress || pendingRestore.ip || pendingRestore.blockKey,
         srcIp: pendingRestore.ip || pendingRestore.blockKey || overrideForm.ipAddress,
@@ -1500,28 +1514,12 @@ function BlocklistTab({ onTabChange }) {
         emailSubject: payload.manualOverride.emailSubject,
         emailMessage: payload.manualOverride.emailMessage,
         manualOverride: payload.manualOverride,
-      }).catch(error => ({
-        data: {
-          event: {
-            emailSent: false,
-            emailTo: null,
-            emailError: error.response?.data?.message || error.message,
-          },
-        },
-      }));
-      await api.post('/ips-engine/audit/manual', {
-        action: 'Server Restored',
-        severity: 'high',
-        target: overrideForm.ipAddress || pendingRestore.ip || pendingRestore.blockKey,
-        srcIp: pendingRestore.ip || pendingRestore.blockKey || overrideForm.ipAddress,
-        systemId: overrideForm.systemId,
-        detail: `Server Live after manual override approval by ${overrideForm.approvedBy} (Employee ID: ${overrideForm.employeeId})`,
-        manualOverride: payload.manualOverride,
-      }).catch(() => { });
+      });
       const emailResult = approvalResult?.data?.event;
-      setMsg(emailResult?.emailSent
-        ? `✅ Manual Override Approved — Server Live: ${pendingRestore.label}. Email sent to ${emailResult.emailTo}`
-        : `⚠️ Server Live: ${pendingRestore.label}, but admin email delivery failed${emailResult?.emailTo ? ` (${emailResult.emailTo})` : ''}`);
+      const reconnected = emailResult?.metadata?.reconnect?.confirmed === true;
+      const reconnectStatus = reconnected ? 'Endpoint reconnection confirmed' : 'Reconnect queued; endpoint confirmation pending';
+      const blockStatus = unblockResult.firewallEnforced ? 'IP unblock confirmed' : 'IP unblock pending';
+      setMsg(`${reconnected ? '✅' : '⏳'} ${reconnectStatus}. ${blockStatus}. ${emailResult?.emailSent ? `Notification accepted by SMTP for ${emailResult.emailTo}` : 'Admin notification failed or was not configured'}`);
       setOverrideError('');
       setPendingRestore(null);
       setManualOverride(false);
@@ -1735,7 +1733,7 @@ function BlocklistTab({ onTabChange }) {
                   else if (blockType === 'Application') setForm(p => ({ ...p, application: val }));
                   else setForm(p => ({ ...p, protocol: val }));
                 }}
-                placeholder={blockType === 'IP Address' ? 'e.g., 192.168.1.100' : blockType === 'Domain' ? 'e.g., evil.com' : blockType === 'Port' ? 'e.g., 22' : blockType === 'Application' ? '/usr/bin/app' : 'e.g., tcp'}
+                placeholder={blockType === 'IP Address' ? 'e.g., 203.0.113.45' : blockType === 'Domain' ? 'e.g., evil.com' : blockType === 'Port' ? 'e.g., 22' : blockType === 'Application' ? '/usr/bin/app' : 'e.g., tcp'}
               />
             </label>
             <label>ATTACK TYPE
@@ -1882,7 +1880,7 @@ function BlocklistTab({ onTabChange }) {
                 <label>Time<input value={new Date().toLocaleTimeString()} readOnly /></label>
               </div>
               <div className="ids-manual-approval-note">
-                Manual Override Approved: Administrator has manually restored the server while the attack is still active. Risk acceptance will be recorded in Audit Log and notification payload.
+                Manual Override Approved: Administrator is requesting restoration while an attack may still be active. Risk acceptance will be recorded in Audit Log and notification payload.
               </div>
             </>
           )}
@@ -2068,7 +2066,7 @@ function BlocklistTab({ onTabChange }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  THREATS
 // ══════════════════════════════════════════════════════════════════════════════
-function ThreatsTab({ onTabChange }) {
+function ThreatsTab({ onTabChange, onMetricsChange }) {
   const [hours, setHours] = useState(24);
   const [stats, setStats] = useState(null);
   const [attacks, setAttacks] = useState([]);
@@ -2177,6 +2175,7 @@ function ThreatsTab({ onTabChange }) {
   const byType = stats?.byType || [];
   const topIPs = stats?.topIPs || [];
   const total = stats?.total || Object.values(byLevel).reduce((sum, value) => sum + Number(value || 0), 0);
+  useTabMetric(onMetricsChange, 'threats', stats && !err ? total : null, `Threats in last ${hours}h`, byLevel.critical > 0 ? 'Danger' : byLevel.high > 0 ? 'Warning' : 'OK');
   const levelCards = [
     { key: 'low', label: 'Low Threats', icon: '⌁', color: '#22c55e' },
     { key: 'medium', label: 'Medium Threats', icon: '⚠', color: '#f59e0b' },
@@ -2527,7 +2526,7 @@ function ThreatsTab({ onTabChange }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  COVERAGE
 // ══════════════════════════════════════════════════════════════════════════════
-function CoverageTab() {
+function CoverageTab({ onMetricsChange }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -2548,6 +2547,7 @@ function CoverageTab() {
 
   const groups = data?.groups || [];
   const totals = data?.totals || {};
+  useTabMetric(onMetricsChange, 'coverage', data && !err ? totals.capabilities : null, 'Monitored classes');
 
   return (
     <div className="ids-tab-page">
@@ -2597,8 +2597,9 @@ function CoverageTab() {
 // ══════════════════════════════════════════════════════════════════════════════
 //  LOGS
 // ══════════════════════════════════════════════════════════════════════════════
-function LogsTab({ onTabChange, initLevel, companyId }) {
-  const LOG_WINDOW_HOURS = 24;
+function LogsTab({ onTabChange, initLevel, companyId, onMetricsChange }) {
+  const [logRange, setLogRange] = useState('24h');
+  const selectedRange = IDS_LOG_RANGES.find(range => range.value === logRange) || IDS_LOG_RANGES[0];
   const [logs, setLogs] = useState([]);
   const [dbTotal, setDbTotal] = useState(0);
   const [filteredTotal, setFilteredTotal] = useState(0);
@@ -2780,7 +2781,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
         // IDS Logs must contain detections/actions, not network heartbeat or
         // summary envelopes. Network telemetry has its own Capability 3 UI.
         includeTelemetry: 'false',
-        range: '24h',
+        range: logRange,
         severity: level === 'ALL' ? 'all' : level.toLowerCase(),
       });
       if (search) params.append('search', search);
@@ -2793,7 +2794,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
       countParams.delete('page');
       countParams.delete('limit');
 
-      // The 24-hour count is intentionally separate so count aggregation never
+      // The selected range's count is separate so count aggregation never
       // delays fresh rows appearing in the live table.
       api.get(`/idsips/logs?${countParams.toString()}`).then(({ data: resData }) => {
         if (requestSequence !== loadSequenceRef.current) return;
@@ -2817,7 +2818,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
     } finally {
       if (requestSequence === loadSequenceRef.current) setLoading(false);
     }
-  }, [level, page, pageSize, search, sourceFilter, agentFilter]);
+  }, [level, page, pageSize, search, sourceFilter, agentFilter, logRange]);
 
   const analyseWithAi = async (row) => {
     setAiBusy(row.id);
@@ -2939,7 +2940,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
     return {
       id: log.id || log._id || `log_${ts ? new Date(ts).toISOString().replace(/\D/g, '').slice(0, 14) : 'entry'}_${index + 1}`,
       time: ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—',
-      date: ts ? new Date(ts).toLocaleDateString([], { month: 'short', day: '2-digit' }) : '—',
+      date: ts ? new Date(ts).toLocaleDateString([], { year: 'numeric', month: 'short', day: '2-digit' }) : '—',
       level: severity.toUpperCase(),
       source,
       agent,
@@ -2972,12 +2973,13 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
   const pageRows = rows;
   const selectedRow = selected ? parseLog(selected) : pageRows[0];
   const statCards = [
-    [`Total IDS/IPS Logs (${LOG_WINDOW_HOURS}H)`, dbTotal, '▤', '#60a5fa'],
+    [`Total IDS/IPS Logs (${selectedRange.shortLabel})`, dbTotal, '▤', '#60a5fa'],
     ['Low', dbCounts.low || 0, 'ⓘ', '#3b82f6'],
     ['Medium', dbCounts.medium || 0, '⚠', '#eab308'],
     ['High', dbCounts.high || 0, '⦿', '#ef4444'],
     ['Critical', dbCounts.critical || 0, '♜', '#a855f7'],
   ];
+  useTabMetric(onMetricsChange, 'logs', err || (loading && !logs.length) ? null : dbTotal, selectedRange.label);
 
   const getPageNumbers = () => {
     const pages = [];
@@ -2994,16 +2996,15 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
   };
 
   const LEVELS = ['ALL', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-  const liveWindowLabel = `Last ${LOG_WINDOW_HOURS} hours`;
   const exportLogs = () => {
     const csvRows = [['timestamp', 'source_ip', 'destination_ip', 'ids_ips_type', 'signature_rule_name', 'severity', 'action', 'status', 'sensor_server']]
-      .concat(filtered.map(row => [row.time, row.srcIp, row.destIp, row.idsType, row.rule, row.level, row.action, row.status, row.agent]));
+      .concat(filtered.map(row => [liveEventTime(row.raw) || '', row.srcIp, row.destIp, row.idsType, row.rule, row.level, row.action, row.status, row.agent]));
     const csv = csvRows.map(row => row.map(cell => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'ids-logs.csv';
+    a.download = `ids-logs-${logRange}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -3563,7 +3564,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
       <div className="ids-log-head">
         <div>
           <h3>Logs</h3>
-          <p>IDS/IPS logs from the last {LOG_WINDOW_HOURS} hours</p>
+          <p>IDS/IPS logs from the {selectedRange.label.toLowerCase()}</p>
         </div>
         <div className="ids-log-actions">
           <button className={autoRefresh ? 'live' : ''} onClick={() => setAutoRefresh(v => !v)}>● Live⌄</button>
@@ -3585,7 +3586,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
             <i style={{ color, background: `${color}18` }}>{icon}</i>
             <span>{label}</span>
             <strong>{Number(value).toLocaleString()}</strong>
-            <small style={{ color: '#94a3b8' }}>last {LOG_WINDOW_HOURS} hours</small>
+            <small style={{ color: '#94a3b8' }}>{selectedRange.label.toLowerCase()}</small>
           </div>
         ))}
       </div>
@@ -3605,8 +3606,10 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
         <select value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); setPage(1); }}>
           {sources.map(source => <option key={source} value={source}>{source === 'ALL' ? 'All Sources' : source}</option>)}
         </select>
-        <div className="ids-log-date">{liveWindowLabel} 📅</div>
-        <button onClick={() => { setSearchInput(''); setSearch(''); setSourceFilter('ALL'); setAgentFilter('ALL'); setLevel('ALL'); }}>Clear All</button>
+        <select className="ids-log-date" aria-label="Log time range" value={logRange} onChange={e => { setLogRange(e.target.value); setPage(1); }}>
+          {IDS_LOG_RANGES.map(range => <option key={range.value} value={range.value}>{range.label}</option>)}
+        </select>
+        <button onClick={() => { setSearchInput(''); setSearch(''); setSourceFilter('ALL'); setAgentFilter('ALL'); setLevel('ALL'); setLogRange('24h'); setPage(1); }}>Clear All</button>
       </div>
 
       <div className="ids-log-workbench">
@@ -3633,7 +3636,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
                 ) : pageRows.map((row, i) => (
                   <tr key={`${row.id}-${i}`} className={selectedRow?.id === row.id ? 'selected' : ''} onClick={() => setViewingLogDetail(row)}>
                     <td>›</td>
-                    <td>{row.time}</td>
+                    <td>{row.date} {row.time}</td>
                     <td>{row.srcIp}:{row.srcPort}</td>
                     <td>{row.destIp}:{row.destPort}</td>
                     <td>{row.protocol}</td>
@@ -3667,7 +3670,7 @@ function LogsTab({ onTabChange, initLevel, companyId }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  WHITELIST
 // ══════════════════════════════════════════════════════════════════════════════
-function WhitelistTab({ onTabChange }) {
+function WhitelistTab({ onTabChange, onMetricsChange }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ value: '', type: 'ip', reason: '' });
@@ -3680,11 +3683,12 @@ function WhitelistTab({ onTabChange }) {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [page, setPage] = useState(1);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const { data } = await api.get('/ips-proxy/whitelist', { skipCache: true }); setList(data.whitelist || []); }
-    catch (e) { setMsg(`❌ ${e.message}`); }
+    try { const { data } = await api.get('/ips-proxy/whitelist', { skipCache: true }); setList(data.whitelist || []); setLoadError(false); }
+    catch (e) { setLoadError(true); setMsg(`❌ ${e.message}`); }
     finally { setLoading(false); }
   }, []);
 
@@ -3777,6 +3781,7 @@ function WhitelistTab({ onTabChange }) {
   const pageRows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const ipCount = list.filter(e => ['ip', 'cidr'].includes((e.type || '').toLowerCase())).length;
   const domainCount = list.filter(e => (e.type || '').toLowerCase() === 'domain').length;
+  useTabMetric(onMetricsChange, 'whitelist', loadError || (loading && !list.length) ? null : list.length, 'Trusted entries');
   const typeLabel = (type) => ({ ip: 'IP Address', domain: 'Domain', cidr: 'CIDR Range' }[(type || 'ip').toLowerCase()] || type || 'IP Address');
   const sourceLabel = (entry) => entry.source || entry.addedBy || 'Manual';
 
@@ -3808,7 +3813,7 @@ function WhitelistTab({ onTabChange }) {
             </select>
           </label>
           <label>Value
-            <input value={form.value} onChange={e => setForm(p => ({ ...p, value: e.target.value }))} placeholder={form.type === 'ip' ? 'e.g., 192.168.1.100' : form.type === 'domain' ? 'e.g., trusted.example.com' : 'e.g., 10.0.0.0/8'} required />
+            <input value={form.value} onChange={e => setForm(p => ({ ...p, value: e.target.value }))} placeholder={form.type === 'ip' ? 'e.g., 203.0.113.45' : form.type === 'domain' ? 'e.g., trusted.example.com' : 'e.g., 10.0.0.0/8'} required />
           </label>
           <label>Reason <span>(Optional)</span>
             <input value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} placeholder="e.g., Office network, Trusted partner..." />
@@ -3960,17 +3965,26 @@ export default function IDSPage({ initialModule = 'ids' }) {
   const [summary, setSummary] = useState(null); // live KPI summary
   const [idsKpis, setIdsKpis] = useState(null);
   const [tabMetrics, setTabMetrics] = useState({
-    overview: { value: 0, status: 'OK' },
-    blocklist: { value: 0, status: 'OK' },
-    threats: { value: 0, status: 'OK' },
-    logs: { value: 0, status: 'OK' },
-    coverage: { value: 0, status: 'OK' },
-    whitelist: { value: 0, status: 'OK' },
-    waf: { value: 0, status: 'OK' },
-    policy: { value: 0, status: 'OK' },
-    audit: { value: 0, status: 'OK' },
-    isolationFlow: { value: 0, status: 'OK' },
+    overview: { value: null, status: 'Unknown' },
+    blocklist: { value: null, status: 'Unknown' },
+    threats: { value: null, status: 'Unknown' },
+    logs: { value: null, status: 'Unknown' },
+    coverage: { value: null, status: 'Unknown' },
+    whitelist: { value: null, status: 'Unknown' },
+    waf: { value: null, status: 'Unknown' },
+    policy: { value: null, status: 'Unknown' },
+    audit: { value: null, status: 'Unknown' },
+    isolationFlow: { value: null, status: 'Unknown' },
   });
+  const [tabDataMetrics, setTabDataMetrics] = useState({});
+  const onMetricsChange = useCallback((tab, metric) => {
+    setTabDataMetrics(previous => {
+      const current = previous[tab];
+      if (current?.value === metric.value && current?.sub === metric.sub && current?.status === metric.status) return previous;
+      return { ...previous, [tab]: metric };
+    });
+  }, []);
+  useEffect(() => { setTabDataMetrics({}); }, [companyId]);
   const summaryRef = useRef(null);
   const workspaceRef = useRef(null);
   const shellRef = useRef(null);
@@ -3986,15 +4000,15 @@ export default function IDSPage({ initialModule = 'ids' }) {
   // only when that tab is opened, instead of firing 13 API requests up front. ──
   const summaryCache = useRef(null);
   useEffect(() => {
-    if (activeModule !== 'ips') return undefined;
+    if (activeModule !== 'ips' || activeTab === 'country') return undefined;
     let active = true;
     const refresh = () => api.get('/ips/country-blocks/summary').then(({ data }) => {
       if (active) setCountryRuleCount(data.enabled);
-    }).catch(() => {});
+    }).catch(() => { if (active) setCountryRuleCount(null); });
     refresh();
     const timer = autoRefresh ? setInterval(refresh, 60000) : null;
     return () => { active = false; if (timer) clearInterval(timer); };
-  }, [activeModule, autoRefresh]);
+  }, [activeModule, activeTab, autoRefresh, companyId]);
   const fetchSummary = useCallback(async () => {
     try {
       let nextSummary;
@@ -4008,10 +4022,14 @@ export default function IDSPage({ initialModule = 'ids' }) {
         const { data } = await api.get('/ids/stats?summary=true');
         nextSummary = {
           ...data,
-          ipsBlocked: data.blocked ?? 0,
+          ipsBlocked: null,
           ipsOnline: false,
           ipsStatus: 'unknown',
         };
+      }
+      if (activeModule === 'ips') {
+        const wafResult = await api.get('/waf/attacks?limit=1&hours=24').catch(() => null);
+        nextSummary.wafBlocked = wafResult?.data?.stats?.blocked ?? null;
       }
       const newJson = JSON.stringify(nextSummary);
       if (summaryCache.current === newJson) return;
@@ -4044,8 +4062,8 @@ export default function IDSPage({ initialModule = 'ids' }) {
           status: getStatus(criticalCount, highCount)
         },
         blocklist: {
-          value: nextSummary?.ipsBlocked ?? 0,
-          status: getStatus(0, (nextSummary?.ipsBlocked ?? 0) > 0 ? 1 : 0)
+          value: nextSummary?.ipsBlocked ?? null,
+          status: nextSummary?.ipsBlocked == null ? 'Unknown' : getStatus(0, nextSummary.ipsBlocked > 0 ? 1 : 0)
         },
         threats: {
           value: nextIds.total,
@@ -4055,13 +4073,18 @@ export default function IDSPage({ initialModule = 'ids' }) {
           value: nextIds.total,
           status: 'OK'
         },
-        coverage: {
-          value: nextSummary?.capabilities ?? previous.coverage.value,
-          status: 'OK'
-        },
+        coverage: { value: nextSummary?.capabilities ?? null, status: nextSummary?.capabilities == null ? 'Unknown' : 'OK' },
+        ...Object.fromEntries(['whitelist', 'policy', 'audit', 'isolationFlow'].map(key => [key, {
+          value: nextSummary.ipsMetrics?.[key] ?? null,
+          status: nextSummary.ipsMetrics?.[key] == null ? 'Unknown' : key === 'isolationFlow' && nextSummary.ipsMetrics[key] > 0 ? 'Warning' : 'OK',
+        }])),
+        waf: { value: nextSummary.wafBlocked ?? null, status: nextSummary.wafBlocked == null ? 'Unknown' : 'OK' },
       }));
-    } catch { /* silent — summary is optional */ }
-  }, []);
+    } catch {
+      summaryCache.current = null;
+      setTabMetrics(previous => Object.fromEntries(Object.entries(previous).map(([key, metric]) => [key, { ...metric, value: null, status: 'Unknown' }])));
+    }
+  }, [activeModule, companyId]);
 
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
@@ -4112,23 +4135,27 @@ export default function IDSPage({ initialModule = 'ids' }) {
             </div>
           </div>
 
-          <div className="ids-kpis">
+          <div className={`ids-kpis${activeModule === 'ips' ? ' ids-kpis--single-row' : ''}`}>
             {[
               { id: 'overview', icon: '📡', label: 'IDS Overview', color: '#3b82f6', value: tabMetrics.overview.value, sub: `${idsKpis?.severity?.critical ?? 0} critical` },
-              { id: 'blocklist', icon: '🛡️', label: 'Blocklist', color: '#ef4444', value: tabMetrics.blocklist.value, sub: '24H blocks' },
+              { id: 'blocklist', icon: '🛡️', label: 'Blocklist', color: '#ef4444', value: tabMetrics.blocklist.value, sub: 'Active IP blocks' },
               { id: 'country', icon: '🌐', label: 'Block Country', color: '#38bdf8', value: countryRuleCount, sub: 'Enabled country rules' },
               { id: 'threats', icon: '⚠️', label: 'Threats', color: '#f97316', value: tabMetrics.threats.value, sub: `${idsKpis?.severity?.high ?? 0} high alerts` },
               { id: 'logs', icon: '📋', label: 'Logs', color: '#60a5fa', value: tabMetrics.logs.value, sub: 'All IDS/IPS logs' },
               { id: 'coverage', icon: '🧭', label: 'Coverage', color: '#14b8a6', value: tabMetrics.coverage.value, sub: 'Monitored classes' },
               { id: 'whitelist', icon: '✅', label: 'Whitelist', color: '#22c55e', value: tabMetrics.whitelist.value, sub: 'Trusted entries' },
               { id: 'waf', icon: '🔥', label: 'WAF', color: '#f59e0b', value: tabMetrics.waf.value, sub: 'Blocked requests' },
-              { id: 'policy', icon: '🛡️', label: 'Policy IDS&IPS', color: '#a855f7', value: tabMetrics.policy.value, sub: 'Violations logged' },
-              { id: 'audit', icon: '🧾', label: 'Audit Log', color: '#34d399', value: tabMetrics.audit.value, sub: 'Audit events' },
+              { id: 'policy', icon: '🛡️', label: 'Policy IDS&IPS', color: '#a855f7', value: tabMetrics.policy.value, sub: 'Violations in 24h' },
+              { id: 'audit', icon: '🧾', label: 'Audit Log', color: '#34d399', value: tabMetrics.audit.value, sub: 'Latest 500 audit events' },
               { id: 'isolationFlow', icon: '🔓', label: 'Isolation Flow', color: '#38bdf8', value: tabMetrics.isolationFlow.value, sub: 'Active workflows' },
             ].filter(tab => activeModule === 'ids' ? IDS_TAB_IDS.has(tab.id) : IPS_TAB_IDS.has(tab.id)).map(tab => {
               const isActive = activeTab === tab.id;
-              const statusStr = tabMetrics[tab.id]?.status || 'OK';
-              const statusIndicator = statusStr === 'Danger' ? '🔴' : statusStr === 'Warning' ? '🟡' : '🟢';
+              const detailMetric = isActive ? tabDataMetrics[tab.id] : null;
+              const metric = detailMetric || (tab.id === 'country'
+                ? { value: countryRuleCount, status: countryRuleCount == null ? 'Unknown' : 'OK' }
+                : tabMetrics[tab.id]);
+              const statusStr = metric?.status || 'Unknown';
+              const statusIndicator = statusStr === 'Danger' ? '🔴' : statusStr === 'Warning' ? '🟡' : statusStr === 'Unknown' ? '⚪' : '🟢';
 
               return (
                 <button
@@ -4153,9 +4180,9 @@ export default function IDSPage({ initialModule = 'ids' }) {
                     <span style={{ fontSize: '9px' }}>{statusIndicator}</span>
                   </div>
                   <strong style={{ color: isActive ? tab.color : '#e7f0fb', fontSize: '23px', margin: '4px 0 2px 0', fontWeight: '800' }}>
-                    {tab.id === 'country' && tab.value === null ? '—' : Number(tab.value || 0).toLocaleString()}
+                    {metric?.value == null ? '—' : Number(metric.value).toLocaleString()}
                   </strong>
-                  <small style={{ color: '#71839b', fontSize: '8px' }}>{tab.sub}</small>
+                  <small style={{ color: '#71839b', fontSize: '8px' }}>{detailMetric?.sub || tab.sub}</small>
                 </button>
               );
             })}
@@ -4167,18 +4194,20 @@ export default function IDSPage({ initialModule = 'ids' }) {
             ))}
           </div>
 
-          {activeTab === 'overview' && <OverviewTab onTabChange={setActiveTab} onOpenReport={openReport} onSeverityFilter={(sev) => { setLogsSeverityInit(sev); changeTab('logs'); }} summary={summary} ipsOnline={ipsOnline} />}
+          <React.Fragment key={String(companyId || '')}>
+          {activeTab === 'overview' && <OverviewTab onMetricsChange={onMetricsChange} onTabChange={setActiveTab} onOpenReport={openReport} onSeverityFilter={(sev) => { setLogsSeverityInit(sev); changeTab('logs'); }} summary={summary} ipsOnline={ipsOnline} />}
           {activeTab === 'report' && <FullReportTab focus={reportFocus} onBack={() => changeTab('overview')} />}
-          {activeTab === 'blocklist' && <BlocklistTab onTabChange={setActiveTab} />}
+          {activeTab === 'blocklist' && <BlocklistTab onMetricsChange={onMetricsChange} onTabChange={setActiveTab} />}
           {activeTab === 'country' && <CountryBlockTab onRulesChange={setCountryRuleCount} autoRefresh={autoRefresh} />}
-          {activeTab === 'threats' && <ThreatsTab onTabChange={setActiveTab} />}
-          {activeTab === 'logs' && <LogsTab onTabChange={setActiveTab} initLevel={logsSeverityInit} companyId={companyId} />}
-          {activeTab === 'coverage' && <CoverageTab />}
-          {activeTab === 'whitelist' && <WhitelistTab onTabChange={setActiveTab} />}
-          {activeTab === 'waf' && <WAFTab />}
-          {activeTab === 'policy' && <PolicyTab />}
-          {activeTab === 'audit' && <AuditLogTab />}
-          {activeTab === 'isolationFlow' && <IsolationFlowTab />}
+          {activeTab === 'threats' && <ThreatsTab onMetricsChange={onMetricsChange} onTabChange={setActiveTab} />}
+          {activeTab === 'logs' && <LogsTab onMetricsChange={onMetricsChange} onTabChange={setActiveTab} initLevel={logsSeverityInit} companyId={companyId} />}
+          {activeTab === 'coverage' && <CoverageTab onMetricsChange={onMetricsChange} />}
+          {activeTab === 'whitelist' && <WhitelistTab onMetricsChange={onMetricsChange} onTabChange={setActiveTab} />}
+          {activeTab === 'waf' && <WAFTab onMetricsChange={onMetricsChange} />}
+          {activeTab === 'policy' && <PolicyTab onMetricsChange={onMetricsChange} />}
+          {activeTab === 'audit' && <AuditLogTab onMetricsChange={onMetricsChange} />}
+          {activeTab === 'isolationFlow' && <IsolationFlowTab onMetricsChange={onMetricsChange} />}
+          </React.Fragment>
         </div>
       </main>
     </div>
@@ -4223,7 +4252,7 @@ function PolicyToggle({ enabled, onChange }) {
   );
 }
 
-function PolicyTab() {
+function PolicyTab({ onMetricsChange }) {
   const [data, setData] = useState(null);
   const [policies, setPolicies] = useState([]);
   const [presets, setPresets] = useState([]);
@@ -4265,7 +4294,7 @@ function PolicyTab() {
         api.get('/ids/policy-violations?hours=24&limit=200'),
         api.get('/ids/policies'),
         api.get('/ids/policy-presets'),
-        api.get('/system').catch(() => ({ data: [] })),
+        api.get('/system', { skipCache: true }).catch(() => ({ data: [] })),
       ]);
       setData(eventsRes.data);
       setPolicies(policiesRes.data?.policies || []);
@@ -4279,6 +4308,7 @@ function PolicyTab() {
   }, []);
 
   useEffect(() => { load(); const t = setInterval(() => load(true), 30000); return () => clearInterval(t); }, [load]);
+  useTabMetric(onMetricsChange, 'policy', data && !error && !data.degraded ? data.total : null, 'Violations in 24h');
 
   const createPolicy = async e => {
     e.preventDefault();
@@ -4700,7 +4730,7 @@ function PolicyTab() {
   );
 }
 
-function AuditLogTab() {
+function AuditLogTab({ onMetricsChange }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -4711,6 +4741,10 @@ function AuditLogTab() {
     'Email Failed',
     'Reminder Sent',
     'Auto Isolation',
+    'Isolation Check',
+    'Threat Verification Passed',
+    'Threat Verification Deferred',
+    'Isolation Deferred',
     'Recovery Check',
     'Attack Still Active',
     'Isolation Again',
@@ -4734,8 +4768,8 @@ function AuditLogTab() {
         id: `audit-${event.id || event.ts}`,
         time: event.ts,
         action: event.action || 'User Actions',
-        category: ['Auto Isolation', 'Isolation Again', 'Isolation Completed'].includes(event.action) ? 'isolation'
-          : ['Recovery Check', 'Attack Still Active', 'Attack Cleared', 'Server Restored', 'Incident Closed'].includes(event.action) ? 'recovery'
+        category: ['Isolation Check', 'Isolation Deferred', 'Auto Isolation', 'Isolation Again', 'Isolation Completed', 'Isolation Pending', 'Isolation Failed'].includes(event.action) ? 'isolation'
+          : ['Recovery Check', 'Attack Still Active', 'Attack Cleared', 'Server Restored', 'Incident Closed', 'Recovery Pending', 'Recovery Failed'].includes(event.action) ? 'recovery'
             : ['Email Sent', 'Email Failed', 'Reminder Sent'].includes(event.action) ? 'email'
               : ['Manual Override Requested', 'Manual Override Cancelled', 'Checklist Submitted', 'Manual Override Approved'].includes(event.action) ? 'manual'
                 : event.action === 'Attack Detected' ? 'detect'
@@ -4768,6 +4802,7 @@ function AuditLogTab() {
     recovery: rows.filter(row => row.category === 'recovery').length,
     manual: rows.filter(row => row.category === 'manual').length,
   };
+  useTabMetric(onMetricsChange, 'audit', error || (loading && !rows.length) ? null : counts.total, 'Latest 500 audit events');
   const actionCounts = Object.fromEntries(auditActions.map(action => [
     action,
     rows.filter(row => row.action === action).length,
@@ -4778,7 +4813,7 @@ function AuditLogTab() {
       <div className="ids-policy-head">
         <div>
           <h3>Audit Log</h3>
-          <p>IDS/IPS detection, blocking, isolation, recovery, email, and manual-response audit events only.</p>
+          <p>Latest 500 IDS/IPS audit events across all dates: detection, blocking, isolation, recovery, email, and manual response.</p>
         </div>
         <div className="ids-policy-head-actions">
           <select value={filter} onChange={event => setFilter(event.target.value)}>
@@ -4793,7 +4828,7 @@ function AuditLogTab() {
         </div>
       </div>
 
-      <div className="ids-policy-kpis">
+      <div className="ids-policy-kpis ids-audit-kpis">
         {[
           ['Audit Events', counts.total, '#60a5fa', '📋', 'Engine audit trail'],
           ['Attack Detected', counts.detect, '#f59e0b', '🚨', 'Threats detected'],
@@ -4864,7 +4899,7 @@ function AuditLogTab() {
   );
 }
 
-function IsolationFlowTab() {
+function IsolationFlowTab({ onMetricsChange }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -4874,7 +4909,7 @@ function IsolationFlowTab() {
     if (!silent) setLoading(true);
     setError('');
     try {
-      const { data } = await api.get('/system');
+      const { data } = await api.get('/system', { skipCache: true });
       const nextRows = (Array.isArray(data) ? data : (data?.systems || []))
         .filter(system => system.isIsolated === true || ['pending', 'isolated', 'reconnecting', 'failed'].includes(system.isolationStatus))
         .map(system => ({
@@ -4887,6 +4922,8 @@ function IsolationFlowTab() {
           reason: system.isolationReason || 'Security isolation',
           error: system.isolationError || '',
           online: system.isOnline,
+          isIsolated: system.isIsolated === true,
+          canRestore: system.isIsolated === true || ['pending', 'failed'].includes(system.isolationStatus),
         }))
         .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
       setRows(nextRows);
@@ -4911,7 +4948,7 @@ function IsolationFlowTab() {
     const events = [
       'system:isolated', 'system:isolation_failed', 'system:reconnected',
       'system:reconnect_failed', 'ips:isolationPending', 'ips:isolated',
-      'ips:isolationFailed', 'ips:recovered',
+      'ips:isolationFailed', 'ips:isolationDeferred', 'ips:recovered',
     ];
     events.forEach(event => socket.on(event, refresh));
     const releaseSocket = connectSocket(socket);
@@ -4938,10 +4975,11 @@ function IsolationFlowTab() {
   const filtered = rows;
   const counts = {
     total: rows.length,
-    isolation: rows.filter(row => row.status === 'isolated').length,
+    isolation: rows.filter(row => row.isIsolated).length,
     pending: rows.filter(row => row.status === 'pending' || row.status === 'reconnecting').length,
     failed: rows.filter(row => row.status === 'failed').length,
   };
+  useTabMetric(onMetricsChange, 'isolationFlow', error || (loading && !rows.length) ? null : counts.total, 'Active workflows', counts.total > 0 ? 'Warning' : 'OK');
 
   return (
     <div className="ids-policy-page ids-audit-page">
@@ -4991,7 +5029,7 @@ function IsolationFlowTab() {
                     <td>{row.system}</td>
                     <td><code>{row.target}</code></td>
                     <td><small>{row.error || row.reason}</small></td>
-                    <td><button onClick={() => restore(row)} disabled={restoringId === row.id || row.status !== 'isolated'}>{restoringId === row.id ? 'Restoring…' : '🔓 Manual Unisolate'}</button></td>
+                    <td><button onClick={() => restore(row)} disabled={restoringId === row.id || !row.canRestore}>{restoringId === row.id ? 'Restoring…' : '🔓 Manual Unisolate'}</button></td>
                   </tr>
                 ))}
                 {!filtered.length && <tr><td colSpan="6"><Empty icon="✅" msg="No systems are currently isolated" /></td></tr>}
@@ -5007,7 +5045,7 @@ function IsolationFlowTab() {
 // ══════════════════════════════════════════════════════════════════════════════
 //  WAF TAB — Smart WAF status + blocked attacks
 // ══════════════════════════════════════════════════════════════════════════════
-function WAFTab() {
+function WAFTab({ onMetricsChange }) {
   const { user, company } = useAuth();
   const companyId = String(company?._id || user?.companyId?._id || user?.companyId || getCompanyIdFromStorage() || '');
   const WAF_WINDOW_HOURS = 24;
@@ -5319,6 +5357,7 @@ function WAFTab() {
   const protectedPorts = status?.totalPortsProtected ?? services.filter(s => !s.empty && s.alive && s.isWebMonitored).length;
   const listeningPorts = status?.totalListeningPorts ?? services.filter(s => !s.empty && s.alive).length;
   const blocked24h = status?.stats24h?.blocked ?? attacks.filter(a => a.blocked !== false).length;
+  useTabMetric(onMetricsChange, 'waf', err || !hasLoaded.current ? null : blocked24h, 'Blocked requests in 24h');
   const requests24h = status?.stats24h?.requests ?? status?.requests24h ?? status?.totalRequests24h ?? 0;
   const blockedPct = requests24h ? (blocked24h / requests24h) * 100 : 0;
   const agentHealth = activeAgents > 0 && (status?.agents || []).every(agent => agent.online !== false);

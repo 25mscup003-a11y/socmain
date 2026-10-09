@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Geolocation Anomaly Detection — canonical Capability ID: 23
  *
@@ -2278,7 +2279,9 @@ export function GeolocationAnomalyDashboardPanel({ alerts = [], loading = false,
         {activeTab === 'policy' ? (
           <GeoPolicyEngine companyId={companyId} onPoliciesChange={updatePolicies} />
         ) : activeTab === 'log-monitor' ? (
-          <GeoAnomalyLogMonitor alerts={rows} companyId={companyId} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={23} companyId={companyId}>
+            <GeoAnomalyLogMonitor alerts={rows} companyId={companyId} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <GeoAnomalyReportsTab alerts={rows} />
         ) : activeTab === 'dashboard' ? (

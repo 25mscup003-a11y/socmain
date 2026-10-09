@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * User & Authentication Monitoring — Capability ID: 4
  *
@@ -102,6 +103,32 @@ function alertHost(row) {
 
 function alertUser(row) {
   return row?.user || row?.username || row?.targetUser || row?.userName || row?.account || 'Not reported';
+}
+
+function authPid(row) {
+  const sources = [row, row?.rawEvent, row?.rawEvent?.raw, row?.raw, row?.raw?.raw];
+  for (const source of sources) {
+    for (const key of ['pid', 'processId', 'process_id', 'ProcessId', 'ProcessID', '_PID', 'SYSLOG_PID']) {
+      const value = source?.[key];
+      if (!['number', 'string'].includes(typeof value) || String(value).trim() === '') continue;
+      const pid = Number(value);
+      if (Number.isSafeInteger(pid) && pid >= 0) return pid;
+    }
+  }
+  // Older events retain the OS log even when no structured PID was sent.
+  // Match the syslog header or a Windows process field, never a command's text.
+  for (const source of sources) {
+    for (const key of ['full_log', 'raw_log']) {
+      const line = source?.[key];
+      if (typeof line !== 'string') continue;
+      const match = line.match(/^(?:<\d+>)?(?:(?:[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}T\S+)\s+)?(?:[^\s:]+\s+)?[\w./()-]+\[(\d+)\]:/)
+        || line.match(/(?:^|\r?\n)[ \t]*(?:Caller )?Process[ _]?Id[ \t]*[:=][ \t]*(0x[0-9a-f]+|\d+)(?=\s|$)/i);
+      if (!match) continue;
+      const pid = Number(match[1]);
+      if (Number.isSafeInteger(pid) && pid >= 0) return pid;
+    }
+  }
+  return null;
 }
 
 function alertStatus(row) {
@@ -726,27 +753,24 @@ function UserAuthLogMonitor({ alerts = [] }) {
           <b style={{ fontSize: 12, color: '#fff' }}>📜 User & Authentication Telemetry SIEM Logs ({filtered.length})</b>
           <span style={{ fontSize: 10, color: MON.green }}>● Live 15s Refresh</span>
         </div>
-        <div style={{ minWidth: 1450 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1.2fr 1.2fr 1fr 90px 90px 90px', gap: 8, padding: '8px 12px', background: MON.card2, color: MON.muted, fontSize: 10, fontWeight: 800 }}>
-            <span>Target User Account</span><span>Host / OS</span><span>Source IP</span><span>Auth Method & Event</span><span>Logon Status</span><span>Severity</span><span>Time</span><span>Actions</span>
+        <div style={{ minWidth: 1100 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 64px 1.2fr 1.2fr 1fr 90px 90px 90px', gap: 6, padding: '8px 12px', background: MON.card2, color: MON.muted, fontSize: 10, fontWeight: 800 }}>
+            <span>Host / OS</span><span>PID</span><span>Source IP</span><span>Auth Method & Event</span><span>Logon Status</span><span>Severity</span><span>Time</span><span>Actions</span>
           </div>
           <div style={{ maxHeight: 440, overflowY: 'auto' }}>
             {filtered.length ? filtered.map(row => (
-              <div key={recordId(row)} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1.2fr 1.2fr 1fr 90px 90px 90px', gap: 8, padding: '10px 12px', borderTop: `1px solid ${MON.line}`, fontSize: 10, alignItems: 'center' }}>
-                <div>
-                  <b style={{ color: MON.cyan, cursor: 'pointer', display: 'block' }} onClick={() => setSelectedLog(row)}>{alertUser(row)}</b>
-                  <span style={{ fontSize: 9, color: MON.sub }}>{row.userGroup || 'Domain User'}</span>
-                </div>
-                <div>
+              <div key={recordId(row)} style={{ display: 'grid', gridTemplateColumns: '120px 64px 1.2fr 1.2fr 1fr 90px 90px 90px', gap: 6, padding: '10px 12px', borderTop: `1px solid ${MON.line}`, fontSize: 10, alignItems: 'center' }}>
+                <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                   <b style={{ color: '#fff', display: 'block' }}>{alertHost(row)}</b>
                   {processOs(row) !== 'Unknown' && <span style={{ fontSize: 9, color: MON.muted }}>{processOs(row)}</span>}
                 </div>
+                <span title={authPid(row) === null ? 'This event has no process ID in its telemetry.' : 'Process ID reported with this event'} style={{ fontFamily: 'monospace', color: MON.purple }}>{authPid(row) ?? '—'}</span>
                 <div>
                   <b style={{ color: MON.green, display: 'block' }}>Source IP: {authSrcIp(row)}</b>
                 </div>
                 <div>
-                  <b style={{ color: MON.purple, display: 'block' }}>{authTypeMethod(row)}</b>
-                  <span style={{ fontSize: 9, color: MON.sub }}>{authEventCode(row)}</span>
+                  {authTypeMethod(row) !== 'Not reported' && <b style={{ color: MON.purple, display: 'block' }}>{authTypeMethod(row)}</b>}
+                  {authEventCode(row) !== 'Not reported' && <span style={{ fontSize: 9, color: MON.sub }}>{authEventCode(row)}</span>}
                 </div>
                 <b style={{ color: alertStatus(row).toLowerCase().includes('fail') ? MON.red : MON.green }}>{alertStatus(row)}</b>
                 <span style={{ background: SEV_BG[alertSeverity(row)] || SEV_BG.low, color: SEV_COLOR[alertSeverity(row)] || MON.green, padding: '2px 6px', borderRadius: 4, fontWeight: 900, textTransform: 'uppercase', textAlign: 'center' }}>
@@ -1602,7 +1626,9 @@ export function UserAuthDashboard({ alerts = [], loading = false, total = 0, rec
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <UserAuthLogMonitor alerts={alerts} />
+          <CapabilityLogsPanel capabilityId={4}>
+            <UserAuthLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={4} alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

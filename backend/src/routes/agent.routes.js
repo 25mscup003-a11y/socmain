@@ -546,6 +546,22 @@ router.post('/certificate/enroll', async (req, res) => {
   }
 });
 
+// A signed agent may request a decision only for its authenticated company/system.
+router.post('/network-response/check', async (req, res) => {
+  try {
+    const auth = await verifySignedAgentRequest(req, { agentKey: req.body.agent_key });
+    if (!auth.ok) return res.status(auth.status).json({ allowed: false, message: auth.message });
+    const result = await require('../services/networkResponseVerification.service').checkNetworkResponse({
+      ip: req.body.ip, action: req.body.action, startedAt: req.body.startedAt,
+      companyId: auth.system.companyId, system: auth.system,
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(result);
+  } catch {
+    return res.status(503).json({ allowed: false, reason: 'Network response verification unavailable' });
+  }
+});
+
 // Derive a per-agent AES-256 key from a server-only master secret. The key is
 // returned only over an authenticated, replay-protected agent request and is
 // never embedded in an installer or persisted in agent configuration.
@@ -906,7 +922,7 @@ router.post('/heartbeat', async (req, res) => {
           // replaced. Keep update commands durable until the restarted build
           // proves completion with its embedded update_request_id.
           if (command === 'update') continue;
-          await recordAgentCommandResult({
+          const acknowledgedSystem = await recordAgentCommandResult({
             systemId: system._id,
             commandId: String(result.commandId),
             command,
@@ -916,8 +932,9 @@ router.post('/heartbeat', async (req, res) => {
           }, req.app.get('io'));
           // Keep this heartbeat response consistent with the state just
           // acknowledged above; `system` was read before result processing.
-          if (result.ok === true && command === 'isolate') system.isIsolated = true;
-          if (result.ok === true && command === 'reconnect') system.isIsolated = false;
+          if (acknowledgedSystem && ['isolate', 'reconnect'].includes(command)) {
+            system.isIsolated = acknowledgedSystem.isIsolated === true;
+          }
         }
       }
     }
@@ -1086,10 +1103,13 @@ router.post('/heartbeat', async (req, res) => {
     // Keep the update command durable for final version confirmation, but do
     // not launch another detached installer on each heartbeat while the first
     // one is already downloading/installing.
-    const pendingCommands = (commandQueue?.pendingCommands || []).filter(command => (
+    const pendingCommands = await require('../services/ipsIsolationGuard.service').filterDeliverableCommands({
+      companyId: company._id, systemId: system._id,
+      commands: (commandQueue?.pendingCommands || []).filter(command => (
       command?.command !== 'update'
       || !['downloading', 'installing'].includes(responseUpdateStatus)
-    ));
+      )),
+    });
     const usbPolicies = await UsbPolicy.find({
       companyId: company._id,
       enabled: true,

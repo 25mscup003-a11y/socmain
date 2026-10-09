@@ -398,6 +398,7 @@ class WindowsProcessEventCollector:
                 if alert.get('rule_id') == 'PROC_DNS_QUERY' and callable(self._on_dns_query):
                     try:
                         self._on_dns_query(alert.get('domain'), {
+                            'query_results': alert.get('query_results'),
                             'process_name': alert.get('process_name'),
                             'pid': alert.get('pid'),
                             'parent_pid': alert.get('parent_pid'),

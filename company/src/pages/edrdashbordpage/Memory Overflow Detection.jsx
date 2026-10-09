@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Memory Overflow Detection — canonical capability ID 29
  *
@@ -1334,7 +1335,9 @@ export default function MemoryOverflowDashboard({ alerts: sourceAlerts = [], loa
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
 
         {activeTab === 'log-monitor' ? (
-          <MemoryOverflowLogMonitor alerts={alerts} memoryMetrics={memoryMetrics} />
+          <CapabilityLogsPanel capabilityId={29}>
+            <MemoryOverflowLogMonitor alerts={alerts} memoryMetrics={memoryMetrics} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <MemoryOverflowReportsTab alerts={alerts} />
         ) : activeTab === 'rules' ? (

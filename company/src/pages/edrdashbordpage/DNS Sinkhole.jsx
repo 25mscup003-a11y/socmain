@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * DNS Sinkhole Monitoring — product module 38 / canonical EDR capability ID 31
  *
@@ -1619,7 +1620,9 @@ export default function DnsSinkholeMonitoringDashboard({ alerts: initialAlerts =
         {apiError && <div style={{ color: MON.yellow, background: `${MON.yellow}12`, border: `1px solid ${MON.yellow}44`, borderRadius: 7, padding: '8px 12px', fontSize: 10 }}>{apiError}</div>}
 
         {activeTab === 'log-monitor' ? (
-          <DnsLogMonitor alerts={alerts} />
+          <CapabilityLogsPanel capabilityId={31}>
+            <DnsLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'configure' ? (
           <DnsSinkholeSetupContent embedded />
         ) : activeTab === 'reports' ? (

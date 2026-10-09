@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Behavioral Analytics (UEBA - User & Entity Behavior Analytics) — Capability ID: 11
  *
@@ -1470,7 +1471,9 @@ export function UebaDashboardPanel({ alerts = [], loading = false, total = 0, re
         {activeTab === 'baseline' ? (
           <Ueba30DayBaselineTab />
         ) : activeTab === 'log-monitor' ? (
-          <UebaLogMonitor alerts={rows} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={11}>
+            <UebaLogMonitor alerts={rows} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <UebaReportsTab alerts={rows} />
         ) : activeTab === 'dashboard' ? (

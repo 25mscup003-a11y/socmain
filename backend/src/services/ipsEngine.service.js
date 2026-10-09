@@ -1,19 +1,11 @@
 /**
  * ipsEngine.service.js — IPS Decision Engine
  * ============================================
- * Strict Architecture:
- *   IDS → emits alert event → IPS Engine evaluates → IPS Server blocks/isolates
- *
- * IDS NEVER blocks directly. This engine is the sole arbiter of blocking.
- *
- * Lifecycle for each detected threat:
- *  1. IDS alert received (high/critical severity)
- *  2. IPS Engine queues auto-block attempt
- *  3. Auto-block attempted → success: mark "Blocked (Auto)"
- *             → fail: retry up to MAX_RETRIES
- *  4. If all retries fail → mark "Block Failed", trigger isolation
- *  5. Isolation = Alert Phase (0–5min reminders) → Auto-isolation via IPS
- *  6. Recovery (manual or auto after 20min recovery timer)
+ * Policy/TI decisions use the full retry and isolation lifecycle here.
+ * Severity-only, SOAR and threat-feed callers may use ips.service directly.
+ * Block confirmation requires a firewall result or endpoint ACK. Three failed
+ * attempts trigger fresh-threat verification before isolation; successful blocks only escalate when
+ * IPS_ISOLATE_AFTER_SUCCESSFUL_BLOCK is enabled. Recovery uses a durable sweep.
  */
 
 const http       = require('http');
@@ -22,6 +14,7 @@ const System     = require('../models/System.model');
 const User       = require('../models/User.model');
 const Alert      = require('../models/Alert.model');
 const IpsAuditEvent = require('../models/IpsAuditEvent.model');
+const isolationGuard = require('./ipsIsolationGuard.service');
 const { listAttackTypes, resolveAttackType } = require('../constants/idsIpsCapabilities');
 
 const IPS_URL    = process.env.IPS_WEBHOOK_URL    || 'http://localhost:5050';
@@ -54,6 +47,7 @@ const incidents = new Map();
 const auditEvents = [];
 const MAX_AUDIT_EVENTS = 1000;
 let autoRecoverySweepTimer = null;
+let autoRecoveryStartupTimer = null;
 let autoRecoverySweepRunning = false;
 
 async function _persistAudit(event) {
@@ -109,6 +103,10 @@ function _audit(action, incOrPayload = {}, detail = '', persist = true) {
   return event;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
+
 // ── Email transport ───────────────────────────────────────────────────────────
 let _transporter = null;
 function _getTransporter() {
@@ -132,12 +130,16 @@ async function _sendEmail({ to, subject, html }) {
     return false;
   }
   try {
-    await _getTransporter().sendMail({
+    const result = await _getTransporter().sendMail({
       from: process.env.SMTP_FROM || process.env.SMTP_USER,
       to: recipients,
       subject,
-      html: html || `<pre>${subject}</pre>`,
+      html: html || `<pre>${escapeHtml(subject)}</pre>`,
     });
+    if (result.rejected?.length || (Array.isArray(result.accepted) && !result.accepted.length)) {
+      console.warn(`[IPS Engine] SMTP did not accept every recipient for: ${subject}`);
+      return false;
+    }
     console.log(`[IPS Engine] Email sent to ${Array.isArray(recipients) ? recipients.join(', ') : recipients}: ${subject}`);
     return true;
   } catch (err) {
@@ -187,8 +189,8 @@ function _ipsRequest(body) {
 }
 
 // ── Incident key ──────────────────────────────────────────────────────────────
-function _key(companyId, srcIp, attackType) {
-  return `${companyId}|${srcIp}|${attackType}`;
+function _key(companyId, srcIp, attackType, systemId = null) {
+  return `${companyId}|${systemId || "unassigned"}|${srcIp}|${attackType}`;
 }
 
 async function _resolveAdminRecipients({ companyId, systemId = null, fallback = null }) {
@@ -236,7 +238,16 @@ async function _resolveAdminRecipients({ companyId, systemId = null, fallback = 
 }
 
 // ── HTML email templates ──────────────────────────────────────────────────────
+function safeTemplateIncident(inc) {
+  const safe = { ...inc };
+  for (const key of ['attackType', 'srcIp', 'severity', 'incidentId', 'failureReason']) {
+    safe[key] = escapeHtml(inc[key] || '');
+  }
+  return safe;
+}
+
 function _alertTpl(inc, remaining) {
+  inc = safeTemplateIncident(inc);
   const elapsed = Math.round((Date.now() - inc.startedAt) / 1000);
   return {
     subject: `🚨 ATTACK ALERT [${inc.severity?.toUpperCase()}]: ${inc.attackType} from ${inc.srcIp}`,
@@ -253,11 +264,11 @@ function _alertTpl(inc, remaining) {
       <tr><td style="padding:8px;color:#94a3b8">Severity</td><td style="padding:8px;color:#f59e0b;font-weight:bold;text-transform:uppercase">${inc.severity}</td></tr>
       <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Block Status</td><td style="padding:8px;color:${inc.blockStatus==='failed'?'#f87171':'#34d399'}">${inc.blockStatus==='failed'?'❌ Block Failed — retries exhausted':'✅ Block Applied'}</td></tr>
       <tr><td style="padding:8px;color:#94a3b8">Elapsed</td><td style="padding:8px;color:#fbbf24">${elapsed}s since detection</td></tr>
-      <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Auto-isolate in</td><td style="padding:8px;color:#ef4444;font-weight:bold">${Math.max(0,remaining)}s</td></tr>
+      <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Isolation check in</td><td style="padding:8px;color:#ef4444;font-weight:bold">${Math.max(0,remaining)}s</td></tr>
     </table>
     <div style="margin-top:20px;padding:16px;background:#1a0a0e;border-radius:8px;border-left:4px solid #f59e0b">
       <p style="margin:0;color:#fbbf24;font-weight:bold">⚠️ Action Required</p>
-      <p style="margin:8px 0 0;color:#94a3b8">No administrator action has been detected. Automatic isolation will begin after 5 minutes if the attack remains active. Remaining: <strong style="color:#ef4444">${Math.max(0,remaining)}s</strong>.</p>
+      <p style="margin:8px 0 0;color:#94a3b8">No administrator action has been detected. Automatic isolation requires a fresh ongoing threat and a recent endpoint heartbeat after the configured response window. Remaining: <strong style="color:#ef4444">${Math.max(0,remaining)}s</strong>.</p>
     </div>
   </div>
 </div>`,
@@ -265,21 +276,22 @@ function _alertTpl(inc, remaining) {
 }
 
 function _blockFailedTpl(inc, retries) {
+  inc = safeTemplateIncident(inc);
   return {
     subject: `❌ BLOCK FAILED: ${inc.attackType} from ${inc.srcIp} — ${retries} retries exhausted`,
     html: `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a0e1a;color:#e2e8f0;border-radius:12px;border:2px solid #f97316;overflow:hidden">
   <div style="background:#7c2d12;padding:20px;text-align:center">
     <h1 style="margin:0;color:#fff;font-size:22px">❌ BLOCK FAILED</h1>
-    <p style="margin:4px 0 0;color:#fed7aa;font-size:13px">IPS retry exhausted — Isolation triggered</p>
+    <p style="margin:4px 0 0;color:#fed7aa;font-size:13px">IPS retry exhausted — Isolation checks required</p>
   </div>
   <div style="padding:24px">
     <p style="color:#fb923c">The IPS server failed to block <strong>${inc.srcIp}</strong> after <strong>${retries} attempts</strong>.</p>
     <p style="color:#94a3b8">Reason: ${inc.failureReason || 'Unknown firewall error'}</p>
     <p style="color:#94a3b8">Attack Type: ${inc.attackType}</p>
     <div style="margin-top:16px;padding:16px;background:#1a0f0a;border-radius:8px;border-left:4px solid #ef4444">
-      <p style="margin:0;color:#f87171;font-weight:bold">🔒 Isolation Triggered</p>
-      <p style="margin:8px 0 0;color:#94a3b8">The system will be isolated after the 5 minute response window if no admin action is taken.</p>
+      <p style="margin:0;color:#f87171;font-weight:bold">🔎 Isolation Verification</p>
+      <p style="margin:8px 0 0;color:#94a3b8">Automatic isolation will only be requested if fresh ongoing threat activity, endpoint heartbeat and allow-rule checks pass. Missing block acknowledgement alone will not isolate an endpoint. A separate notification follows endpoint confirmation.</p>
     </div>
   </div>
 </div>`,
@@ -287,24 +299,25 @@ function _blockFailedTpl(inc, retries) {
 }
 
 function _isolatedTpl(inc, reason = 'auto') {
+  inc = safeTemplateIncident(inc);
   return {
     subject: `🔒 SYSTEM ${reason === 'auto' ? 'AUTO-' : 'MANUALLY '}ISOLATED — ${inc.attackType} from ${inc.srcIp}`,
     html: `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a0e1a;color:#e2e8f0;border-radius:12px;border:2px solid #ef4444;overflow:hidden">
   <div style="background:#7f1d1d;padding:20px;text-align:center">
     <h1 style="margin:0;color:#fff;font-size:22px">🔒 SYSTEM ${reason === 'auto' ? 'AUTO-' : 'MANUALLY '}ISOLATED</h1>
-    <p style="margin:4px 0 0;color:#fca5a5;font-size:13px">${reason === 'auto' ? 'No admin response within 5 minutes' : 'Admin manually isolated'}</p>
+    <p style="margin:4px 0 0;color:#fca5a5;font-size:13px">${reason === 'auto' ? 'Automatic IPS response confirmed by endpoint' : 'Admin isolation confirmed by endpoint'}</p>
   </div>
   <div style="padding:24px">
     <table style="width:100%;border-collapse:collapse">
       <tr><td style="padding:8px;color:#94a3b8">Attack Type</td><td style="padding:8px;color:#f87171;font-weight:bold">${inc.attackType}</td></tr>
       <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Source IP</td><td style="padding:8px;color:#60a5fa;font-family:monospace">${inc.srcIp}</td></tr>
       <tr><td style="padding:8px;color:#94a3b8">Isolated At</td><td style="padding:8px;color:#e2e8f0">${new Date().toLocaleString()}</td></tr>
-      <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Next Recovery Check</td><td style="padding:8px;color:#fbbf24">20 minutes after isolation</td></tr>
+      <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Next Recovery Check</td><td style="padding:8px;color:#fbbf24">${Math.round(AUTO_RECOVER_DELAY_MS / 60000)} minutes after isolation</td></tr>
     </table>
     <div style="margin-top:16px;padding:16px;background:#0d2a1e;border-radius:8px;border-left:4px solid #22c55e">
       <p style="margin:0;color:#34d399;font-weight:bold">Recovery Steps</p>
-      <p style="margin:8px 0 0;color:#94a3b8">Login → SOC4 Dashboard → IDS/IPS → Blocklist → Unblock the entry</p>
+      <p style="margin:8px 0 0;color:#94a3b8">Dashboard → IPS → Isolation Flow → Manual Unisolate</p>
     </div>
   </div>
 </div>`,
@@ -312,42 +325,21 @@ function _isolatedTpl(inc, reason = 'auto') {
 }
 
 function _recoveredTpl(inc, reason = 'auto') {
+  inc = safeTemplateIncident(inc);
   return {
-    subject: `✅ SYSTEM RESTORED — ${inc.attackType} from ${inc.srcIp} resolved`,
+    subject: `✅ SYSTEM RESTORED — ${inc.attackType} from ${inc.srcIp}`,
     html: `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a0e1a;color:#e2e8f0;border-radius:12px;border:2px solid #22c55e;overflow:hidden">
   <div style="background:#14532d;padding:20px;text-align:center">
     <h1 style="margin:0;color:#fff;font-size:22px">✅ SYSTEM RESTORED</h1>
-    <p style="margin:4px 0 0;color:#bbf7d0;font-size:13px">${reason === 'manual' ? 'Admin manually recovered' : 'Attack subsided — auto-recovered'}</p>
+    <p style="margin:4px 0 0;color:#bbf7d0;font-size:13px">${reason === 'manual' ? 'Admin manually recovered' : 'Quiet-window checks passed — endpoint reconnection confirmed'}</p>
   </div>
   <div style="padding:24px">
-    <p style="color:#34d399">The system has been restored to normal operation.</p>
+    <p style="color:#34d399">The endpoint confirmed removal of network isolation. IP blocking is managed separately.</p>
     <table style="width:100%;border-collapse:collapse">
       <tr><td style="padding:8px;color:#94a3b8">Attack</td><td style="padding:8px;color:#f87171">${inc.attackType}</td></tr>
       <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Source IP</td><td style="padding:8px;color:#60a5fa;font-family:monospace">${inc.srcIp}</td></tr>
-      <tr><td style="padding:8px;color:#94a3b8">Recovery</td><td style="padding:8px;color:#34d399">${reason === 'manual' ? 'Admin Intervention' : 'Auto-recovery (20 minute verification)'}</td></tr>
-    </table>
-  </div>
-</div>`,
-  };
-}
-
-function _stillActiveTpl(inc) {
-  return {
-    subject: `⚠ ATTACK STILL ACTIVE – RE-ISOLATION INITIATED — ${inc.attackType}`,
-    html: `
-<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a0e1a;color:#e2e8f0;border-radius:12px;border:2px solid #f97316;overflow:hidden">
-  <div style="background:#7c2d12;padding:20px;text-align:center">
-    <h1 style="margin:0;color:#fff;font-size:22px">⚠ ATTACK STILL ACTIVE</h1>
-    <p style="margin:4px 0 0;color:#fed7aa;font-size:13px">Re-isolation initiated after recovery verification</p>
-  </div>
-  <div style="padding:24px">
-    <p style="color:#fb923c">The 20 minute recovery timer completed, but attack activity was still observed.</p>
-    <table style="width:100%;border-collapse:collapse">
-      <tr><td style="padding:8px;color:#94a3b8">Incident ID</td><td style="padding:8px;color:#e2e8f0">${inc.incidentId}</td></tr>
-      <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Attack</td><td style="padding:8px;color:#f87171">${inc.attackType}</td></tr>
-      <tr><td style="padding:8px;color:#94a3b8">Source IP</td><td style="padding:8px;color:#60a5fa;font-family:monospace">${inc.srcIp}</td></tr>
-      <tr style="background:#0f172a"><td style="padding:8px;color:#94a3b8">Next Recovery Check</td><td style="padding:8px;color:#fbbf24">20 minutes</td></tr>
+      <tr><td style="padding:8px;color:#94a3b8">Recovery</td><td style="padding:8px;color:#34d399">${reason === 'manual' ? 'Admin Intervention' : `Auto-recovery (${Math.round(AUTO_RECOVER_DELAY_MS / 60000)} minute verification)`}</td></tr>
     </table>
   </div>
 </div>`,
@@ -355,9 +347,8 @@ function _stillActiveTpl(inc) {
 }
 
 // ── Core: Attempt to block via IPS (single attempt) ──────────────────────────
-// Returns normally  → block succeeded (DB saved)     → NO isolation
-// Throws an Error   → block truly failed (DB error, invalid IP) → _blockWithRetry
-//                     counts this attempt; after MAX_RETRIES fails → isolation
+// Requires firewall enforcement or an endpoint ACK. Pending commands retry;
+// exhausted retries request isolation. A whitelist match bypasses escalation.
 async function _attemptBlock(srcIp, attackType, companyId, reason, source = 'Auto', systemId = null) {
   let IpsService;
   try { IpsService = require('./ips.service'); } catch (_) { IpsService = null; }
@@ -370,6 +361,7 @@ async function _attemptBlock(srcIp, attackType, companyId, reason, source = 'Aut
       blockedBy: source === 'Manual' ? 'analyst' : 'auto',
       systemId,
     });
+    if (result?.whitelisted || result?.tiDeferred) return result;
 
     // ❌ Private or invalid IP — hard failure, throw so caller counts this attempt
     if (result?.reason === 'private/invalid IP') {
@@ -377,7 +369,7 @@ async function _attemptBlock(srcIp, attackType, companyId, reason, source = 'Aut
     }
 
     // A DB record is only an audit trail.  A successful attempt requires a
-    // real enforcement acknowledgement; otherwise retry and eventually isolate.
+    // real enforcement acknowledgement; otherwise retry, then verify whether isolation is justified.
     if (isAcceptedBlockResult(result)) {
       return result;
     }
@@ -385,7 +377,8 @@ async function _attemptBlock(srcIp, attackType, companyId, reason, source = 'Aut
     throw new Error(result?.webhook?.error || result?.reason || 'firewall enforcement was not acknowledged');
   }
 
-  // Fallback: direct webhook if ips.service unavailable
+  if (source !== 'Manual') return { ok: false, tiDeferred: true, reason: 'Automatic response service unavailable; verification cannot be bypassed' };
+  // Explicit manual fallback only.
   return _ipsRequest({
     action:     'block',
     ip:         srcIp,
@@ -396,22 +389,7 @@ async function _attemptBlock(srcIp, attackType, companyId, reason, source = 'Aut
   });
 }
 
-// ── Core: Attempt to unblock via IPS ─────────────────────────────────────────
-async function _attemptUnblock(srcIp, companyId) {
-  try {
-    const IpsService = require('./ips.service');
-    if (IpsService?.unblockIP) {
-      return IpsService.unblockIP({ ip: srcIp, companyId, reason: 'IPS incident recovery' });
-    }
-  } catch (_) { /* direct webhook fallback below */ }
-  return _ipsRequest({
-    action:  'unblock',
-    ip:      srcIp,
-    company: companyId,
-  });
-}
-
-async function _queueEndpointCommand(inc, command, reason) {
+async function _queueEndpointCommand(inc, command, reason, options = {}) {
   if (!inc?.systemId) {
     _audit('User Actions', inc, `Endpoint ${command} skipped: no target system was associated with this IDS alert`);
     return { queued: 0, confirmed: false, status: 'no-target' };
@@ -424,13 +402,14 @@ async function _queueEndpointCommand(inc, command, reason) {
     reason: reason || inc.description || inc.attackType,
     srcIp: inc.srcIp,
     attackType: inc.attackType,
+    ...options,
   });
   if (!delivery.queued && delivery.status === 'no-target') {
     _audit('User Actions', inc, `Endpoint ${command} skipped: target system was not found or inactive`);
     return delivery;
   }
   _audit('User Actions', inc,
-    `Endpoint ${command} ${delivery.confirmed ? 'confirmed by agent' : 'queued for agent heartbeat'}`,
+    `Endpoint ${command} ${delivery.confirmed ? 'confirmed by agent' : delivery.status === 'deferred' ? 'deferred by safety checks' : delivery.status === 'failed' ? 'failed' : 'queued for agent heartbeat'}`,
   );
   return delivery;
 }
@@ -452,19 +431,24 @@ async function handleDetection({ companyId, srcIp, attackType, severity, adminEm
   attackType = resolveCanonicalAttackType(attackType, description);
   const notificationEmails = await _resolveAdminRecipients({ companyId, systemId, fallback: adminEmail });
 
-  const incidentId = _key(companyId, srcIp, attackType);
+  const incidentId = _key(companyId, srcIp, attackType, systemId);
 
   // De-duplicate: if already handling this incident, just touch last-seen
   if (incidents.has(incidentId)) {
     const existing = incidents.get(incidentId);
-    existing.lastSeen = Date.now();
-    if (!existing.systemId && systemId) existing.systemId = systemId;
-    existing.adminEmail = [...new Set([
-      ...(Array.isArray(existing.adminEmail) ? existing.adminEmail : [existing.adminEmail].filter(Boolean)),
-      ...notificationEmails,
-    ])];
-    console.log(`[IPS Engine] Incident already active: ${incidentId}`);
-    return existing;
+    if (existing.phase === 'verification_deferred' || (existing.phase === 'blocked' && existing.blockExpiresAt && new Date(existing.blockExpiresAt).getTime() <= Date.now())) {
+      incidents.delete(incidentId);
+    } else {
+      existing.lastSeen = Date.now();
+      if (!existing.systemId && systemId) existing.systemId = systemId;
+      existing.adminEmail = [...new Set([
+        ...(Array.isArray(existing.adminEmail) ? existing.adminEmail : [existing.adminEmail].filter(Boolean)),
+        ...notificationEmails,
+      ])];
+      if (existing.phase === 'isolation_deferred') await _autoIsolate(incidentId);
+      console.log(`[IPS Engine] Incident already active: ${incidentId}`);
+      return existing;
+    }
   }
 
   const incident = {
@@ -505,6 +489,7 @@ async function _blockWithRetry(incidentId) {
   if (!inc || inc.phase === 'recovered') return;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    if (inc.phase !== 'blocking' || incidents.get(incidentId) !== inc) return;
     inc.blockAttempts = attempt;
     inc.blockStatus   = 'pending';
 
@@ -517,6 +502,21 @@ async function _blockWithRetry(incidentId) {
         'Auto',
         inc.systemId,
       );
+      if (inc.phase !== 'blocking' || incidents.get(incidentId) !== inc) return;
+      if (result?.whitelisted) {
+        inc.phase = 'bypassed';
+        inc.blockStatus = 'skipped';
+        _audit('Block Bypassed', inc, result.reason || 'Active whitelist matched; isolation skipped');
+        incidents.delete(incidentId);
+        return;
+      }
+      if (result?.tiDeferred) {
+        inc.phase = 'verification_deferred';
+        inc.blockStatus = 'skipped';
+        inc.failureReason = result.reason;
+        _audit('Threat Verification Deferred', inc, result.reason);
+        return;
+      }
 
       const alreadyBlocked = result?.note === 'already blocked' || result?.reason === 'already blocked';
       // Success is an enforcement acknowledgement, never merely a DB record.
@@ -530,6 +530,7 @@ async function _blockWithRetry(incidentId) {
       inc.blockStatus = 'success';
       inc.phase = ISOLATE_AFTER_SUCCESSFUL_BLOCK ? 'alerting' : 'blocked';
       inc.blockedAt = Date.now();
+      inc.blockExpiresAt = result.expiresAt || null;
       _audit('User Actions', inc,
         `IPS block recorded on attempt ${attempt}/${MAX_RETRIES}` +
         (webhookOk || agentAccepted ? '' : ' (no firewall acknowledgement)'),
@@ -559,12 +560,13 @@ async function _blockWithRetry(incidentId) {
       if (ISOLATE_AFTER_SUCCESSFUL_BLOCK) {
         _startAlertPhase(incidentId);
       } else {
-        _audit('Attack Cleared', inc,
+        _audit('Block Confirmed', inc,
           'IP block applied successfully. Endpoint isolation skipped.',
         );
       }
       return; // ← exit loop on first success
     } catch (err) {
+      if (inc.phase !== 'blocking' || incidents.get(incidentId) !== inc) return;
       // Only a real exception (e.g. private IP, DB write failure) counts as failure
       console.error(`[IPS Engine] ❌ Block attempt ${attempt}/${MAX_RETRIES} truly failed: ${err.message}`);
       inc.failureReason = err.message;
@@ -575,6 +577,8 @@ async function _blockWithRetry(incidentId) {
       }
     }
   }
+
+  if (inc.phase !== 'blocking' || incidents.get(incidentId) !== inc) return;
 
   // All retries truly exhausted (e.g. private IP, DB unreachable)
   console.error(`[IPS Engine] 💀 All ${MAX_RETRIES} block attempts truly failed for ${incidentId}`);
@@ -597,7 +601,7 @@ async function _blockWithRetry(incidentId) {
     _audit(sent ? 'Email Sent' : 'Email Failed', inc, `Block failed notification ${sent ? 'sent' : 'failed'} to ${_recipientLabel(inc.adminEmail)}`);
   }
 
-  // User policy: after exactly three unsuccessful enforcement attempts, isolate.
+  // Missing enforcement ACK alone is insufficient evidence for isolation.
   await _autoIsolate(incidentId);
 }
 
@@ -621,10 +625,10 @@ function _startAlertPhase(incidentId) {
 
     const remaining = Math.round(Math.max(0, AUTO_ISOLATE_DELAY_MS - (Date.now() - current.startedAt)) / 1000);
     if (current.adminEmail) {
-      _audit('Reminder Sent', current, `Reminder sent. Auto-isolate in ${remaining}s`);
       _sendEmail({ to: current.adminEmail, ..._alertTpl(current, remaining) })
         .then(sent => {
-          if (!sent) _audit('Email Failed', current, `Reminder email failed to ${_recipientLabel(current.adminEmail)}`);
+          _audit(sent ? 'Reminder Sent' : 'Email Failed', current,
+            `Reminder ${sent ? 'accepted by SMTP' : 'failed/skipped'} to ${_recipientLabel(current.adminEmail)}. Isolation check in ${remaining}s`);
         });
     }
   }, ALERT_INTERVAL_MS);
@@ -634,7 +638,7 @@ function _startAlertPhase(incidentId) {
   const autoIsolateTimer = setTimeout(() => {
     const current = incidents.get(incidentId);
     if (!current || current.manuallyIsolated || current.phase !== 'alerting') return;
-    _autoIsolate(incidentId);
+    return _autoIsolate(incidentId);
   }, AUTO_ISOLATE_DELAY_MS);
   inc.timers.push(autoIsolateTimer);
 }
@@ -673,16 +677,25 @@ async function _confirmIsolation(inc, reason = 'auto') {
     const sent = await _sendEmail({ to: inc.adminEmail, ..._isolatedTpl(inc, reason) });
     _audit(sent ? 'Email Sent' : 'Email Failed', inc, `Isolation notification ${sent ? 'sent' : 'failed'} to ${_recipientLabel(inc.adminEmail)}`);
   }
-  _scheduleAutoRecovery(inc.incidentId);
+  // Recovery is driven exclusively by the durable, database-backed sweep.
   return inc;
 }
 
 async function _autoIsolate(incidentId) {
   const inc = incidents.get(incidentId);
-  if (!inc) return;
-
-  console.log(`[IPS Engine] 🔒 AUTO-ISOLATING: ${incidentId}`);
-  _audit('Auto Isolation', inc, 'Automatic isolation started');
+  if (!inc || inc.manuallyRecovered || inc.manuallyIsolated || !['blocking', 'alerting', 'isolation_deferred'].includes(inc.phase)) return;
+  inc.phase = 'isolation_checking';
+  _audit('Isolation Check', inc, 'Checking fresh threat, endpoint heartbeat, allow rules and block acknowledgement');
+  const decision = await isolationGuard.checkAutoIsolation({ ...inc,
+    requireUnconfirmedBlock: !ISOLATE_AFTER_SUCCESSFUL_BLOCK });
+  if (incidents.get(incidentId) !== inc || inc.phase !== 'isolation_checking') return inc;
+  if (!ISOLATE_AFTER_SUCCESSFUL_BLOCK && (inc.blockStatus === 'success' || inc.agentBlockStatus === 'confirmed')) {
+    decision.allowed = false;
+    decision.reason = 'source IP block was confirmed before isolation';
+  }
+  if (!decision.allowed) return _deferIsolation(inc, decision.reason);
+  inc.isolationDecision = { ...decision, checkedAt: new Date().toISOString() };
+  _audit('Auto Isolation', { ...inc, metadata: decision.autoIsolation }, 'Fresh ongoing threat verified; requesting endpoint isolation');
 
   // Clear alert timers
   inc.timers.forEach(t => { clearInterval(t); clearTimeout(t); });
@@ -690,13 +703,29 @@ async function _autoIsolate(incidentId) {
 
   inc.phase = 'isolation_pending';
   inc.isolationApplied = false;
-  const delivery = await _queueEndpointCommand(inc, 'isolate', `Automatic IPS isolation: ${inc.attackType}`);
+  let delivery;
+  try {
+    delivery = await _queueEndpointCommand(inc, 'isolate', `Automatic IPS isolation: ${inc.attackType}`, {
+      autoIsolation: decision.autoIsolation,
+      automatic: true, threatVerification: decision.threatVerification,
+      isStillCurrent: () => incidents.get(incidentId) === inc && inc.phase === 'isolation_pending'
+        && !inc.manuallyRecovered && !inc.manuallyIsolated,
+    });
+  } catch (error) {
+    if (inc.phase === 'isolation_pending' && !inc.manuallyRecovered && !inc.manuallyIsolated) {
+      return _deferIsolation(inc, `command verification/delivery unavailable: ${error.message}`);
+    }
+    return inc;
+  }
+  // Socket ACKs and manual recovery can complete while delivery is awaited.
+  if (incidents.get(incidentId) !== inc || inc.phase !== 'isolation_pending' || inc.manuallyRecovered || inc.manuallyIsolated) return inc;
   inc.isolationCommandId = delivery.commandId || null;
+  if (delivery.status === 'deferred') return _deferIsolation(inc, delivery.message);
   if (delivery.confirmed) return _confirmIsolation(inc, 'auto');
   if (delivery.status === 'failed' || delivery.status === 'no-target') {
     inc.phase = 'isolation_failed';
     inc.failureReason = delivery.message || 'Endpoint isolation could not be delivered';
-    _audit('Isolation Failed', inc, inc.failureReason);
+    await _notifyCommandFailure(inc, 'isolate', inc.failureReason, delivery.commandId);
     _emitEvent(inc.companyId, 'ips:isolationFailed', {
       incidentId, systemId: inc.systemId, srcIp: inc.srcIp,
       attackType: inc.attackType, reason: inc.failureReason,
@@ -711,19 +740,33 @@ async function _autoIsolate(incidentId) {
   return inc;
 }
 
+function _deferIsolation(inc, reason) {
+  inc.timers?.forEach(timer => { clearInterval(timer); clearTimeout(timer); });
+  inc.timers = [];
+  inc.phase = 'isolation_deferred';
+  inc.isolationApplied = false;
+  inc.isolationDecision = { allowed: false, reason, checkedAt: new Date().toISOString() };
+  _audit('Isolation Deferred', { ...inc, metadata: inc.isolationDecision }, reason);
+  _emitEvent(inc.companyId, 'ips:isolationDeferred', { incidentId: inc.incidentId,
+    systemId: inc.systemId, srcIp: inc.srcIp, reason });
+  return inc;
+}
+
 // ── Phase 4: Auto-Recovery after the configured verification window ──────────
-async function _confirmRecovery(inc, reason = 'auto') {
+async function _confirmRecovery(inc, reason = 'auto', notify = true) {
   if (!inc || inc.recoveryConfirmed === true) return inc;
+  inc.timers?.forEach(timer => { clearInterval(timer); clearTimeout(timer); });
+  inc.timers = [];
   inc.recoveryConfirmed = true;
   inc.phase = 'recovered';
   inc.recoveredAt = Date.now();
   inc.isolationApplied = false;
-  _audit('Server Restored', inc, 'Endpoint agent confirmed network connectivity was restored');
+  _audit('Server Restored', inc, 'Endpoint agent confirmed removal of network isolation');
   _emitEvent(inc.companyId, 'ips:recovered', {
     incidentId: inc.incidentId, systemId: inc.systemId, srcIp: inc.srcIp,
     attackType: inc.attackType, reason, isolationStatus: 'none',
   });
-  if (inc.adminEmail && !inc.recoveryEmailSent) {
+  if (notify && inc.adminEmail && !inc.recoveryEmailSent) {
     inc.recoveryEmailSent = true;
     const sent = await _sendEmail({ to: inc.adminEmail, ..._recoveredTpl(inc, reason) });
     _audit(sent ? 'Email Sent' : 'Email Failed', inc, `Recovery notification ${sent ? 'sent' : 'failed'} to ${_recipientLabel(inc.adminEmail)}`);
@@ -731,69 +774,6 @@ async function _confirmRecovery(inc, reason = 'auto') {
   _audit('Incident Closed', inc, 'Incident closed after confirmed endpoint recovery');
   incidents.delete(inc.incidentId);
   return inc;
-}
-
-function _scheduleAutoRecovery(incidentId) {
-  const recoverTimer = setTimeout(async () => {
-    const inc = incidents.get(incidentId);
-    if (!inc || inc.manuallyRecovered) return;
-    _audit('Recovery Check', inc, '20 minute recovery verification started');
-
-    const attackStillActive = inc.isolatedAt && inc.lastSeen > inc.isolatedAt;
-    if (attackStillActive) {
-      console.warn(`[IPS Engine] ⚠ ATTACK STILL ACTIVE, RE-ISOLATING: ${incidentId}`);
-      _audit('Attack Still Active', inc, 'Recovery verification failed; attack still active');
-      inc.phase = 'isolated';
-      inc.isolationApplied = true;
-      inc.isolatedAt = Date.now();
-      inc.recoveryAttempts = (inc.recoveryAttempts || 0) + 1;
-      _audit('Isolation Again', inc, `Re-isolation attempt ${inc.recoveryAttempts}`);
-      await _queueEndpointCommand(inc, 'isolate', `Attack still active: ${inc.attackType}`);
-
-      try {
-        await _attemptBlock(inc.srcIp, inc.attackType, inc.companyId, 'Recovery verification failed — re-isolation block', 'Auto', inc.systemId);
-        inc.blockStatus = 'success';
-      } catch (e) {
-        console.error(`[IPS Engine] Re-isolation block failed: ${e.message}`);
-      }
-
-      _emitEvent(inc.companyId, 'ips:reIsolation', {
-        incidentId,
-        systemId: inc.systemId,
-        srcIp: inc.srcIp,
-        attackType: inc.attackType,
-        recoveryAttempts: inc.recoveryAttempts,
-      });
-
-      if (inc.adminEmail) {
-        const sent = await _sendEmail({ to: inc.adminEmail, ..._stillActiveTpl(inc) });
-        _audit(sent ? 'Email Sent' : 'Email Failed', inc, `Attack-still-active notification ${sent ? 'sent' : 'failed'} to ${_recipientLabel(inc.adminEmail)}`);
-      }
-
-      _scheduleAutoRecovery(incidentId);
-      return;
-    }
-
-    console.log(`[IPS Engine] ✅ AUTO-RECOVERY REQUESTED: ${incidentId}`);
-    inc.phase = 'recovery_pending';
-    _audit('Attack Cleared', inc, 'Recovery verification passed');
-
-    // Unblock at IPS
-    try { await _attemptUnblock(inc.srcIp, inc.companyId); } catch {}
-    const delivery = await _queueEndpointCommand(inc, 'reconnect', `Automatic recovery: ${inc.attackType}`);
-    inc.recoveryCommandId = delivery.commandId || null;
-    if (delivery.confirmed) await _confirmRecovery(inc, 'auto');
-    else if (delivery.status === 'failed' || delivery.status === 'no-target') {
-      inc.phase = 'recovery_failed';
-      inc.failureReason = delivery.message || 'Endpoint recovery could not be delivered';
-      _audit('Recovery Failed', inc, inc.failureReason);
-    } else {
-      _audit('Recovery Pending', inc, 'Reconnect command queued; waiting for endpoint acknowledgement');
-    }
-  }, AUTO_RECOVER_DELAY_MS);
-
-  const inc = incidents.get(incidentId);
-  if (inc) inc.timers.push(recoverTimer);
 }
 
 async function sweepPendingAutoRecoveries(nowValue = new Date()) {
@@ -819,6 +799,12 @@ async function sweepPendingAutoRecoveries(nowValue = new Date()) {
 
     for (const system of systems) {
       result.checked += 1;
+      // No telemetry from an offline agent is not evidence that it is safe.
+      const heartbeatAt = new Date(system.lastSeen || 0).getTime();
+      if (!Number.isFinite(heartbeatAt) || heartbeatAt < now.getTime() - Math.min(AUTO_RECOVER_DELAY_MS, 120000)) {
+        result.deferred += 1;
+        continue;
+      }
       const baselineValue = system.isolationLastThreatAt || system.isolatedAt || legacyCutoff;
       // Only activity inside the current quiet window should defer recovery.
       // This avoids a stale alert found after a long backend outage causing a
@@ -833,6 +819,8 @@ async function sweepPendingAutoRecoveries(nowValue = new Date()) {
         companyId: system.companyId,
         createdAt: { $gt: baseline, $lte: now },
         severity: { $in: ['high', 'critical', 'HIGH', 'CRITICAL'] },
+        isSynthetic: { $ne: true },
+        event_category: { $ne: 'ips_action' },
         $or: related,
       }).sort({ createdAt: -1 }).select('createdAt srcip description').lean();
 
@@ -847,6 +835,13 @@ async function sweepPendingAutoRecoveries(nowValue = new Date()) {
           srcIp: system.isolationSourceIp || latestThreat.srcip,
           attackType: system.isolationAttackType || 'Endpoint threat', phase: 'isolated',
         }, `Auto-unisolate deferred until ${nextCheck.toISOString()}; recent high/critical activity remains`);
+        const event = { companyId: system.companyId, systemId: system._id,
+          srcIp: system.isolationSourceIp || latestThreat.srcip, attackType: system.isolationAttackType || 'Endpoint threat' };
+        const recipients = await _resolveAdminRecipients(event);
+        const sent = await _sendEmail({ to: recipients,
+          subject: `Auto-unisolation deferred: ${system.name || system._id}`,
+          html: `<p>Recent high/critical activity remains. Network isolation is retained.</p><p>Next check after ${escapeHtml(nextCheck.toISOString())}.</p>` });
+        _audit(sent ? 'Email Sent' : 'Email Failed', event, `Recovery deferral notification ${sent ? 'accepted by SMTP' : 'failed/skipped'} to ${_recipientLabel(recipients)}`);
         result.deferred += 1;
         continue;
       }
@@ -866,7 +861,7 @@ async function sweepPendingAutoRecoveries(nowValue = new Date()) {
       if (delivery.confirmed) result.recovered += 1;
       else if (delivery.status === 'failed' || delivery.status === 'no-target') result.failed += 1;
       else result.pending += 1;
-      _audit(delivery.confirmed ? 'Server Restored' : delivery.status === 'failed' ? 'Recovery Failed' : 'Recovery Pending', {
+      if (!delivery.confirmed) _audit(delivery.status === 'failed' ? 'Recovery Failed' : 'Recovery Pending', {
         companyId: system.companyId, systemId: system._id,
         srcIp: system.isolationSourceIp || system.ip,
         attackType: system.isolationAttackType || 'Endpoint isolation',
@@ -886,13 +881,16 @@ function startAutoRecoverySweeper(intervalMs = 60 * 1000) {
   const run = () => sweepPendingAutoRecoveries().catch(error => {
     console.error(`[IPS Engine] Auto-recovery sweep failed: ${error.message}`);
   });
-  setTimeout(run, 5000);
+  autoRecoveryStartupTimer = setTimeout(run, 5000);
+  autoRecoveryStartupTimer.unref?.();
   autoRecoverySweepTimer = setInterval(run, Math.max(1000, Number(intervalMs) || 60000));
   autoRecoverySweepTimer.unref?.();
   return autoRecoverySweepTimer;
 }
 
 function stopAutoRecoverySweeper() {
+  if (autoRecoveryStartupTimer) clearTimeout(autoRecoveryStartupTimer);
+  autoRecoveryStartupTimer = null;
   if (autoRecoverySweepTimer) clearInterval(autoRecoverySweepTimer);
   autoRecoverySweepTimer = null;
 }
@@ -901,7 +899,7 @@ function stopAutoRecoverySweeper() {
 async function manualIsolate({ companyId, srcIp, attackType, adminEmail, systemId = null }) {
   attackType = resolveCanonicalAttackType(attackType);
   const notificationEmails = await _resolveAdminRecipients({ companyId, systemId, fallback: adminEmail });
-  const incidentId = _key(companyId, srcIp, attackType);
+  const incidentId = _key(companyId, srcIp, attackType, systemId);
   let inc = incidents.get(incidentId);
   _audit('Manual Override Requested', { companyId, incidentId, srcIp, attackType, severity: 'manual', actor: 'Admin' }, 'Administrator requested manual isolation');
 
@@ -929,8 +927,8 @@ async function manualIsolate({ companyId, srcIp, attackType, adminEmail, systemI
 
   // Block via IPS
   try {
-    await _attemptBlock(srcIp, attackType || 'Manual isolation', companyId, 'Manual isolation by admin', 'Manual', systemId);
-    inc.blockStatus = 'success';
+    const blockResult = await _attemptBlock(srcIp, attackType || 'Manual isolation', companyId, 'Manual isolation by admin', 'Manual', systemId);
+    inc.blockStatus = blockResult?.whitelisted ? 'skipped' : 'success';
   } catch (e) {
     console.warn(`[IPS Engine] Manual block failed: ${e.message}`);
     inc.blockStatus = 'failed';
@@ -943,7 +941,7 @@ async function manualIsolate({ companyId, srcIp, attackType, adminEmail, systemI
   } else if (delivery.status === 'failed' || delivery.status === 'no-target') {
     inc.phase = 'isolation_failed';
     inc.failureReason = delivery.message || 'Endpoint isolation could not be delivered';
-    _audit('Isolation Failed', inc, inc.failureReason);
+    await _notifyCommandFailure(inc, 'isolate', inc.failureReason, delivery.commandId);
   } else {
     _audit('Isolation Pending', inc, 'Manual isolation is queued; waiting for endpoint acknowledgement');
   }
@@ -954,8 +952,13 @@ async function manualIsolate({ companyId, srcIp, attackType, adminEmail, systemI
 async function manualRecover({ companyId, srcIp, attackType, adminEmail, systemId = null }) {
   attackType = resolveCanonicalAttackType(attackType);
   const notificationEmails = await _resolveAdminRecipients({ companyId, systemId, fallback: adminEmail });
-  const incidentId = _key(companyId, srcIp, attackType);
-  const inc = incidents.get(incidentId);
+  const incidentId = _key(companyId, srcIp, attackType, systemId);
+  let inc = incidents.get(incidentId);
+  if (!inc) {
+    inc = { incidentId, companyId, srcIp, attackType, systemId, adminEmail: notificationEmails,
+      startedAt: Date.now(), lastSeen: Date.now(), severity: 'manual', timers: [], phase: 'recovery_pending' };
+    incidents.set(incidentId, inc);
+  }
   _audit('Manual Override Requested', { companyId, incidentId, srcIp, attackType, severity: 'manual', actor: 'Admin' }, 'Administrator requested manual recovery');
 
   if (inc) {
@@ -968,8 +971,8 @@ async function manualRecover({ companyId, srcIp, attackType, adminEmail, systemI
     _audit('Manual Override Approved', inc, 'Manual recovery approved');
   }
 
-  // Unblock via IPS
-  try { await _attemptUnblock(srcIp, companyId); } catch {}
+  // Unisolation restores endpoint connectivity. IP blocks are removed only
+  // through an explicit unblock action or their own TTL lifecycle.
 
   const recoveryTarget = inc || { companyId, incidentId, srcIp, attackType, systemId, severity: 'manual' };
   const delivery = await _queueEndpointCommand(recoveryTarget, 'reconnect', `Manual IPS recovery: ${attackType}`);
@@ -979,55 +982,96 @@ async function manualRecover({ companyId, srcIp, attackType, adminEmail, systemI
   } else if (inc && (delivery.status === 'failed' || delivery.status === 'no-target')) {
     inc.phase = 'recovery_failed';
     inc.failureReason = delivery.message || 'Endpoint recovery could not be delivered';
-    _audit('Recovery Failed', inc, inc.failureReason);
+    await _notifyCommandFailure(inc, 'reconnect', inc.failureReason, delivery.commandId);
   } else if (inc) {
     _audit('Recovery Pending', inc, 'Manual reconnect queued; waiting for endpoint acknowledgement');
   }
   return inc || { incidentId, companyId, srcIp, attackType, phase: delivery.confirmed ? 'recovered' : 'recovery_pending' };
 }
 
-async function handleAgentCommandResult({ companyId, systemId, commandId, command, ok, message }) {
+async function _notifyCommandFailure(inc, command, message, commandId) {
+  const key = `${command}:${commandId || ''}:${message}`;
+  if (inc.failureNotificationKey === key) return;
+  inc.failureNotificationKey = key;
+  const action = command === 'isolate' ? 'Isolation Failed' : 'Recovery Failed';
+  _audit(action, inc, message);
+  const recipients = inc.adminEmail || await _resolveAdminRecipients(inc);
+  const sent = await _sendEmail({ to: recipients, subject: `${action}: ${inc.systemId || inc.srcIp}`,
+    html: `<p>${escapeHtml(message)}</p><p>Endpoint confirmation failed. Review Isolation Flow before retrying.</p>` });
+  _audit(sent ? 'Email Sent' : 'Email Failed', inc, `${action} notification ${sent ? 'accepted by SMTP' : 'failed/skipped'} to ${_recipientLabel(recipients)}`);
+}
+
+function releaseBlockedIncidents({ companyId, ip }) {
+  for (const [id, inc] of incidents) {
+    if (String(inc.companyId) === String(companyId) && inc.srcIp === ip && inc.phase === 'blocked') {
+      _audit('Incident Closed', inc, 'IP unblock requested; future detections will be evaluated again');
+      incidents.delete(id);
+    }
+  }
+}
+
+async function handleAgentCommandResult({ companyId, systemId, commandId, command, ok, message, reason, srcIp, attackType, deferred = false }) {
   const candidates = [...incidents.values()].filter(inc =>
-    String(inc.companyId) === String(companyId) &&
-    String(inc.systemId || '') === String(systemId || '')
+    String(inc.companyId) === String(companyId) && String(inc.systemId || '') === String(systemId || '')
   );
   if (command === 'block_ip') {
-    candidates.forEach(inc => {
+    candidates.filter(inc => inc.srcIp === srcIp).forEach(inc => {
       inc.agentBlockStatus = ok ? 'confirmed' : 'failed';
       inc.agentBlockMessage = message || '';
     });
     return;
   }
-  const inc = candidates.find(item =>
-    (command === 'isolate' && (
-      item.isolationCommandId === commandId || item.phase === 'isolation_pending'
-    )) || (command === 'reconnect' && (
-      item.recoveryCommandId === commandId || item.phase === 'recovery_pending'
-    ))
-  );
-  if (!inc) return;
-
-  if (command === 'isolate') {
-    inc.isolationCommandId = commandId;
-    if (ok) {
-      await _confirmIsolation(inc, inc.manuallyIsolated ? 'manual' : 'auto');
+  if (!['isolate', 'reconnect'].includes(command)) return;
+  const mode = /^Automatic /i.test(String(reason || '')) ? 'auto' : 'manual';
+  const matching = command === 'reconnect' && ok
+    ? candidates // reconnection restores this endpoint, not just one attack incident
+    : candidates.filter(item => command === 'isolate'
+      ? item.isolationCommandId === commandId || (!item.isolationCommandId && item.phase === 'isolation_pending')
+      : item.recoveryCommandId === commandId || (!item.recoveryCommandId && item.phase === 'recovery_pending'));
+  if (command === 'isolate' && deferred && !ok) {
+    const automaticMatches = matching.filter(inc => !inc.manuallyRecovered && !inc.manuallyIsolated);
+    automaticMatches.forEach(inc => _deferIsolation(inc, message));
+    if (!automaticMatches.length) _audit('Isolation Deferred', { companyId, systemId, srcIp, attackType,
+      metadata: { commandId } }, message);
+    return;
+  }
+  if (!matching.length) {
+    // Manual system routes and recovery after restart have no in-memory incident.
+    // recordAgentCommandResult durably deduplicates the ACK before reaching here.
+    const event = { companyId, systemId, srcIp: srcIp || systemId, attackType: attackType || 'Endpoint isolation',
+      severity: ok ? 'info' : 'high', metadata: { commandId, command, mode } };
+    const action = command === 'isolate'
+      ? (ok ? 'Isolation Completed' : 'Isolation Failed')
+      : (ok ? 'Server Restored' : 'Recovery Failed');
+    _audit(action, event, message || `Endpoint ${command} ${ok ? 'confirmed' : 'failed'}`);
+    const recipients = await _resolveAdminRecipients({ companyId, systemId });
+    const template = ok
+      ? (command === 'isolate' ? _isolatedTpl(event, mode) : _recoveredTpl(event, mode))
+      : { subject: `${action}: ${systemId}`, html: `<p>${escapeHtml(message || action)}</p>` };
+    const sent = await _sendEmail({ to: recipients, ...template });
+    _audit(sent ? 'Email Sent' : 'Email Failed', event,
+      `${action} notification ${sent ? 'accepted by SMTP' : 'failed/skipped'} to ${_recipientLabel(recipients)}`);
+    return;
+  }
+  for (const [index, inc] of matching.entries()) {
+    if (command === 'isolate') {
+      inc.isolationCommandId = commandId;
+      if (ok) await _confirmIsolation(inc, mode);
+      else {
+        inc.phase = 'isolation_failed';
+        inc.failureReason = message || 'Endpoint agent rejected isolation';
+        await _notifyCommandFailure(inc, command, inc.failureReason, commandId);
+        _emitEvent(inc.companyId, 'ips:isolationFailed', { incidentId: inc.incidentId, systemId,
+          srcIp: inc.srcIp, attackType: inc.attackType, reason: inc.failureReason });
+      }
     } else {
-      inc.phase = 'isolation_failed';
-      inc.failureReason = message || 'Endpoint agent rejected isolation';
-      _audit('Isolation Failed', inc, inc.failureReason);
-      _emitEvent(inc.companyId, 'ips:isolationFailed', {
-        incidentId: inc.incidentId, systemId, srcIp: inc.srcIp,
-        attackType: inc.attackType, reason: inc.failureReason,
-      });
-    }
-  } else if (command === 'reconnect') {
-    inc.recoveryCommandId = commandId;
-    if (ok) {
-      await _confirmRecovery(inc, inc.manuallyRecovered ? 'manual' : 'auto');
-    } else {
-      inc.phase = 'recovery_failed';
-      inc.failureReason = message || 'Endpoint agent rejected reconnect';
-      _audit('Recovery Failed', inc, inc.failureReason);
+      inc.recoveryCommandId = commandId;
+      if (ok) await _confirmRecovery(inc, mode, index === 0);
+      else {
+        inc.phase = 'recovery_failed';
+        inc.failureReason = message || 'Endpoint agent rejected reconnect';
+        await _notifyCommandFailure(inc, command, inc.failureReason, commandId);
+      }
     }
   }
 }
@@ -1071,6 +1115,7 @@ function getIncidents(companyId = null) {
           : inc.phase === 'isolation_failed' ? 'failed'
             : inc.phase === 'recovery_pending' ? 'reconnecting' : 'none',
       isolationCommandId: inc.isolationCommandId || null,
+      isolationDecision: inc.isolationDecision || null,
       recoveryCommandId: inc.recoveryCommandId || null,
       failureReason:     inc.failureReason || null,
       manuallyIsolated: inc.manuallyIsolated,
@@ -1142,7 +1187,7 @@ async function recordAuditEvent(event = {}) {
     emailSent = await _sendEmail({
       to: emailTo,
       subject: event.emailSubject || 'Manual Override Approved',
-      html: `<pre>${event.emailMessage || event.detail || 'Administrator has manually restored the server while the attack is still active.\n\nRisk acceptance has been recorded.'}</pre>`,
+      html: `<pre>${escapeHtml(event.emailMessage || event.detail || 'Administrator approved the requested action. Endpoint confirmation is reported separately.')}</pre>`,
     });
     _audit(
       emailSent ? 'Email Sent' : 'Email Failed',
@@ -1171,6 +1216,8 @@ module.exports = {
   getAuditEvents,
   recordAuditEvent,
   handleAgentCommandResult,
+  releaseBlockedIncidents,
+  resolveAdminRecipients: _resolveAdminRecipients,
   attachIO,
   sweepPendingAutoRecoveries,
   startAutoRecoverySweeper,
@@ -1180,5 +1227,5 @@ module.exports = {
   AUTO_RECOVER_DELAY_MS,
   resolveCanonicalAttackType,
   CANONICAL_ATTACK_TYPES,
-  _test: { isAcceptedBlockResult },
+  _test: { isAcceptedBlockResult, incidentKey: _key, resolveAdminRecipients: _resolveAdminRecipients, escapeHtml, autoIsolate: _autoIsolate },
 };

@@ -214,7 +214,7 @@ def _nft_set_element(op, set_name, ip):
     r = _run(['nft', op, 'element', 'inet', SOC_TABLE, set_name, '{', ip, '}'])
     txt = (r.stderr or '').lower()
     # adding an existing / deleting an absent element is not a real failure
-    return r.returncode == 0 or 'exists' in txt or 'no such' in txt or 'not' in txt
+    return r.returncode == 0 or (op == 'add' and 'file exists' in txt) or (op == 'delete' and 'no such file or directory' in txt)
 
 
 def _nft_add_rule(chain, expr, tag):
@@ -297,31 +297,39 @@ def unblock_ip(ip, direction='both'):
     if SYSTEM == 'Linux':
         be = linux_backend()
         if be == 'ufw':
+            ok = True
             if d in ('in', 'both'):
-                _run(['ufw', 'delete', 'deny', 'from', ip])
+                result = _run(['ufw', 'delete', 'deny', 'from', ip])
+                ok = (result.returncode == 0 or 'non-existent rule' in (result.stdout + result.stderr).lower()) and ok
             if d in ('out', 'both'):
-                _run(['ufw', 'delete', 'deny', 'out', 'to', ip])
-            return True
+                result = _run(['ufw', 'delete', 'deny', 'out', 'to', ip])
+                ok = (result.returncode == 0 or 'non-existent rule' in (result.stdout + result.stderr).lower()) and ok
+            return ok
         if be == 'nft':
-            if _run(['nft', 'list', 'table', 'inet', SOC_TABLE]).returncode != 0:
-                return True  # nothing to remove
+            result = _run(['nft', 'list', 'table', 'inet', SOC_TABLE])
+            if result.returncode != 0:
+                return 'no such file or directory' in (result.stderr or '').lower()
             fam = '6' if _is_v6(ip) else '4'
-            _nft_set_element('delete', f'blk_in{fam}', ip)
-            _nft_set_element('delete', f'blk_out{fam}', ip)
-            return True
+            ok = True
+            if d in ('in', 'both'):
+                ok = _nft_set_element('delete', f'blk_in{fam}', ip) and ok
+            if d in ('out', 'both'):
+                ok = _nft_set_element('delete', f'blk_out{fam}', ip) and ok
+            return ok
         return False
 
     if SYSTEM == 'Windows':
+        ok = True
         for name in (f'SOCBlock_IN_{ip}', f'SOCBlock_OUT_{ip}', f'SOCBlock_{ip}'):
-            _run(['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={name}'])
-        return True
+            result = _run(['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={name}'])
+            ok = (result.returncode == 0 or 'no rules match' in (result.stdout or '').lower()) and ok
+        return ok
 
     if SYSTEM == 'Darwin':
-        _run([
+        return _run([
             'pfctl', '-a', MACOS_PF_ANCHOR, '-t', MACOS_PF_TABLE,
             '-T', 'delete', ip,
-        ])
-        return True
+        ]).returncode == 0
 
     return False
 
@@ -503,44 +511,45 @@ def unblock_protocol(proto, direction='both'):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Full network isolation (preserves SOC management + loopback + established)
+# Full network isolation (preserves SOC management + loopback)
 # ═══════════════════════════════════════════════════════════════════════════════
 def isolate(mgmt_ip, mgmt_port):
     if SYSTEM == 'Linux':
         if not _have('nft'):
             raise RuntimeError('nftables (nft) required for isolation')
-        restore()  # start from a clean slate
+        current = _run(['nft', 'list', 'table', 'inet', ISO_TABLE])
+        if current.returncode != 0 and 'no such file or directory' not in (current.stderr or '').lower():
+            raise RuntimeError(f'Cannot inspect current isolation: {current.stderr}')
+        # nft commits the entire batch atomically: a failed replacement leaves
+        # the previous isolation intact instead of briefly restoring traffic.
+        replacement = f'delete table inet {ISO_TABLE}\n' if current.returncode == 0 else ''
         saddr = 'ip6 saddr' if _is_v6(mgmt_ip) else 'ip saddr'
         daddr = 'ip6 daddr' if _is_v6(mgmt_ip) else 'ip daddr'
         script = (
             f'table inet {ISO_TABLE} {{\n'
             '  chain input  { type filter hook input  priority -150; policy accept;\n'
-            '    ct state established,related accept\n'
             '    iif lo accept\n'
             f'    {saddr} {mgmt_ip} tcp sport {mgmt_port} accept\n'
             '    drop\n'
             '  }\n'
             '  chain output { type filter hook output priority -150; policy accept;\n'
-            '    ct state established,related accept\n'
             '    oif lo accept\n'
             f'    {daddr} {mgmt_ip} tcp dport {mgmt_port} accept\n'
             '    drop\n'
             '  }\n'
             '}\n'
         )
-        r = _run(['nft', '-f', '-'], stdin=script)
+        r = _run(['nft', '-f', '-'], stdin=replacement + script)
         if r.returncode != 0:
             raise RuntimeError(f'nft isolation failed: {r.stderr}')
         return
 
     if SYSTEM == 'Windows':
-        _run(['netsh', 'advfirewall', 'firewall', 'delete', 'rule',
-              'name=SOC Management Allow'])
-        _run(['netsh', 'advfirewall', 'firewall', 'add', 'rule',
-              'name=SOC Management Allow', 'dir=out', 'action=allow',
-              f'remoteip={mgmt_ip}', 'protocol=TCP', f'remoteport={mgmt_port}'])
-        _run(['netsh', 'advfirewall', 'set', 'allprofiles', 'firewallpolicy',
-              'blockinbound,blockoutbound'])
+        from core.windows_isolation import isolation_script
+        result = _run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+                       isolation_script(mgmt_ip, mgmt_port)], timeout=90)
+        if result.returncode != 0 or 'AJNAT isolation confirmed' not in result.stdout:
+            raise RuntimeError(f'Windows isolation failed: {result.stderr or result.stdout}')
         return
 
     if SYSTEM == 'Darwin':
@@ -564,13 +573,18 @@ def isolate(mgmt_ip, mgmt_port):
 
 def restore():
     if SYSTEM == 'Linux':
-        _run(['nft', 'delete', 'table', 'inet', ISO_TABLE])  # ignore if absent
+        if not _have('nft'):
+            raise RuntimeError('nftables (nft) required to verify removal of isolation')
+        result = _run(['nft', 'delete', 'table', 'inet', ISO_TABLE])
+        if result.returncode != 0 and 'No such file or directory' not in result.stderr:
+            raise RuntimeError(f'nft reconnect failed: {result.stderr}')
         return
     if SYSTEM == 'Windows':
-        _run(['netsh', 'advfirewall', 'set', 'allprofiles', 'firewallpolicy',
-              'blockinbound,allowoutbound'])
-        _run(['netsh', 'advfirewall', 'firewall', 'delete', 'rule',
-              'name=SOC Management Allow'])
+        from core.windows_isolation import restoration_script
+        result = _run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+                       restoration_script()], timeout=90)
+        if result.returncode != 0 or 'AJNAT reconnect confirmed' not in result.stdout:
+            raise RuntimeError(f'Windows reconnect failed: {result.stderr or result.stdout}')
         return
     if SYSTEM == 'Darwin':
         with _mac_pf_lock:

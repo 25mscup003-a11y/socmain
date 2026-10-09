@@ -1,3 +1,4 @@
+const { REPORT_PERIOD_HOURS } = require('../utils/edrTimeRange');
 const router = require('express').Router();
 const mongoose = require('mongoose');
 const Alert = require('../models/Alert.model');
@@ -254,7 +255,9 @@ router.get('/statistics', async (req, res) => {
 
 router.get('/report', async (req, res) => {
   try {
-    const hours = { daily: 24, weekly: 168, monthly: 720, '90days': 2160 }[req.query.period] || 2160;
+    const period = String(req.query.period || '90days');
+    if (!Object.prototype.hasOwnProperty.call(REPORT_PERIOD_HOURS, period)) return res.status(400).json({ message: 'Invalid report period' });
+    const hours = REPORT_PERIOD_HOURS[period];
     const scope = userScope(req); const until = new Date(); const since = new Date(until.getTime() - hours * 3600000);
     const { events, total } = await loadEvents(scope, since, until, { limit: 10000, category: req.query.category });
     const summary = summarize(events, total);

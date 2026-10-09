@@ -449,24 +449,25 @@ router.post('/block', requireManager, async (req, res) => {
         companyId,
         reason: body.reason || body.attackType || 'Manual IPS block',
         alertId: body.alertId,
-        blockedBy: req.user.role === 'soc_manager' || req.user.role === 'company_admin' ? 'analyst' : 'auto',
-        ttlHours: body.ttlHours ? Number(body.ttlHours) : undefined,
+        blockedBy: 'analyst',
+        ttlHours: body.ttlHours == null ? undefined : Number(body.ttlHours),
         systemId: body.systemId,
         mac: body.mac,
       });
 
-      return res.status(result.ok ? 200 : 202).json({
+      return res.status(result.ok ? 200 : result.agentAccepted ? 202 : result.whitelisted ? 409 : 422).json({
         ok: Boolean(result.ok),
         action: 'block',
         source: 'soc-backend-ips-service',
         backendStateUpdated: Boolean(result.dbSaved),
-        firewallEnforced: Boolean(result.webhookOk),
+        firewallEnforced: Boolean(result.webhookOk || result.agentConfirmed),
         ipsserver: result.webhook || null,
         message: result.ok
           ? 'IPS block persisted and confirmed by a firewall endpoint'
           : result.whitelisted
             ? `IPS block skipped: ${result.reason}`
-            : 'IPS block persisted but is awaiting endpoint firewall ACK',
+            : result.agentAccepted ? 'IPS block queued; waiting for endpoint firewall ACK'
+              : `IPS block could not be confirmed: ${result.reason || result.webhook?.error || 'no available enforcement target'}`,
         result,
       });
     }
@@ -535,10 +536,12 @@ router.post('/unblock', requireManager, async (req, res) => {
       if (!system) return res.status(400).json({ message: 'Selected agent was not found for this company' });
     }
 
-    // Central firewall must confirm removal before local/backend state changes.
-    const ipsResult = await callIpsWebhook(companyId, body);
-    stages.centralFirewall = ipsResult.enforced !== false;
-    if (!stages.centralFirewall && !system) {
+    const ipsResult = await callIpsWebhook(companyId, body).catch(error => {
+      if (!body.ip && !system) throw error;
+      return { enforced: false, error: error.message, unavailable: true };
+    });
+    stages.centralFirewall = ipsResult.enforced === true;
+    if (!stages.centralFirewall && !system && !body.ip) {
       const unavailable = new Error('Central IPS is in log-only mode and no endpoint agent was selected');
       unavailable.status = 503;
       throw unavailable;
@@ -551,9 +554,10 @@ router.post('/unblock', requireManager, async (req, res) => {
         companyId,
         reason: body.reason || 'Manual Override Approved',
         skipWebhook: true,
+        webhookEnforced: stages.centralFirewall,
         systemId: system?._id || null,
       });
-      stages.backendState = true;
+      stages.backendState = unblockResult.dbUpdated > 0;
       stages.endpointFirewall = unblockResult.agentDispatch?.confirmed === true;
       agentResult = unblockResult.agentDispatch;
     }
@@ -576,14 +580,14 @@ router.post('/unblock', requireManager, async (req, res) => {
       stages.endpointFirewall = agentResult.confirmed === true;
     }
 
-    const agentAccepted = agentResult?.confirmed === true || agentResult?.queued > 0 || agentResult?.pending > 0;
+    const agentAccepted = agentResult?.confirmed === true || (agentResult?.status !== 'failed' && (agentResult?.queued > 0 || agentResult?.pending > 0));
     const completed = stages.centralFirewall || stages.endpointFirewall === true;
     res.status(completed ? 200 : agentAccepted ? 202 : 503).json({
       ok: completed,
       accepted: agentAccepted,
       action: 'unblock',
       firewallEnforced: stages.centralFirewall || stages.endpointFirewall === true,
-      backendStateUpdated: Boolean(body.ip),
+      backendStateUpdated: stages.backendState,
       agentEnforced: system ? stages.endpointFirewall === true : null,
       agentResult,
       ips: ipsResult,

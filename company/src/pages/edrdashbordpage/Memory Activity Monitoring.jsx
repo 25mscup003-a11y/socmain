@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Memory Activity Monitoring — Capability ID: 5
  *
@@ -1467,7 +1468,9 @@ export function MemoryActivityDashboard({ alerts = [], loading = false, total = 
         {data?.error && <div role="alert" style={{ color: MON.yellow }}>{data.error}</div>}
         {data?.generatedAt && <div style={{ color: MON.muted, fontSize: 10 }}>Updated: {new Date(data.generatedAt).toLocaleTimeString()} · Live events / 15s refresh</div>}
         {activeTab === 'log-monitor' ? (
-          <MemoryLogMonitor alerts={alerts} metrics={metricRows} loading={loading} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={5}>
+            <MemoryLogMonitor alerts={alerts} metrics={metricRows} loading={loading} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={5} alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

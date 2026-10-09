@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Sandbox Analysis — Capability ID: 18 / 21
  *
@@ -1426,7 +1427,9 @@ export function SandboxAnalysisDashboardPanel({ alerts = [], loading = false, to
             </div>
           </div>
         ) : activeTab === 'log-monitor' ? (
-          <SandboxLogMonitor alerts={rows} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={18}>
+            <SandboxLogMonitor alerts={rows} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={18} alerts={rows} />
         ) : activeTab === 'dashboard' ? (

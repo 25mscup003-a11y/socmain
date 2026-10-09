@@ -103,6 +103,7 @@ async function handleWebhook(req, res) {
       direction: effectiveDirection,
       reason: effectiveReason,
       source: data.source || 'Auto',
+      automatic: data.automatic,
       attackType: manualAttackType || detectedAttack || threat.attackType || undefined,
       company: req.company || undefined,
       mac: mac || undefined,
@@ -136,6 +137,7 @@ async function handleWebhook(req, res) {
     let result;
     if (action === 'block') {
       result = await firewallService.blockTarget(blockCriteria);
+      if (result.tiDeferred) return sendSuccess(res, { ...result, action: 'block' });
 
       // Auto-trigger alert engine on block if threat is high/critical and attack type is known
       const isThreatIntel = data.source === 'backend-threat-intel' ||

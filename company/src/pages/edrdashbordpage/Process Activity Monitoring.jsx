@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Process Activity Monitoring — Capability ID: 1
  *
@@ -220,46 +221,64 @@ function metricNumber(...values) {
   return 0;
 }
 
-function cpuValue(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || {};
-  for (const key of ['cpu', 'cpuPercent', 'processCpuPercent', 'cpuUsage', 'processCpu', 'cpu_pct']) {
-    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== '') return Number(row[key]);
-    if (raw?.[key] !== undefined && raw?.[key] !== null && raw?.[key] !== '') return Number(raw[key]);
+function resourceMetric(row, keys) {
+  const sources = [row, row?.rawEvent, row?.rawEvent?.raw];
+  sources.push(...sources.map(source => source?.process));
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = key.split('.').reduce((current, part) => current?.[part], source);
+      if (typeof value !== 'number' && typeof value !== 'string') continue;
+      if (typeof value === 'string' && !value.trim()) continue;
+      const number = Number(value);
+      if (Number.isFinite(number) && number >= 0) return number;
+    }
   }
-  if (raw?.cpu_percent !== undefined && raw?.cpu_percent !== null) return Number(raw.cpu_percent);
   return null;
+}
+
+function cpuValue(row) {
+  return resourceMetric(row, ['processCpuPercent', 'process_cpu_percent', 'cpuPercent', 'cpu_percent', 'cpuUsage', 'processCpu', 'cpu_pct', 'cpu']);
 }
 
 function ramValue(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || {};
-  for (const key of ['ram', 'memoryMb', 'memoryMB', 'processMemoryMB', 'processMemoryMb', 'memory_mb', 'memory', 'rssMb', 'rssMB', 'ramMb']) {
-    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== '') return Number(row[key]);
-    if (raw?.[key] !== undefined && raw?.[key] !== null && raw?.[key] !== '') return Number(raw[key]);
-  }
-  return null;
+  const mb = resourceMetric(row, ['processMemoryMb', 'processMemoryMB', 'process_memory_mb', 'memoryMb', 'memoryMB', 'memory_mb', 'rssMb', 'rssMB', 'ramMb', 'ram']);
+  if (mb !== null) return mb;
+  const bytes = resourceMetric(row, ['processRssBytes', 'process_rss_bytes', 'rssBytes', 'rss_bytes', 'memoryRssBytes', 'workingSetBytes', 'privateWorkingSetBytes', 'memory_info.rss', 'memoryInfo.rss', 'memory.rss']);
+  return bytes === null ? null : bytes / (1024 * 1024);
 }
 
 function ramPercentValue(row) {
-  const raw = row?.rawEvent?.raw || row?.rawEvent || {};
-  for (const key of ['ramPercent', 'memoryPercent', 'processMemoryPercent', 'memory_pct']) {
-    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== '') return Number(row[key]);
-    if (raw?.[key] !== undefined && raw?.[key] !== null && raw?.[key] !== '') return Number(raw[key]);
-  }
-  if (raw?.memory_percent !== undefined && raw?.memory_percent !== null) return Number(raw.memory_percent);
-  return null;
+  return resourceMetric(row, ['processMemoryPercent', 'process_memory_percent', 'memoryPercent', 'memory_percent', 'ramPercent', 'memory_pct', 'mem']);
+}
+
+function formatResource(value, unit) {
+  return Number.isFinite(value) ? `${Number(value.toFixed(2))}${unit}` : 'Not reported';
 }
 
 function formatCpuRam(row) {
   const cpu = cpuValue(row);
   const ram = ramValue(row);
   const ramPct = ramPercentValue(row);
-  const cpuText = Number.isFinite(cpu) ? `${cpu.toFixed(cpu % 1 ? 1 : 0)}%` : '—';
+  const cpuText = formatResource(cpu, '%');
   const ramText = Number.isFinite(ram)
-    ? `${ram.toFixed(ram % 1 ? 1 : 0)} MB`
-    : Number.isFinite(ramPct)
-      ? `${ramPct.toFixed(ramPct % 1 ? 1 : 0)}%`
-      : '—';
+    ? formatResource(ram, ' MB')
+    : formatResource(ramPct, '%');
   return `${cpuText} / ${ramText}`;
+}
+
+function ProcessResources({ row }) {
+  const cpu = cpuValue(row);
+  const ram = ramValue(row);
+  const ramPercent = ramPercentValue(row);
+  const ramText = Number.isFinite(ram) ? formatResource(ram, ' MB') : formatResource(ramPercent, '%');
+  return <div aria-label="CPU and RAM usage" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 10, whiteSpace: 'nowrap' }}>
+    <span title={cpu === null ? 'CPU usage was not reported with this event.' : 'CPU usage reported with this event.'}>
+      <span style={{ color: MON.muted }}>CPU: </span><b style={{ color: cpu === null ? MON.muted : cpu > 80 ? MON.red : MON.cyan }}>{formatResource(cpu, '%')}</b>
+    </span>
+    <span title={ram === null && ramPercent === null ? 'RAM usage was not reported with this event.' : 'RAM usage reported with this event.'}>
+      <span style={{ color: MON.muted }}>RAM: </span><b style={{ color: ram === null && ramPercent === null ? MON.muted : ramPercent > 80 ? MON.red : MON.green }}>{ramText}</b>
+    </span>
+  </div>;
 }
 
 function processMetric(row, camelKey, snakeKey) {
@@ -885,13 +904,13 @@ function ProcessLogMonitor({ alerts = [], systems = [] }) {
           <b style={{ fontSize: 12, color: '#fff' }}>📜 Monitored Process Telemetry SIEM Logs ({filtered.length})</b>
           <span style={{ fontSize: 10, color: MON.green }}>● Socket live · 30s reconciliation</span>
         </div>
-        <div style={{ minWidth: 1780 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 70px 1fr 0.75fr 0.9fr 1.35fr 95px 82px 90px 80px 80px 90px 90px', gap: 8, padding: '8px 12px', background: MON.card2, color: MON.muted, fontSize: 10, fontWeight: 800 }}>
-            <span>Process / Executable</span><span>PID</span><span>Host / OS</span><span>User</span><span>Parent</span><span>Command Line</span><span>CPU / RAM</span><span>Network</span><span>Disk I/O</span><span>Severity</span><span>Status</span><span>Category</span><span>Actions</span>
+        <div style={{ minWidth: 1280 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 60px 1fr 0.75fr 0.9fr 1.35fr 125px 70px 80px 90px 90px', gap: 8, padding: '8px 12px', background: MON.card2, color: MON.muted, fontSize: 10, fontWeight: 800 }}>
+            <span>Process / Executable</span><span>PID</span><span>Host / OS</span><span>User</span><span>Parent</span><span>Command Line</span><span>CPU / RAM</span><span>Severity</span><span>Status</span><span>Category</span><span>Actions</span>
           </div>
           <div style={{ maxHeight: 440, overflowY: 'auto' }}>
             {visibleRows.length ? visibleRows.map(row => (
-              <div key={recordId(row)} style={{ display: 'grid', gridTemplateColumns: '1.15fr 70px 1fr 0.75fr 0.9fr 1.35fr 95px 82px 90px 80px 80px 90px 90px', gap: 8, padding: '10px 12px', borderTop: `1px solid ${MON.line}`, fontSize: 10, alignItems: 'center' }}>
+              <div key={recordId(row)} style={{ display: 'grid', gridTemplateColumns: '1.15fr 60px 1fr 0.75fr 0.9fr 1.35fr 125px 70px 80px 90px 90px', gap: 8, padding: '10px 12px', borderTop: `1px solid ${MON.line}`, fontSize: 10, alignItems: 'center' }}>
                 <div>
                   <b style={{ color: MON.cyan, cursor: 'pointer', display: 'block' }} onClick={() => setSelectedLog(row)}>{processName(row)}</b>
                   <span title={executablePath(row)} style={{ fontSize: 9, color: MON.sub }}>{String(executablePath(row) || 'OS did not expose executable path').slice(0, 42)}</span>
@@ -904,17 +923,7 @@ function ProcessLogMonitor({ alerts = [], systems = [] }) {
                 <span style={{ color: MON.green }}>{alertUser(row)}</span>
                 <span title={parentCommandLine(row) || String(parentProcess(row) || '')} style={{ color: MON.muted, fontSize: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parentProcess(row) || 'Not reported'}</span>
                 <span title={commandLine(row)} style={{ color: MON.muted, fontSize: 9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{commandLine(row) || executablePath(row) || 'OS did not expose command line'}</span>
-                <span style={{ color: (cpuValue(row) || 0) > 80 || (ramPercentValue(row) || 0) > 80 ? MON.red : MON.text }}>
-                  {formatCpuRam(row)}
-                </span>
-                <span title={`${processMetric(row, 'processExternalConnectionCount', 'external_connection_count')} external connection(s)`} style={{ color: processMetric(row, 'processExternalConnectionCount', 'external_connection_count') ? MON.orange : MON.text }}>
-                  {processMetric(row, 'processNetworkConnectionCount', 'network_connection_count')} conn
-                </span>
-                <span title="Current process read and write rate; older agents fall back to cumulative bytes" style={{ color: MON.text }}>
-                  {processMetric(row, 'processDiskReadBytesPerSecond', 'disk_read_bytes_per_second') || processMetric(row, 'processDiskWriteBytesPerSecond', 'disk_write_bytes_per_second')
-                    ? `${formatBytes(processMetric(row, 'processDiskReadBytesPerSecond', 'disk_read_bytes_per_second') + processMetric(row, 'processDiskWriteBytesPerSecond', 'disk_write_bytes_per_second'))}/s`
-                    : formatBytes(processMetric(row, 'processDiskReadBytes', 'disk_read_bytes') + processMetric(row, 'processDiskWriteBytes', 'disk_write_bytes'))}
-                </span>
+                <ProcessResources row={row} />
                 <span style={{ background: SEV_BG[alertSeverity(row)] || SEV_BG.low, color: SEV_COLOR[alertSeverity(row)] || MON.green, padding: '2px 6px', borderRadius: 4, fontWeight: 900, textTransform: 'uppercase', textAlign: 'center' }}>
                   {alertSeverity(row)}
                 </span>
@@ -964,7 +973,7 @@ function ProcessReportsTab({ alerts = [], total = 0 }) {
   // Keep the local fallback bound to the exact requested window. Records without
   // a usable timestamp cannot safely be assigned to a time-based report.
   const getFilteredAlerts = (period = reportType, endTime = Date.now(), category = reportCategory) => {
-    const windowMap = { daily: 1, weekly: 7, monthly: 30, '90days': 90 };
+    const windowMap = { daily: 1, weekly: 7, monthly: 30, '90days': 90, '180days': 180 };
     const days = windowMap[period] || 1;
     const cutoff = endTime - days * dayMs;
     return alerts.filter(a => {
@@ -975,7 +984,7 @@ function ProcessReportsTab({ alerts = [], total = 0 }) {
   };
 
   const buildLocalReport = (period, endTime = Date.now(), category = reportCategory) => {
-    const periodDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90 }[period] || 1;
+    const periodDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90, '180days': 180 }[period] || 1;
     const filteredAlerts = getFilteredAlerts(period, endTime, category);
     const bySev = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
     const byPlatform = { Windows: 0, Linux: 0, macOS: 0, Other: 0 };
@@ -1013,9 +1022,9 @@ function ProcessReportsTab({ alerts = [], total = 0 }) {
     const activeReportType = reportData?.period || reportType;
     const activeReportCategory = reportData?.category || reportCategory;
     const categoryLabel = processReportCategoryLabel(activeReportCategory);
-    const period = activeReportType === '90days' ? '90 Day Security Analysis' : activeReportType === 'daily' ? 'Daily (24 Hours)' : activeReportType === 'weekly' ? 'Weekly Summary' : 'Monthly Report';
+    const period = activeReportType === '180days' ? '6 Month Security Analysis' : activeReportType === '90days' ? '90 Day Security Analysis' : activeReportType === 'daily' ? 'Daily (24 Hours)' : activeReportType === 'weekly' ? 'Weekly Summary' : 'Monthly Report';
     let now = new Date(reportData?.until || Date.now());
-    const periodDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90 }[activeReportType] || 1;
+    const periodDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90, '180days': 180 }[activeReportType] || 1;
     let start = new Date(reportData?.since || now.getTime() - periodDays * 86400000);
 
     // Fetch ALL logs using dedicated report API — no limit, single call
@@ -1313,6 +1322,7 @@ function ProcessReportsTab({ alerts = [], total = 0 }) {
               { key: 'weekly', label: '1 Week', icon: '📆', sub: 'Last 7 days' },
               { key: 'monthly', label: '1 Month', icon: '🗓', sub: 'Last 30 days' },
               { key: '90days', label: '3 Months', icon: '📊', sub: 'Last 90 days' },
+              { key: '180days', label: '6 Months', icon: '📅', sub: 'Last 180 days' },
             ].map(opt => {
               const active = reportType === opt.key;
               return (
@@ -1357,8 +1367,8 @@ function ProcessReportsTab({ alerts = [], total = 0 }) {
         const generatedPeriod = reportData?.period || reportType;
         const generatedCategory = reportData?.category || reportCategory;
         const generatedCategoryLabel = processReportCategoryLabel(generatedCategory);
-        const periodDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90 }[generatedPeriod] || 1;
-        const periodLabel = { daily: 'Last 24 Hours', weekly: 'Last 7 Days', monthly: 'Last 30 Days', '90days': 'Last 90 Days' }[generatedPeriod];
+        const periodDays = { daily: 1, weekly: 7, monthly: 30, '90days': 90, '180days': 180 }[generatedPeriod] || 1;
+        const periodLabel = { daily: 'Last 24 Hours', weekly: 'Last 7 Days', monthly: 'Last 30 Days', '90days': 'Last 90 Days', '180days': 'Last 180 Days' }[generatedPeriod];
         const sinceMs = reportData?.since ? new Date(reportData.since).getTime() : Date.now() - periodDays * 86400000;
         const untilMs = reportData?.until ? new Date(reportData.until).getTime() : Date.now();
         const reportAlerts = reportData?.alerts || getFilteredAlerts(generatedPeriod, untilMs, generatedCategory);
@@ -1888,13 +1898,10 @@ export default function ProcessActivityDashboard({ alerts = [], loading = false,
 
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
-        <div style={{ background: MON.card, border: `1px solid ${MON.border}`, borderRadius: 7, padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, fontSize: 10, flexWrap: 'wrap' }}>
-          <span style={{ color: loading ? MON.yellow : MON.green, fontWeight: 900 }}>{loading ? '● SYNCING LIVE DATA' : '● LIVE DATABASE DATA'}</span>
-          <span style={{ color: MON.muted }}>Rolling window: <b style={{ color: MON.cyan }}>Last 24 Hours</b></span>
-          <span style={{ color: MON.muted }}>Process events: <b style={{ color: MON.text }}>{Number(total || telemetryRows.length).toLocaleString()}</b></span>
-        </div>
         {activeTab === 'log-monitor' ? (
-          <ProcessLogMonitor alerts={telemetryRows} systems={systems} />
+          <CapabilityLogsPanel capabilityId={1}>
+            <ProcessLogMonitor alerts={telemetryRows} systems={systems} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <ProcessReportsTab alerts={telemetryRows} total={total || telemetryRows.length} />
         ) : activeTab === 'dashboard' ? (

@@ -31,6 +31,8 @@ function CodeBlock({ code }) {
 }
 
 // ── OS config ─────────────────────────────────────────────────────────────────
+const LINUX_UNINSTALL_COMMAND = 'sudo bash /opt/soc-agent/uninstall.sh\n# Enter the SOC Agent uninstall password when prompted\n# Type yes to confirm uninstall and removal of /opt/soc-agent';
+
 const OS_TABS = [
   {
     key: 'linux', icon: '🐧', label: 'Linux', color: '#f59e0b',
@@ -47,8 +49,7 @@ const OS_TABS = [
       { title:'Verify service and connection', code:'sudo systemctl is-active soc-agent\nsudo python3 /opt/soc-agent/agent.py test' },
     ],
     uninstall: [
-      { title:'Debian / Ubuntu / Mint / Kali', code:'sudo apt remove soc-agent\n# Enter the SOC Agent uninstall password when prompted' },
-      { title:'RHEL / CentOS / Fedora / Rocky', code:'sudo dnf remove soc-agent\n# Enter the SOC Agent uninstall password when prompted' },
+      { title:'Run the Linux uninstaller', code:LINUX_UNINSTALL_COMMAND },
       { title:'Verify removal', code:'sudo systemctl is-active soc-agent 2>/dev/null || echo "Agent uninstalled"\ntest ! -e /opt/soc-agent && echo "Files removed"' },
     ],
   },
@@ -158,8 +159,7 @@ const OS_TABS = [
       { title:'Verify service and connection', code:'sudo systemctl is-active soc-agent\nsudo python3 /opt/soc-agent/agent.py test' },
     ],
     uninstall: [
-      { title:'Debian / Ubuntu Server', code:'sudo apt remove soc-agent\n# Enter the SOC Agent uninstall password' },
-      { title:'RHEL / Rocky / AlmaLinux', code:'sudo dnf remove soc-agent\n# Enter the SOC Agent uninstall password' },
+      { title:'Run the Linux uninstaller', code:LINUX_UNINSTALL_COMMAND },
       { title:'Verify removal', code:'sudo systemctl is-active soc-agent 2>/dev/null || echo "Agent uninstalled"' },
     ],
   },
@@ -1026,7 +1026,7 @@ export default function AgentDownloadPage() {
                 <CodeBlock code={'sudo systemctl is-active soc-agent\nsudo python3 /opt/soc-agent/agent.py test'}/>
 
                 <h3 style={{ color: '#34d399', fontSize: 13, marginTop: 16 }}>Uninstall</h3>
-                <CodeBlock code={showInstall === 'deb' ? 'sudo dpkg --remove soc-agent' : 'sudo dnf remove soc-agent'}/>
+                <CodeBlock code={LINUX_UNINSTALL_COMMAND}/>
               </div>
             ) : showInstall === 'exe' ? (
               <div style={{ color: '#e2e8f0' }}>

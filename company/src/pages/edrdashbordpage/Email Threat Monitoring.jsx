@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Email Threat Monitoring — Capability ID: 15
  *
@@ -1785,7 +1786,9 @@ export function EmailThreatDashboardPanel({ alerts = [], loading = false, total 
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <EmailThreatLogMonitor alerts={rows} total={totalRows} />
+          <CapabilityLogsPanel capabilityId={15}>
+            <EmailThreatLogMonitor alerts={rows} total={totalRows} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={15} alerts={rows} />
         ) : activeTab === 'dashboard' ? (

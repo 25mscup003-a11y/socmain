@@ -34,6 +34,7 @@ import math
 from urllib.parse import urlparse
 from collections import Counter, deque
 from datetime import datetime, timezone
+from core.network_telemetry import PeerMetadataCache, linux_tcp_counters, normalized_ip, reverse_dns, socket_key
 
 try:
     from core.geo_enrichment import lookup_ip
@@ -129,7 +130,13 @@ _OBSERVATION_FIELDS = frozenset({
     # Useful evidence, but unstable topology identifiers. Browsers and worker
     # processes recycle client ports/PIDs without changing the remote service.
     'pid', 'process_start_time', 'observed_local_port',
+    'bytes_scope', 'bytes_source', 'socket_count', 'measured_socket_count',
 })
+
+_SOCKET_TELEMETRY_FIELDS = (
+    'domain', 'domain_source', 'geo', 'bytes_sent', 'bytes_received',
+    'bytes_scope', 'bytes_source', 'observed_at', 'start_time', 'end_time',
+)
 
 
 def _network_state_fingerprint(value):
@@ -257,6 +264,9 @@ def _summary_connection_view(connection, listener_ports=None, local_addresses=No
     }
     for field in _SUMMARY_PROCESS_FIELDS:
         row[field] = connection.get(field) or ''
+    for field in _SOCKET_TELEMETRY_FIELDS:
+        if connection.get(field) is not None:
+            row[field] = connection[field]
     return row
 
 
@@ -266,7 +276,7 @@ def _summary_connection_identity(connection, listener_ports=None, local_addresse
         return None
     row = {
         key: value for key, value in row.items()
-        if key not in {'state', 'pid', 'observed_local_port'}
+        if key not in {'state', 'pid', 'observed_local_port', *_SOCKET_TELEMETRY_FIELDS}
     }
     return json.dumps(row, sort_keys=True, separators=(',', ':'))
 
@@ -282,7 +292,16 @@ def _summary_connection_inventory(connections, listeners=None, local_addresses=N
         row = _summary_connection_view(connection, listener_ports, local_addresses)
         if row is None:
             continue
-        key = _network_state_fingerprint(row)
+        key = _summary_connection_identity(connection, listener_ports, local_addresses)
+        previous = unique.get(key)
+        row['socket_count'] = 1 + (previous or {}).get('socket_count', 0)
+        row['measured_socket_count'] = int(any(field in row for field in ('bytes_sent', 'bytes_received'))) + (previous or {}).get('measured_socket_count', 0)
+        if previous:
+            for field in ('bytes_sent', 'bytes_received'):
+                if field in row or field in previous:
+                    row[field] = row.get(field, 0) + previous.get(field, 0)
+        if row['measured_socket_count']:
+            row['bytes_scope'] = 'active_sockets'
         unique[key] = row
     return [unique[key] for key in sorted(unique)]
 
@@ -449,34 +468,38 @@ def _process_identity(psutil_module, pid, cache=None, now=None):
     cache = cache if cache is not None else {}
     now = time.monotonic() if now is None else now
     cached = cache.get(pid)
-    if cached and now < cached.get('expires_at', 0):
+    if cached and cached.get('checked_at') == now:
         return cached['value']
     value = _empty_process_identity()
     try:
         proc = psutil_module.Process(pid)
-        executable = proc.exe() or ''
-        parent_name = ''
-        try:
-            parent = proc.parent()
-            parent_name = parent.name() if parent else ''
-        except (psutil_module.NoSuchProcess, psutil_module.AccessDenied, OSError):
-            pass
-        value = {
-            'process_name': proc.name() or '',
-            'executable': executable,
-            'username': proc.username() or '',
-            'command_line': ' '.join(proc.cmdline() or [])[:2000],
-            'parent_pid': proc.ppid(),
-            'parent_process': parent_name,
-            'process_hash': _sha256_file(executable),
-            'signature_status': 'unknown',
-            'process_start_time': proc.create_time(),
-        }
+        def read(callback, default=''):
+            try:
+                return callback()
+            except (psutil_module.NoSuchProcess, psutil_module.AccessDenied, OSError):
+                return default
+        started = read(proc.create_time, None)
+        if cached and started is not None and started == cached['value'].get('process_start_time') and now < cached.get('expires_at', 0):
+            cached['checked_at'] = now
+            return cached['value']
+        # Access to one protected field must not discard an accessible user/name.
+        value.update({
+            'process_name': read(proc.name) or '',
+            'username': read(proc.username) or '',
+            'executable': read(proc.exe) or '',
+            'command_line': ' '.join(read(proc.cmdline, []) or [])[:2000],
+            'parent_pid': read(proc.ppid, None),
+            'process_start_time': started,
+        })
+        parent = read(proc.parent, None)
+        value['parent_process'] = read(parent.name) if parent else ''
+        value['process_hash'] = _sha256_file(value['executable'])
     except (psutil_module.NoSuchProcess, psutil_module.AccessDenied, OSError):
         pass
     cache[pid] = {
         'value': value,
-        'expires_at': now + PROCESS_METADATA_CACHE_SECONDS,
+        'checked_at': now,
+        'expires_at': now + (PROCESS_METADATA_CACHE_SECONDS if value['username'] else 10),
     }
     if len(cache) > 4096:
         expired = [key for key, item in cache.items() if now >= item.get('expires_at', 0)]
@@ -883,15 +906,26 @@ def _peer_summary(conn: dict, include_geo: bool = True) -> dict:
         'local_port': conn.get('local_port'),
         'pid': conn.get('pid'),
     }
-    host = _reverse_dns(remote_ip)
+    host = conn.get('domain') or ''
     if host:
         item['host'] = host
         item['domain'] = host
     if include_geo:
-        geo = _geo_for_ip(remote_ip)
+        geo = conn.get('geo') or {}
         if geo:
             item.update(geo)
     return item
+
+
+def _lookup_network_peer(ip):
+    result = {}
+    geo = {key: value for key, value in _geo_for_ip(ip).items() if value}
+    if geo:
+        result['geo'] = geo
+    host = reverse_dns(ip)
+    if host:
+        result.update(domain=host, domain_source='reverse_dns')
+    return result
 
 
 class NetworkCollector:
@@ -937,6 +971,7 @@ class NetworkCollector:
         self._last_io_snapshot = None
         self._transfer_baseline = deque(maxlen=120)
         self._process_metadata_cache = {}
+        self._peer_metadata = PeerMetadataCache(_lookup_network_peer)
         self._server_addresses, self._server_port = _agent_server_endpoint(self._config)
         self._thread    = threading.Thread(target=self._loop, daemon=True, name='net-monitor')
         self._dns_thread = threading.Thread(target=self._dns_sniffer_loop, daemon=True, name='dns-query-sniffer')
@@ -1414,6 +1449,9 @@ class NetworkCollector:
 
     def observe_dns_query(self, domain, process=None):
         """Accept DNS metadata from OS-native collectors (for example Sysmon)."""
+        process = process or {}
+        answers = [normalized_ip(value.strip()) for value in str(process.get('query_results') or '').split(';')]
+        self._remember_dns_query(domain, [value for value in answers if value])
         self._observe_dns_beacon(domain, process or {})
 
     def _observe_dns_beacon(self, domain, connection=None):
@@ -1494,7 +1532,7 @@ class NetworkCollector:
             pid, process_start_time, process_name, domain, remote_port = key
             conn = item['connection']
             destination_ips = sorted(item['ips'])
-            primary_ip = destination_ips[0] if destination_ips else ''
+            primary_ip = str(conn.get('remote_ip') or '')
             # A deterministic transport id also makes the event idempotent
             # across agent restarts while the same OS process is alive.
             attribution_id = hashlib.sha256(
@@ -1571,6 +1609,24 @@ class NetworkCollector:
                 logger.error('Network check error: %s', e)
             time.sleep(max(10.0, self._cfg_float('network_poll_interval_seconds', 20)))
 
+    def _enrich_connection_telemetry(self, connections):
+        counters = linux_tcp_counters()
+        _, answers = self._recent_dns_queries()
+        domains_by_ip = {}
+        for domain, addresses in answers.items():
+            for address in addresses:
+                domains_by_ip.setdefault(normalized_ip(address), domain)
+        for connection in connections:
+            remote_ip = normalized_ip(connection.get('remote_ip'))
+            connection.update(self._peer_metadata.get(remote_ip))
+            if remote_ip in domains_by_ip:
+                connection.update(domain=domains_by_ip[remote_ip], domain_source='dns_answer')
+            if connection.get('protocol') == 'tcp':
+                measured = counters.get(socket_key(connection['local_ip'], connection['local_port'], remote_ip, connection['remote_port']))
+                if measured:
+                    connection.update(measured, bytes_scope='connection', bytes_source='linux_tcp_info')
+        return connections
+
     def _check(self):
         try:
             import psutil
@@ -1596,6 +1652,7 @@ class NetworkCollector:
                 local_addresses=interface_map,
             )
         ]
+        self._enrich_connection_telemetry(observed_connections)
         connections, closed_connections, started_connections = self._track_connection_lifecycle(observed_connections)
         listeners = _get_listeners(
             socket_rows=socket_rows,
@@ -1898,8 +1955,9 @@ class NetworkCollector:
             'network': network_state, 'dns_queries': live_dns_queries, 'dns_answers': dns_answer_map,
         })
         pending_bytes = int(io_delta.get('bytes_sent') or 0) + int(io_delta.get('bytes_received') or 0)
-        usage_interval = max(60.0, self._cfg_float('network_usage_report_interval_seconds', 300))
-        usage_due = pending_bytes > 0 and now - self._last_usage_emit >= usage_interval
+        usage_interval = max(60.0, self._cfg_float('network_usage_report_interval_seconds', 60))
+        has_socket_bytes = any(row.get('bytes_sent', 0) or row.get('bytes_received', 0) for row in summary_connections)
+        usage_due = (pending_bytes > 0 or has_socket_bytes) and now - self._last_usage_emit >= usage_interval
         if self._last_observed_summary == observed_state and not self._pending_closed_connections and not usage_due:
             return
         max_closed = max(1, int(self._cfg_float('network_snapshot_max_closed', 250)))
@@ -1980,6 +2038,7 @@ class NetworkCollector:
                 'dns_config': network_state['dns_config'],
                 # Metadata only. Payload/content is never captured.
                 'connections': summary_connections[:max(1, int(self._cfg_float('network_snapshot_max_connections', 500)))],
+                'dns_answer_map': display_dns_answer_map,
                 'listeners': summary_listeners[:max(1, int(self._cfg_float('network_snapshot_max_connections', 500)))],
                 'closed_connections': closed_connections[:max(1, int(self._cfg_float('network_snapshot_max_closed', 250)))],
                 'adapter_delta': io_delta,

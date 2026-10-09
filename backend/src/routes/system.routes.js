@@ -185,12 +185,17 @@ router.post('/heartbeat', async (req, res) => {
       // heartbeat. A fallback delivery must not erase their durable record.
       { $pull: { pendingCommands: {
         auditId: { $exists: false },
-        command: { $nin: ['update', 'security-policy-sync', 'verify-integrity', 'security-force-recovery', 'security-lockdown', 'security-unlock'] },
+        command: { $nin: ['update', 'security-policy-sync', 'verify-integrity', 'security-force-recovery', 'security-lockdown', 'security-unlock',
+          'isolate', 'reconnect', 'block_ip', 'unblock_ip', 'block_domain', 'unblock_domain', 'block_application', 'unblock_application',
+          'block_port', 'close_port', 'unblock_port', 'block_protocol', 'unblock_protocol', 'ips_whitelist_add', 'ips_whitelist_remove'] },
       } } },
       { new: false },
     ).select('pendingCommands');
-    const pendingCommands = (commandClaim?.pendingCommands || []).filter(command => command.command !== 'update'
-      || !['downloading', 'installing'].includes(system.updateStatus));
+    const pendingCommands = await require('../services/ipsIsolationGuard.service').filterDeliverableCommands({
+      companyId: system.companyId, systemId: system._id,
+      commands: (commandClaim?.pendingCommands || []).filter(command => command.command !== 'update'
+        || !['downloading', 'installing'].includes(system.updateStatus)),
+    });
     const fimStartAt = system.fimStartAt || system.installDate || now;
 
     // Emit real-time status update to monitoring dashboards
@@ -509,8 +514,10 @@ router.post('/:id/isolate', requireManager, async (req, res) => {
     });
     const updated = await System.findById(system._id);
     console.log(`[System] ${system.name} isolation ${delivery.confirmed ? 'confirmed' : 'queued'} — ${reason || 'manual dashboard action'}`);
-    res.json({
-      message: delivery.confirmed ? 'System isolation confirmed by endpoint' : 'System isolation queued; waiting for endpoint acknowledgement',
+    const failed = delivery.status === 'failed' || delivery.status === 'no-target';
+    res.status(delivery.confirmed ? 200 : failed ? 502 : 202).json({
+      ok: delivery.confirmed === true,
+      message: delivery.confirmed ? 'System isolation confirmed by endpoint' : failed ? (delivery.message || 'System isolation failed') : 'System isolation queued; waiting for endpoint acknowledgement',
       delivery,
       system: updated,
     });
@@ -531,8 +538,10 @@ router.delete('/:id/isolate', requireManager, async (req, res) => {
     });
     const updated = await System.findById(system._id);
     console.log(`[System] ${system.name} reconnect ${delivery.confirmed ? 'confirmed' : 'queued'}`);
-    res.json({
-      message: delivery.confirmed ? 'System reconnection confirmed by endpoint' : 'System reconnection queued; waiting for endpoint acknowledgement',
+    const failed = delivery.status === 'failed' || delivery.status === 'no-target';
+    res.status(delivery.confirmed ? 200 : failed ? 502 : 202).json({
+      ok: delivery.confirmed === true,
+      message: delivery.confirmed ? 'System reconnection confirmed by endpoint' : failed ? (delivery.message || 'System reconnection failed') : 'System reconnection queued; waiting for endpoint acknowledgement',
       delivery,
       system: updated,
     });

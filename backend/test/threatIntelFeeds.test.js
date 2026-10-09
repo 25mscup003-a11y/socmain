@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const previousFeedSetting = process.env.THREAT_INTEL_PUBLIC_FEEDS_ENABLED;
 process.env.THREAT_INTEL_PUBLIC_FEEDS_ENABLED = 'false';
 const {
-  parsePublicFeed, fetchPublicFeed, loadPublicFeeds, normalizeThreatLabels,
+  parsePublicFeed, fetchPublicFeed, loadPublicFeeds, normalizeThreatLabels, verifyPublicFeeds, publicFeedVerification,
 } = require('../src/services/threat-intel.service');
 const Alert = require('../src/models/Alert.model');
 if (previousFeedSetting === undefined) delete process.env.THREAT_INTEL_PUBLIC_FEEDS_ENABLED;
@@ -83,6 +83,33 @@ test('system-wide DNS failures are reported once instead of once per feed', asyn
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /system DNS lookup failed/);
   assert.match(warnings[0], /feodo, emergingThreats, tor/);
+});
+
+test('verification waits for all startup feeds and reports individual readiness', async () => {
+  const pending = [];
+  const client = { get: async () => new Promise(resolve => pending.push(resolve)) };
+  const loading = loadPublicFeeds({ client, schedule: false });
+  let finished = false;
+  const checking = verifyPublicFeeds('45.77.1.23').then(result => { finished = true; return result; });
+  await Promise.resolve();
+  assert.equal(pending.length, 3);
+  pending[0]({ data: '45.77.1.23\n' });
+  pending[1]({ data: '45.77.1.24\n' });
+  await Promise.resolve();
+  assert.equal(finished, false);
+  pending[2]({ data: '45.77.1.25\n' });
+  await loading;
+  const checks = await checking;
+  assert.ok(checks.every(check => check.status === 'checked'));
+  assert.equal(checks.find(check => check.provider === 'feodo').matched, true);
+  assert.ok(checks.every(check => check.checkedAt && check.expiresAt));
+});
+
+test('failed refresh retains lookup data but cannot pass mandatory verification', async () => {
+  await loadPublicFeeds({ client: { get: async () => { throw new Error('offline'); } }, schedule: false, waitFn: async () => {} });
+  const checks = publicFeedVerification('45.77.1.23');
+  assert.ok(checks.every(check => check.status === 'unavailable'));
+  assert.equal(checks.find(check => check.provider === 'feodo').matched, true);
 });
 
 test('OTX object malware families are normalized to stable strings', () => {

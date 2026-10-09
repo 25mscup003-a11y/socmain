@@ -337,22 +337,8 @@ class CommandListener:
 
                 @sio.on('ips:block')
                 def on_ips_block(data: dict):
-                    """IPS Engine notified us to block an IP — apply local firewall rule."""
-                    ip = data.get('srcIp', '')
-                    attack_type = data.get('attackType', 'IPS Auto-block')
-                    severity = data.get('severity', 'high')
-                    logger.warning('[IPS] Auto-block command received: IP=%s attack=%s sev=%s', ip, attack_type, severity)
-                    if ip:
-                        result = self._block_ip({'ip': ip})
-                        self._sender.enqueue({
-                            'rule_id':     'IPS_AUTO_BLOCK',
-                            'category':    'network',
-                            'severity':    severity,
-                            'description': f'IPS auto-blocked {ip} — {attack_type}: {result}',
-                            'raw_log':     f'IPS_BLOCK|ip={ip}|attack={attack_type}|result={result}',
-                            'src_ip':      ip,
-                            'blocked':     True,
-                        })
+                    """Dashboard notification; enforcement uses the verified command queue."""
+                    logger.info('[IPS] Block status update for %s', data.get('srcIp') or data.get('ip'))
 
                 @sio.on('ips:blockFailed')
                 def on_ips_block_failed(data: dict):
@@ -373,42 +359,19 @@ class CommandListener:
 
                 @sio.on('ips:isolated')
                 def on_ips_isolated(data: dict):
-                    """IPS Engine triggered network isolation — disconnect this system from network."""
+                    """Confirmation notification, never a second execution path."""
                     target = str(data.get('systemId') or '')
                     if not target or target != str(system_id):
                         return
-                    ip = data.get('srcIp', '')
-                    reason_type = data.get('reason', 'auto')
-                    attack_type = data.get('attackType', 'Unknown')
-                    logger.critical('[IPS] ISOLATION command received! attack=%s reason=%s', attack_type, reason_type)
-                    result = self._isolate(data)
-                    self._sender.enqueue({
-                        'rule_id':     'IPS_ISOLATION',
-                        'category':    'system',
-                        'severity':    'critical',
-                        'description': f'IPS ISOLATED this system — attack={attack_type} src={ip} reason={reason_type}: {result}',
-                        'raw_log':     f'IPS_ISOLATE|ip={ip}|attack={attack_type}|reason={reason_type}|result={result}',
-                        'src_ip':      ip,
-                        'blocked':     True,
-                    })
+                    logger.info('[IPS] Backend acknowledged endpoint isolation: %s', target)
 
                 @sio.on('ips:recovered')
                 def on_ips_recovered(data: dict):
-                    """IPS Engine recovered this system — restore network connectivity."""
+                    """Confirmation notification; reconnect executes through the command queue."""
                     target = str(data.get('systemId') or '')
                     if not target or target != str(system_id):
                         return
-                    ip = data.get('srcIp', '')
-                    reason_type = data.get('reason', 'auto')
-                    logger.info('[IPS] RECOVERY command received: ip=%s reason=%s', ip, reason_type)
-                    result = self._reconnect(data)
-                    self._sender.enqueue({
-                        'rule_id':     'IPS_RECOVERY',
-                        'category':    'system',
-                        'severity':    'medium',
-                        'description': f'IPS recovered system from isolation — src={ip} reason={reason_type}: {result}',
-                        'raw_log':     f'IPS_RECOVER|ip={ip}|reason={reason_type}|result={result}',
-                    })
+                    logger.info('[IPS] Backend acknowledged endpoint recovery: %s', target)
 
                 # Try to connect
                 logger.info('Connecting to backend: %s (attempt %d/%d)', server_url, retry_count + 1, max_retries)
@@ -564,7 +527,7 @@ class CommandListener:
                     ok = self._firewall.unblock_ip(ip)
                     results.append(f'unblock_ip({ip})={chr(10003) if ok else chr(10007)}')
             elif self._ips and action == 'block':
-                ok = self._ips.block_ip(ip, reason=f'rule: {rule_name}')
+                ok = self._ips.block_ip(ip, reason=f'rule: {rule_name}', authorized_by_backend=True)
                 results.append(f'ips.block_ip({ip})={"ok" if ok else "fail"}')
             else:
                 result = self._block_ip({'ip': ip}) if action == 'block' else self._unblock_ip({'ip': ip})
@@ -700,7 +663,8 @@ class CommandListener:
 
     def _dispatch(self, command: str, data: dict):
         from .heartbeat import security_command_error
-        denied = security_command_error(command)
+        from .command_guard import automatic_isolation_error
+        denied = security_command_error(command) or automatic_isolation_error(command, data)
         if denied:
             return {'ok': False, 'result': denied}
         handlers = {
@@ -781,7 +745,7 @@ class CommandListener:
             return 'no IP specified'
         # Use IPS module if available (preferred, logs to dashboard)
         if self._ips:
-            ok = self._ips.block_ip(ip, reason='dashboard command')
+            ok = self._ips.block_ip(ip, reason='dashboard command', authorized_by_backend=True)
             return f'IPS blocked {ip}' if ok else f'IPS block failed for {ip}'
         # Fallback: enforce directly on the local host firewall (UFW/nftables/netsh)
         ok = fw_backend.block_ip(ip, direction='both', comment='dashboard command')

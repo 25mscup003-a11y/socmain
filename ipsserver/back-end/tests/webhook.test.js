@@ -4,6 +4,7 @@
  */
 
 const http = require('http');
+jest.mock('../src/services/threatVerificationService', () => ({ verifyAutomaticBlock: jest.fn().mockResolvedValue({ allowed: true }) }));
 process.env.IPS_FIREWALL_MODE = 'log-only';
 process.env.IPS_WEBHOOK_SECRET = 'ips-test-secret';
 const { createServer } = require('../src/app');

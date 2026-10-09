@@ -509,6 +509,10 @@ async function _blockTarget(options) {
     throw new Error('At least one of: ip, domain, application, port, or protocol is required');
   }
   if (ip && !isValidIP(ip)) throw new Error(`Invalid IP address: ${ip}`);
+  if (ip && options.automatic !== false && !/^manual$/i.test(source)) {
+    const decision = await require('./threatVerificationService').verifyAutomaticBlock({ ip, company });
+    if (!decision.allowed) return { ok: false, skipped: true, tiDeferred: true, enforced: false, reason: decision.reason, ip };
+  }
   if ((domain && typeof domain !== 'string') || (application && typeof application !== 'string')) {
     throw new Error('Domain and application targets must be strings');
   }

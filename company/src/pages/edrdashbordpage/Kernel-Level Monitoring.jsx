@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Kernel-Level Monitoring — Capability ID: 19 (Backend ID: 22)
  *
@@ -1360,7 +1361,9 @@ export function KernelLevelMonitoringDashboardPanel({ alerts = [], loading = fal
             </div>
           </div>
         ) : activeTab === 'log-monitor' ? (
-          <KernelLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={19}>
+            <KernelLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={19} alerts={rows} />
         ) : activeTab === 'dashboard' ? (

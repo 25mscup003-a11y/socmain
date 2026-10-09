@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Time-Based Anomaly Detection — Capability ID: 22 (Backend ID: 22)
  *
@@ -1797,7 +1798,9 @@ export function TimeBasedAnomalyDashboardPanel({ alerts = [], loading = false, t
             </div>
           </div>
         ) : activeTab === 'log-monitor' ? (
-          <TimeAnomalyLogMonitor alerts={alerts} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={22}>
+            <TimeAnomalyLogMonitor alerts={alerts} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <TimeAnomalyReportsTab alerts={alerts} />
         ) : activeTab === 'configure' ? (

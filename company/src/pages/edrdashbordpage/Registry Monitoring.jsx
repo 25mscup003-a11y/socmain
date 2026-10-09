@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Registry & System Configuration Monitoring — Capability ID: 6
  *
@@ -1051,7 +1052,9 @@ export function RegistryActivityDashboard({ alerts = [], loading = false, total 
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'log-monitor' ? (
-          <RegistryLogMonitor alerts={alerts} />
+          <CapabilityLogsPanel capabilityId={6}>
+            <RegistryLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <CapabilityReportsPanel capabilityId={6} alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

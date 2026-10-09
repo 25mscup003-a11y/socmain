@@ -155,6 +155,22 @@ async function dispatchResponse(response, system, io) {
   if (!system?.responseEnabled || !system?.isActive) {
     return transition(response, 'queued', 'Endpoint is offline or response execution is disabled', null, io);
   }
+  let threatVerification = null;
+  const automaticNetwork = response.trigger !== 'manual'
+    && ['block_ip', 'isolate', 'isolate_agent', 'quarantine_endpoint'].includes(response.actionType);
+  if (automaticNetwork) {
+    const alert = response.alertId ? await require('../models/Alert.model').findOne({
+      _id: response.alertId, companyId: response.companyId, systemId: system._id,
+    }).select('srcip').lean() : null;
+    const ip = response.actionParams?.ip || alert?.srcip;
+    const decision = await require('./ipsThreatGate.service').verifyAutomaticNetworkAction({ ip,
+      companyId: response.companyId, systemId: system._id, alertId: response.alertId,
+      action: response.actionType === 'block_ip' ? 'block_ip' : 'isolate' });
+    const allowed = decision.allowed && !await require('./ips.service').isWhitelistedForCompany(ip, response.companyId, { requireRemote: true }).catch(() => true);
+    if (!allowed) return transition(response, 'failed', `Threat verification deferred: ${decision.reason}`, null, io, { errorDetail: decision.reason });
+    threatVerification = decision.verification;
+    response.actionParams = { ...response.actionParams, ip };
+  }
 
   const command = {
     commandId: crypto.randomUUID(),
@@ -169,6 +185,7 @@ async function dispatchResponse(response, system, io) {
     retryCount: response.retryCount || 0,
     maxRetries: response.maxRetries || 0,
     correlationId: response.correlationId || String(response._id),
+    ...(automaticNetwork ? { automatic: true, threatVerification } : {}),
   };
   command.signature = signCommand(command, system.agentKey);
   const outbound = { ...command, ...command.params };

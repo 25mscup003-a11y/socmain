@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Living-off-the-Land (LOLBins) Detection — Capability ID: 28
  *
@@ -1081,7 +1082,9 @@ export default function LolbinsDashboard({ alerts: incomingAlerts = [], loading 
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
 
         {activeTab === 'log-monitor' ? (
-          <LolbinsLogMonitor alerts={alerts} />
+          <CapabilityLogsPanel capabilityId={28}>
+            <LolbinsLogMonitor alerts={alerts} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <LolbinsReportsTab alerts={alerts} />
         ) : activeTab === 'dashboard' ? (

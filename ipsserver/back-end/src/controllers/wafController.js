@@ -174,11 +174,12 @@ async function reportWAFEvent(req, res) {
       // Auto-block at network level via firewall service
       const whitelisted = await mongoService.isWhitelisted(ip, company);
       if (!whitelisted) {
-        await firewallService.blockTarget({
+        const response = await firewallService.blockTarget({
           ip, reason: `WAF auto-block: ${attackType || 'Web Attack'} on ${requestPath}`,
           source: 'WAF', attackType: attackType || 'Web Attack',
           direction: 'inbound', company,
         }).catch(err => logger.debug(`[WAF] Firewall block failed: ${err.message}`));
+        if (response?.tiDeferred) logger.info(`[WAF] Network IP block deferred: ${response.reason}`);
       }
 
       // Emit real-time event to dashboard

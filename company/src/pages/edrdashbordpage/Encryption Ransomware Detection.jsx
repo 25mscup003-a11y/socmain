@@ -1,3 +1,4 @@
+import CapabilityLogsPanel from './CapabilityLogsPanel';
 /**
  * Encryption & Ransomware Detection — Capability ID: 27 (Backend ID: 27)
  *
@@ -1069,7 +1070,9 @@ export function RansomwareDashboardPanel({ alerts = [], loading = false, total =
       {/* Main Container */}
       <main style={{ flex: 1, minWidth: 0, padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
         {activeTab === 'logs' ? (
-          <RansomwareLogsTab alerts={rows} onAction={onAction} />
+          <CapabilityLogsPanel capabilityId={27}>
+            <RansomwareLogsTab alerts={rows} onAction={onAction} />
+          </CapabilityLogsPanel>
         ) : activeTab === 'reports' ? (
           <RansomwareReportsTab alerts={rows} />
         ) : activeTab === 'dashboard' ? (

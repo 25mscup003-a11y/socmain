@@ -450,6 +450,9 @@ class AlertSender:
                             finding['raw'] = {**(finding.get('raw') or {}), 'logoutError': str(logout_err)}
                     elif finding.get('geoFenceLockRequested'):
                         try:
+                            from .network_verification import verify_network_action
+                            if not verify_network_action(self.config, finding.get('srcip') or finding.get('src_ip'), 'isolate'):
+                                raise RuntimeError('automatic isolation deferred by backend threat verification')
                             from response.isolate import isolate
                             isolate(self.config.get('server_url'))
                             finding['containmentStatus'] = 'isolated'
@@ -469,6 +472,9 @@ class AlertSender:
                             address = ipaddress.ip_address(str(source_ip))
                             if not address.is_global:
                                 raise ValueError('only a public source IP can be blocked by geolocation policy')
+                            from .network_verification import verify_network_action
+                            if not verify_network_action(self.config, str(address), 'block_ip'):
+                                raise RuntimeError('automatic IP block deferred by backend threat verification')
                             if not fw_backend.block_ip(str(address), direction='both', comment='geolocation-policy'):
                                 raise RuntimeError('host firewall rejected the geolocation IP block')
                             finding['containmentStatus'] = 'blocked'
